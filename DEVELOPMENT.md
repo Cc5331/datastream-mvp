@@ -310,5 +310,6 @@
 | 2026-08-03 | Excel 转换健壮性：WorkbookFactory.create 支持 .xls/.xlsx；路径 trim | DagTranslationService / ExcelPreprocessor |
 | 2026-08-03 | MySQL 输出自动建表 MysqlTableCreator（类型映射 + 保留字反引号 + utf8mb4） | 新增 service |
 | 2026-08-02 | 元数据库默认 H2 file；保留 application-mysql.yml 切换方案 | application.yml |
+| 2026-08-03 | 完善 README.md：11 控件清单、API 表、启动方式、Docker、使用流程，修复旧文档代码块损坏 | 仅文档，无代码逻辑变更 |
 
 > 新改动请在下方继续追加，保持框架可追溯。
