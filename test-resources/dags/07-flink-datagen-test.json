@@ -1,0 +1,35 @@
+﻿{
+    "parallelism":  2,
+    "edges":  [
+                  {
+                      "target":  "datagen_out",
+                      "source":  "datagen_in",
+                      "id":  "e1"
+                  }
+              ],
+    "jobName":  "Flink 真实提交测试",
+    "nodes":  [
+                  {
+                      "id":  "datagen_in",
+                      "label":  "Datagen 输入",
+                      "params":  {
+                                     "fieldsConfig":  "[{\"name\":\"id\",\"type\":\"INT\",\"kind\":\"sequence\",\"start\":\"1\",\"end\":\"100\"},{\"name\":\"name\",\"type\":\"STRING\",\"length\":\"10\"},{\"name\":\"amount\",\"type\":\"DOUBLE\",\"min\":\"100\",\"max\":\"5000\"}]",
+                                     "rowsPerSecond":  "5"
+                                 },
+                      "type":  "datagen_input",
+                      "x":  100,
+                      "y":  250
+                  },
+                  {
+                      "id":  "datagen_out",
+                      "label":  "CSV 输出",
+                      "params":  {
+                                     "delimiter":  ",",
+                                     "path":  "D:\\\\code\\\\比赛\\\\2026省服务外包\\\\test-resources\\\\data\\\\flink_output.csv"
+                                 },
+                      "type":  "csv_output",
+                      "x":  400,
+                      "y":  250
+                  }
+              ]
+}

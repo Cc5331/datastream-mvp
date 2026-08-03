@@ -1,0 +1,5502 @@
+[
+  {
+    "event_id": "evt_000001",
+    "event_type": "login",
+    "user_id": 307,
+    "timestamp": "2025-06-07T00:48:33",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 4263,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000002",
+    "event_type": "login",
+    "user_id": 284,
+    "timestamp": "2025-06-25T12:47:57",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 23364,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000003",
+    "event_type": "login",
+    "user_id": 68,
+    "timestamp": "2025-06-16T21:41:07",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 5491,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000004",
+    "event_type": "purchase",
+    "user_id": 21,
+    "timestamp": "2025-06-12T01:58:27",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 14428,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000005",
+    "event_type": "login",
+    "user_id": 56,
+    "timestamp": "2025-06-15T12:35:13",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 12055,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000006",
+    "event_type": "login",
+    "user_id": 361,
+    "timestamp": "2025-06-30T10:35:48",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 2004,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000007",
+    "event_type": "click",
+    "user_id": 36,
+    "timestamp": "2025-06-30T19:45:59",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 19353,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000008",
+    "event_type": "login",
+    "user_id": 115,
+    "timestamp": "2025-06-09T03:01:31",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 28847,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000009",
+    "event_type": "click",
+    "user_id": 9,
+    "timestamp": "2025-06-06T08:57:15",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 27412,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000010",
+    "event_type": "search",
+    "user_id": 394,
+    "timestamp": "2025-06-04T01:09:39",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 19008,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000011",
+    "event_type": "page_view",
+    "user_id": 479,
+    "timestamp": "2025-06-07T23:06:21",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 10688,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000012",
+    "event_type": "logout",
+    "user_id": 171,
+    "timestamp": "2025-06-24T10:17:18",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 4629,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000013",
+    "event_type": "logout",
+    "user_id": 128,
+    "timestamp": "2025-06-26T19:45:58",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 20173,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000014",
+    "event_type": "login",
+    "user_id": 282,
+    "timestamp": "2025-06-10T20:36:52",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 8793,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000015",
+    "event_type": "login",
+    "user_id": 378,
+    "timestamp": "2025-06-14T17:29:44",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 5299,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000016",
+    "event_type": "login",
+    "user_id": 486,
+    "timestamp": "2025-06-16T13:54:10",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 29292,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000017",
+    "event_type": "purchase",
+    "user_id": 224,
+    "timestamp": "2025-06-18T08:22:26",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 21299,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000018",
+    "event_type": "page_view",
+    "user_id": 332,
+    "timestamp": "2025-06-18T16:05:36",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 27900,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000019",
+    "event_type": "purchase",
+    "user_id": 189,
+    "timestamp": "2025-06-01T07:29:39",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 25819,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000020",
+    "event_type": "search",
+    "user_id": 415,
+    "timestamp": "2025-06-16T19:25:20",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 105,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000021",
+    "event_type": "click",
+    "user_id": 338,
+    "timestamp": "2025-06-23T10:17:07",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 27176,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000022",
+    "event_type": "click",
+    "user_id": 58,
+    "timestamp": "2025-06-22T17:08:32",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 22583,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000023",
+    "event_type": "click",
+    "user_id": 325,
+    "timestamp": "2025-06-15T09:33:56",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 13086,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000024",
+    "event_type": "page_view",
+    "user_id": 338,
+    "timestamp": "2025-06-29T04:11:34",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 6152,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000025",
+    "event_type": "login",
+    "user_id": 276,
+    "timestamp": "2025-06-28T11:37:04",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 22790,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000026",
+    "event_type": "logout",
+    "user_id": 171,
+    "timestamp": "2025-06-02T08:34:44",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 19518,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000027",
+    "event_type": "logout",
+    "user_id": 284,
+    "timestamp": "2025-06-21T05:47:44",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 24586,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000028",
+    "event_type": "purchase",
+    "user_id": 348,
+    "timestamp": "2025-06-20T04:36:09",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 26168,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000029",
+    "event_type": "purchase",
+    "user_id": 317,
+    "timestamp": "2025-06-03T06:02:28",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 17393,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000030",
+    "event_type": "click",
+    "user_id": 369,
+    "timestamp": "2025-06-10T14:27:37",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 18564,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000031",
+    "event_type": "page_view",
+    "user_id": 231,
+    "timestamp": "2025-06-15T12:21:32",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 22903,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000032",
+    "event_type": "search",
+    "user_id": 273,
+    "timestamp": "2025-06-20T20:14:22",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 1424,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000033",
+    "event_type": "page_view",
+    "user_id": 173,
+    "timestamp": "2025-06-12T15:10:52",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 8537,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000034",
+    "event_type": "page_view",
+    "user_id": 382,
+    "timestamp": "2025-06-04T11:46:43",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 28317,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000035",
+    "event_type": "search",
+    "user_id": 381,
+    "timestamp": "2025-06-24T16:48:21",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 29586,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000036",
+    "event_type": "search",
+    "user_id": 387,
+    "timestamp": "2025-06-12T15:51:06",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 7601,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000037",
+    "event_type": "purchase",
+    "user_id": 146,
+    "timestamp": "2025-06-18T16:13:18",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 10863,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000038",
+    "event_type": "page_view",
+    "user_id": 252,
+    "timestamp": "2025-06-21T05:26:44",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 26097,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000039",
+    "event_type": "login",
+    "user_id": 309,
+    "timestamp": "2025-06-13T06:43:31",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 11327,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000040",
+    "event_type": "page_view",
+    "user_id": 314,
+    "timestamp": "2025-06-21T01:25:45",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 29800,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000041",
+    "event_type": "search",
+    "user_id": 329,
+    "timestamp": "2025-06-16T03:34:49",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 21215,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000042",
+    "event_type": "login",
+    "user_id": 418,
+    "timestamp": "2025-06-15T01:48:08",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 27274,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000043",
+    "event_type": "logout",
+    "user_id": 295,
+    "timestamp": "2025-06-24T06:51:09",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 3335,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000044",
+    "event_type": "login",
+    "user_id": 258,
+    "timestamp": "2025-06-13T09:57:17",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 7466,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000045",
+    "event_type": "click",
+    "user_id": 434,
+    "timestamp": "2025-06-30T18:01:59",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 28803,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000046",
+    "event_type": "search",
+    "user_id": 18,
+    "timestamp": "2025-06-19T08:46:29",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 15216,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000047",
+    "event_type": "logout",
+    "user_id": 205,
+    "timestamp": "2025-06-12T06:16:51",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 2184,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000048",
+    "event_type": "search",
+    "user_id": 477,
+    "timestamp": "2025-06-20T19:46:57",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 9553,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000049",
+    "event_type": "purchase",
+    "user_id": 229,
+    "timestamp": "2025-06-17T08:22:37",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 23225,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000050",
+    "event_type": "purchase",
+    "user_id": 389,
+    "timestamp": "2025-06-14T08:32:15",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 1489,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000051",
+    "event_type": "click",
+    "user_id": 49,
+    "timestamp": "2025-06-17T21:00:23",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 24143,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000052",
+    "event_type": "logout",
+    "user_id": 186,
+    "timestamp": "2025-06-01T18:28:47",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 5772,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000053",
+    "event_type": "logout",
+    "user_id": 174,
+    "timestamp": "2025-06-15T09:44:20",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 24791,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000054",
+    "event_type": "search",
+    "user_id": 160,
+    "timestamp": "2025-06-15T05:34:49",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 17925,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000055",
+    "event_type": "page_view",
+    "user_id": 242,
+    "timestamp": "2025-06-03T19:16:56",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 8429,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000056",
+    "event_type": "click",
+    "user_id": 315,
+    "timestamp": "2025-06-04T05:46:17",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 20677,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000057",
+    "event_type": "purchase",
+    "user_id": 434,
+    "timestamp": "2025-06-24T05:37:53",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 3961,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000058",
+    "event_type": "login",
+    "user_id": 494,
+    "timestamp": "2025-06-21T00:47:51",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 13419,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000059",
+    "event_type": "purchase",
+    "user_id": 443,
+    "timestamp": "2025-06-21T04:06:00",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 2890,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000060",
+    "event_type": "page_view",
+    "user_id": 170,
+    "timestamp": "2025-06-28T06:51:19",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 25109,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000061",
+    "event_type": "purchase",
+    "user_id": 496,
+    "timestamp": "2025-06-16T08:12:46",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 9415,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000062",
+    "event_type": "purchase",
+    "user_id": 217,
+    "timestamp": "2025-06-26T11:01:07",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 4592,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000063",
+    "event_type": "logout",
+    "user_id": 379,
+    "timestamp": "2025-06-19T18:41:28",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 12092,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000064",
+    "event_type": "logout",
+    "user_id": 380,
+    "timestamp": "2025-06-30T18:02:13",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 15861,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000065",
+    "event_type": "logout",
+    "user_id": 383,
+    "timestamp": "2025-06-25T21:14:03",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 28767,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000066",
+    "event_type": "logout",
+    "user_id": 332,
+    "timestamp": "2025-06-05T22:05:53",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 17131,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000067",
+    "event_type": "logout",
+    "user_id": 347,
+    "timestamp": "2025-06-08T12:54:40",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 419,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000068",
+    "event_type": "click",
+    "user_id": 72,
+    "timestamp": "2025-06-14T20:22:16",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 28472,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000069",
+    "event_type": "purchase",
+    "user_id": 248,
+    "timestamp": "2025-06-04T14:20:00",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 18932,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000070",
+    "event_type": "page_view",
+    "user_id": 342,
+    "timestamp": "2025-06-24T00:46:30",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 20800,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000071",
+    "event_type": "page_view",
+    "user_id": 95,
+    "timestamp": "2025-06-24T17:03:16",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 19738,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000072",
+    "event_type": "page_view",
+    "user_id": 89,
+    "timestamp": "2025-06-14T13:54:21",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 24907,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000073",
+    "event_type": "logout",
+    "user_id": 88,
+    "timestamp": "2025-06-11T23:13:10",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 20510,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000074",
+    "event_type": "purchase",
+    "user_id": 462,
+    "timestamp": "2025-06-10T03:07:24",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 603,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000075",
+    "event_type": "purchase",
+    "user_id": 482,
+    "timestamp": "2025-06-21T23:40:45",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 26289,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000076",
+    "event_type": "search",
+    "user_id": 63,
+    "timestamp": "2025-06-06T02:36:23",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 12611,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000077",
+    "event_type": "purchase",
+    "user_id": 62,
+    "timestamp": "2025-06-17T18:07:34",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 8267,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000078",
+    "event_type": "purchase",
+    "user_id": 56,
+    "timestamp": "2025-06-01T20:13:39",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 9534,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000079",
+    "event_type": "click",
+    "user_id": 233,
+    "timestamp": "2025-06-15T01:16:54",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 12474,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000080",
+    "event_type": "click",
+    "user_id": 402,
+    "timestamp": "2025-06-30T13:00:13",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 542,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000081",
+    "event_type": "login",
+    "user_id": 268,
+    "timestamp": "2025-06-30T21:43:39",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 22271,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000082",
+    "event_type": "logout",
+    "user_id": 259,
+    "timestamp": "2025-06-17T20:13:23",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 15492,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000083",
+    "event_type": "purchase",
+    "user_id": 489,
+    "timestamp": "2025-06-21T12:43:12",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 26615,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000084",
+    "event_type": "purchase",
+    "user_id": 342,
+    "timestamp": "2025-06-09T15:37:12",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 22350,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000085",
+    "event_type": "click",
+    "user_id": 91,
+    "timestamp": "2025-06-07T15:51:13",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 12086,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000086",
+    "event_type": "search",
+    "user_id": 404,
+    "timestamp": "2025-06-23T04:10:13",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 5256,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000087",
+    "event_type": "page_view",
+    "user_id": 44,
+    "timestamp": "2025-06-20T16:22:29",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 7342,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000088",
+    "event_type": "click",
+    "user_id": 34,
+    "timestamp": "2025-06-07T11:43:17",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 26206,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000089",
+    "event_type": "logout",
+    "user_id": 346,
+    "timestamp": "2025-06-04T00:39:53",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 12753,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000090",
+    "event_type": "purchase",
+    "user_id": 400,
+    "timestamp": "2025-06-14T21:22:26",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 27832,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000091",
+    "event_type": "search",
+    "user_id": 158,
+    "timestamp": "2025-06-11T20:09:48",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 5821,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000092",
+    "event_type": "click",
+    "user_id": 367,
+    "timestamp": "2025-06-21T04:37:55",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 825,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000093",
+    "event_type": "search",
+    "user_id": 48,
+    "timestamp": "2025-06-22T07:52:35",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 25698,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000094",
+    "event_type": "purchase",
+    "user_id": 244,
+    "timestamp": "2025-06-03T02:38:30",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 21663,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000095",
+    "event_type": "logout",
+    "user_id": 59,
+    "timestamp": "2025-06-17T11:21:41",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 19271,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000096",
+    "event_type": "page_view",
+    "user_id": 310,
+    "timestamp": "2025-06-24T02:40:58",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 15314,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000097",
+    "event_type": "logout",
+    "user_id": 466,
+    "timestamp": "2025-06-08T01:08:42",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 26107,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000098",
+    "event_type": "logout",
+    "user_id": 61,
+    "timestamp": "2025-06-20T15:36:15",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 17433,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000099",
+    "event_type": "login",
+    "user_id": 145,
+    "timestamp": "2025-06-08T06:02:20",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 1653,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000100",
+    "event_type": "click",
+    "user_id": 46,
+    "timestamp": "2025-06-29T16:34:00",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 28430,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000101",
+    "event_type": "logout",
+    "user_id": 122,
+    "timestamp": "2025-06-29T23:10:50",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 28743,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000102",
+    "event_type": "page_view",
+    "user_id": 78,
+    "timestamp": "2025-06-25T23:53:22",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 2979,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000103",
+    "event_type": "click",
+    "user_id": 264,
+    "timestamp": "2025-06-28T21:50:22",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 24728,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000104",
+    "event_type": "login",
+    "user_id": 478,
+    "timestamp": "2025-06-15T07:21:03",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 14933,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000105",
+    "event_type": "click",
+    "user_id": 179,
+    "timestamp": "2025-06-20T16:35:37",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 26558,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000106",
+    "event_type": "purchase",
+    "user_id": 11,
+    "timestamp": "2025-06-24T22:54:41",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 18926,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000107",
+    "event_type": "logout",
+    "user_id": 79,
+    "timestamp": "2025-06-24T17:55:48",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 10742,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000108",
+    "event_type": "logout",
+    "user_id": 47,
+    "timestamp": "2025-06-19T03:12:53",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 8549,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000109",
+    "event_type": "page_view",
+    "user_id": 161,
+    "timestamp": "2025-06-02T02:55:03",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 15479,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000110",
+    "event_type": "login",
+    "user_id": 44,
+    "timestamp": "2025-06-22T07:48:02",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 3220,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000111",
+    "event_type": "logout",
+    "user_id": 171,
+    "timestamp": "2025-06-18T00:17:19",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 14235,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000112",
+    "event_type": "search",
+    "user_id": 143,
+    "timestamp": "2025-06-22T18:09:05",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 23046,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000113",
+    "event_type": "purchase",
+    "user_id": 315,
+    "timestamp": "2025-06-16T18:04:52",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 18144,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000114",
+    "event_type": "search",
+    "user_id": 472,
+    "timestamp": "2025-06-24T19:34:27",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 2144,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000115",
+    "event_type": "purchase",
+    "user_id": 415,
+    "timestamp": "2025-06-01T04:12:32",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 29607,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000116",
+    "event_type": "purchase",
+    "user_id": 189,
+    "timestamp": "2025-06-30T21:55:26",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 13931,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000117",
+    "event_type": "logout",
+    "user_id": 155,
+    "timestamp": "2025-06-19T01:24:02",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 5915,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000118",
+    "event_type": "login",
+    "user_id": 179,
+    "timestamp": "2025-06-01T14:40:44",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 10320,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000119",
+    "event_type": "click",
+    "user_id": 373,
+    "timestamp": "2025-06-02T05:29:14",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 5579,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000120",
+    "event_type": "search",
+    "user_id": 285,
+    "timestamp": "2025-06-26T14:25:22",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 9634,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000121",
+    "event_type": "purchase",
+    "user_id": 178,
+    "timestamp": "2025-06-05T15:28:10",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 24266,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000122",
+    "event_type": "page_view",
+    "user_id": 278,
+    "timestamp": "2025-06-21T19:35:53",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 8248,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000123",
+    "event_type": "search",
+    "user_id": 202,
+    "timestamp": "2025-06-16T21:11:10",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 10851,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000124",
+    "event_type": "login",
+    "user_id": 347,
+    "timestamp": "2025-06-17T12:06:09",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 1164,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000125",
+    "event_type": "page_view",
+    "user_id": 456,
+    "timestamp": "2025-06-10T15:29:51",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 25096,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000126",
+    "event_type": "search",
+    "user_id": 30,
+    "timestamp": "2025-06-17T15:00:54",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 19024,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000127",
+    "event_type": "logout",
+    "user_id": 441,
+    "timestamp": "2025-06-15T10:25:49",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 9255,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000128",
+    "event_type": "purchase",
+    "user_id": 120,
+    "timestamp": "2025-06-23T03:18:42",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 5127,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000129",
+    "event_type": "click",
+    "user_id": 22,
+    "timestamp": "2025-06-23T20:13:12",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 24158,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000130",
+    "event_type": "search",
+    "user_id": 7,
+    "timestamp": "2025-06-29T15:59:03",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 22598,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000131",
+    "event_type": "search",
+    "user_id": 320,
+    "timestamp": "2025-06-09T05:55:37",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 29765,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000132",
+    "event_type": "logout",
+    "user_id": 491,
+    "timestamp": "2025-06-06T19:30:21",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 28408,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000133",
+    "event_type": "click",
+    "user_id": 370,
+    "timestamp": "2025-06-13T06:33:08",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 409,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000134",
+    "event_type": "login",
+    "user_id": 348,
+    "timestamp": "2025-06-19T08:19:27",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 16821,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000135",
+    "event_type": "search",
+    "user_id": 159,
+    "timestamp": "2025-06-29T06:05:07",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 19587,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000136",
+    "event_type": "purchase",
+    "user_id": 353,
+    "timestamp": "2025-06-14T19:04:00",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 19407,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000137",
+    "event_type": "click",
+    "user_id": 396,
+    "timestamp": "2025-06-13T16:06:30",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 9752,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000138",
+    "event_type": "click",
+    "user_id": 483,
+    "timestamp": "2025-06-18T07:17:58",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 29191,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000139",
+    "event_type": "click",
+    "user_id": 483,
+    "timestamp": "2025-06-01T22:20:59",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 7788,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000140",
+    "event_type": "login",
+    "user_id": 187,
+    "timestamp": "2025-06-12T12:42:54",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 24757,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000141",
+    "event_type": "search",
+    "user_id": 446,
+    "timestamp": "2025-06-04T23:43:01",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 12455,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000142",
+    "event_type": "login",
+    "user_id": 393,
+    "timestamp": "2025-06-05T01:16:04",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 3076,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000143",
+    "event_type": "search",
+    "user_id": 362,
+    "timestamp": "2025-06-08T13:45:53",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 21715,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000144",
+    "event_type": "logout",
+    "user_id": 239,
+    "timestamp": "2025-06-10T17:47:52",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 12266,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000145",
+    "event_type": "click",
+    "user_id": 291,
+    "timestamp": "2025-06-06T01:34:29",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 4038,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000146",
+    "event_type": "purchase",
+    "user_id": 175,
+    "timestamp": "2025-06-13T11:37:49",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 26852,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000147",
+    "event_type": "logout",
+    "user_id": 419,
+    "timestamp": "2025-06-13T21:43:03",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 24458,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000148",
+    "event_type": "page_view",
+    "user_id": 258,
+    "timestamp": "2025-06-29T19:18:15",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 14015,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000149",
+    "event_type": "page_view",
+    "user_id": 200,
+    "timestamp": "2025-06-19T09:47:16",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 6968,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000150",
+    "event_type": "login",
+    "user_id": 362,
+    "timestamp": "2025-06-13T12:39:14",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 20682,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000151",
+    "event_type": "search",
+    "user_id": 120,
+    "timestamp": "2025-06-15T01:17:48",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 21513,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000152",
+    "event_type": "search",
+    "user_id": 228,
+    "timestamp": "2025-06-05T15:30:06",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 23740,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000153",
+    "event_type": "click",
+    "user_id": 37,
+    "timestamp": "2025-06-03T11:24:45",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 20088,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000154",
+    "event_type": "logout",
+    "user_id": 376,
+    "timestamp": "2025-06-22T02:10:01",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 16600,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000155",
+    "event_type": "page_view",
+    "user_id": 196,
+    "timestamp": "2025-06-07T13:52:10",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 944,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000156",
+    "event_type": "login",
+    "user_id": 500,
+    "timestamp": "2025-06-21T10:19:57",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 11525,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000157",
+    "event_type": "login",
+    "user_id": 99,
+    "timestamp": "2025-06-22T10:29:38",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 19069,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000158",
+    "event_type": "logout",
+    "user_id": 490,
+    "timestamp": "2025-06-15T23:57:47",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 17479,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000159",
+    "event_type": "purchase",
+    "user_id": 183,
+    "timestamp": "2025-06-14T18:39:20",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 19699,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000160",
+    "event_type": "purchase",
+    "user_id": 487,
+    "timestamp": "2025-06-07T22:14:27",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 19893,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000161",
+    "event_type": "logout",
+    "user_id": 393,
+    "timestamp": "2025-06-26T17:43:13",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 14949,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000162",
+    "event_type": "click",
+    "user_id": 206,
+    "timestamp": "2025-06-12T06:20:01",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 20430,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000163",
+    "event_type": "page_view",
+    "user_id": 465,
+    "timestamp": "2025-06-13T23:29:54",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 28055,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000164",
+    "event_type": "login",
+    "user_id": 115,
+    "timestamp": "2025-06-08T13:03:32",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 18227,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000165",
+    "event_type": "logout",
+    "user_id": 297,
+    "timestamp": "2025-06-04T22:55:53",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 11507,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000166",
+    "event_type": "logout",
+    "user_id": 55,
+    "timestamp": "2025-06-27T08:47:17",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 1850,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000167",
+    "event_type": "page_view",
+    "user_id": 347,
+    "timestamp": "2025-06-15T19:14:03",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 2381,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000168",
+    "event_type": "click",
+    "user_id": 343,
+    "timestamp": "2025-06-08T04:35:52",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 18150,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000169",
+    "event_type": "click",
+    "user_id": 407,
+    "timestamp": "2025-06-07T01:30:12",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 11619,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000170",
+    "event_type": "page_view",
+    "user_id": 422,
+    "timestamp": "2025-06-28T18:16:51",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 2398,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000171",
+    "event_type": "click",
+    "user_id": 144,
+    "timestamp": "2025-06-23T13:05:32",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 12078,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000172",
+    "event_type": "search",
+    "user_id": 131,
+    "timestamp": "2025-06-25T00:51:57",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 18033,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000173",
+    "event_type": "page_view",
+    "user_id": 157,
+    "timestamp": "2025-06-17T21:19:39",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 2602,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000174",
+    "event_type": "logout",
+    "user_id": 67,
+    "timestamp": "2025-06-12T22:35:45",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 12961,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000175",
+    "event_type": "search",
+    "user_id": 194,
+    "timestamp": "2025-06-03T17:19:40",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 24445,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000176",
+    "event_type": "purchase",
+    "user_id": 327,
+    "timestamp": "2025-06-21T06:24:05",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 15300,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000177",
+    "event_type": "search",
+    "user_id": 140,
+    "timestamp": "2025-06-04T06:14:05",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 21661,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000178",
+    "event_type": "purchase",
+    "user_id": 55,
+    "timestamp": "2025-06-19T19:54:51",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 19853,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000179",
+    "event_type": "page_view",
+    "user_id": 81,
+    "timestamp": "2025-06-28T14:42:27",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 10501,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000180",
+    "event_type": "logout",
+    "user_id": 213,
+    "timestamp": "2025-06-07T20:25:43",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 16408,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000181",
+    "event_type": "search",
+    "user_id": 20,
+    "timestamp": "2025-06-11T23:36:02",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 7721,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000182",
+    "event_type": "search",
+    "user_id": 245,
+    "timestamp": "2025-06-15T18:20:18",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 13764,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000183",
+    "event_type": "click",
+    "user_id": 150,
+    "timestamp": "2025-06-10T02:36:03",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 26387,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000184",
+    "event_type": "purchase",
+    "user_id": 51,
+    "timestamp": "2025-06-18T04:21:28",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 23302,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000185",
+    "event_type": "search",
+    "user_id": 302,
+    "timestamp": "2025-06-22T23:40:44",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 9688,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000186",
+    "event_type": "click",
+    "user_id": 235,
+    "timestamp": "2025-06-21T16:37:46",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 672,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000187",
+    "event_type": "search",
+    "user_id": 27,
+    "timestamp": "2025-06-23T08:46:18",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 10328,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000188",
+    "event_type": "search",
+    "user_id": 465,
+    "timestamp": "2025-06-06T05:17:04",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 1158,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000189",
+    "event_type": "click",
+    "user_id": 63,
+    "timestamp": "2025-06-01T19:50:14",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 10690,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000190",
+    "event_type": "page_view",
+    "user_id": 139,
+    "timestamp": "2025-06-09T11:11:35",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 23763,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000191",
+    "event_type": "click",
+    "user_id": 297,
+    "timestamp": "2025-06-12T12:51:54",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 13071,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000192",
+    "event_type": "click",
+    "user_id": 183,
+    "timestamp": "2025-06-18T13:32:18",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 23162,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000193",
+    "event_type": "logout",
+    "user_id": 273,
+    "timestamp": "2025-06-27T23:26:29",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 8213,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000194",
+    "event_type": "login",
+    "user_id": 468,
+    "timestamp": "2025-06-28T01:26:12",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 19235,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000195",
+    "event_type": "click",
+    "user_id": 275,
+    "timestamp": "2025-06-24T20:31:36",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 2495,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000196",
+    "event_type": "click",
+    "user_id": 439,
+    "timestamp": "2025-06-08T01:21:52",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 24141,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000197",
+    "event_type": "purchase",
+    "user_id": 400,
+    "timestamp": "2025-06-08T17:55:29",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 18939,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000198",
+    "event_type": "click",
+    "user_id": 331,
+    "timestamp": "2025-06-13T02:06:56",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 16152,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000199",
+    "event_type": "purchase",
+    "user_id": 485,
+    "timestamp": "2025-06-01T18:17:31",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 25629,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000200",
+    "event_type": "page_view",
+    "user_id": 5,
+    "timestamp": "2025-06-27T05:07:28",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 18969,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000201",
+    "event_type": "click",
+    "user_id": 217,
+    "timestamp": "2025-06-13T13:48:32",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 409,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000202",
+    "event_type": "search",
+    "user_id": 279,
+    "timestamp": "2025-06-30T03:02:04",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 14891,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000203",
+    "event_type": "search",
+    "user_id": 458,
+    "timestamp": "2025-06-12T01:44:51",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 17071,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000204",
+    "event_type": "page_view",
+    "user_id": 292,
+    "timestamp": "2025-06-16T04:05:36",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 29365,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000205",
+    "event_type": "logout",
+    "user_id": 198,
+    "timestamp": "2025-06-15T15:57:06",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 22466,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000206",
+    "event_type": "logout",
+    "user_id": 68,
+    "timestamp": "2025-06-21T15:44:11",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 6019,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000207",
+    "event_type": "click",
+    "user_id": 313,
+    "timestamp": "2025-06-07T19:17:27",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 17595,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000208",
+    "event_type": "page_view",
+    "user_id": 106,
+    "timestamp": "2025-06-04T19:26:18",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 22409,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000209",
+    "event_type": "logout",
+    "user_id": 236,
+    "timestamp": "2025-06-19T06:39:51",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 2140,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000210",
+    "event_type": "login",
+    "user_id": 479,
+    "timestamp": "2025-06-29T13:40:24",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 22241,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000211",
+    "event_type": "login",
+    "user_id": 201,
+    "timestamp": "2025-06-11T17:42:00",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 19858,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000212",
+    "event_type": "login",
+    "user_id": 453,
+    "timestamp": "2025-06-06T19:07:12",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 17101,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000213",
+    "event_type": "page_view",
+    "user_id": 485,
+    "timestamp": "2025-06-21T07:07:30",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 20320,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000214",
+    "event_type": "page_view",
+    "user_id": 147,
+    "timestamp": "2025-06-04T00:03:06",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 21419,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000215",
+    "event_type": "search",
+    "user_id": 91,
+    "timestamp": "2025-06-19T14:53:23",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 23825,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000216",
+    "event_type": "purchase",
+    "user_id": 308,
+    "timestamp": "2025-06-23T05:59:28",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 1618,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000217",
+    "event_type": "login",
+    "user_id": 164,
+    "timestamp": "2025-06-01T23:06:27",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 13389,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000218",
+    "event_type": "logout",
+    "user_id": 206,
+    "timestamp": "2025-06-07T13:20:24",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 16414,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000219",
+    "event_type": "click",
+    "user_id": 316,
+    "timestamp": "2025-06-12T22:33:28",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 19577,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000220",
+    "event_type": "page_view",
+    "user_id": 122,
+    "timestamp": "2025-06-17T16:16:46",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 28679,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000221",
+    "event_type": "login",
+    "user_id": 127,
+    "timestamp": "2025-06-18T01:37:10",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 4372,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000222",
+    "event_type": "search",
+    "user_id": 272,
+    "timestamp": "2025-06-16T06:06:05",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 11412,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000223",
+    "event_type": "login",
+    "user_id": 454,
+    "timestamp": "2025-06-05T10:46:38",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 6501,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000224",
+    "event_type": "login",
+    "user_id": 167,
+    "timestamp": "2025-06-29T10:23:14",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 14648,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000225",
+    "event_type": "page_view",
+    "user_id": 252,
+    "timestamp": "2025-06-16T04:28:24",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 18691,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000226",
+    "event_type": "search",
+    "user_id": 485,
+    "timestamp": "2025-06-23T12:32:28",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 5752,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000227",
+    "event_type": "purchase",
+    "user_id": 375,
+    "timestamp": "2025-06-28T04:28:22",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 16973,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000228",
+    "event_type": "logout",
+    "user_id": 308,
+    "timestamp": "2025-06-10T17:33:34",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 9453,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000229",
+    "event_type": "search",
+    "user_id": 56,
+    "timestamp": "2025-06-01T19:28:11",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 27757,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000230",
+    "event_type": "purchase",
+    "user_id": 458,
+    "timestamp": "2025-06-23T20:25:16",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 5123,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000231",
+    "event_type": "purchase",
+    "user_id": 122,
+    "timestamp": "2025-06-15T23:51:59",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 12437,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000232",
+    "event_type": "logout",
+    "user_id": 341,
+    "timestamp": "2025-06-28T04:09:30",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 22174,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000233",
+    "event_type": "search",
+    "user_id": 219,
+    "timestamp": "2025-06-03T14:09:12",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 11995,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000234",
+    "event_type": "login",
+    "user_id": 111,
+    "timestamp": "2025-06-12T11:59:02",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 15601,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000235",
+    "event_type": "logout",
+    "user_id": 342,
+    "timestamp": "2025-06-20T00:37:07",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 20902,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000236",
+    "event_type": "logout",
+    "user_id": 208,
+    "timestamp": "2025-06-17T00:27:41",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 16373,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000237",
+    "event_type": "login",
+    "user_id": 436,
+    "timestamp": "2025-06-19T00:42:33",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 21626,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000238",
+    "event_type": "purchase",
+    "user_id": 152,
+    "timestamp": "2025-06-14T20:19:08",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 7813,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000239",
+    "event_type": "click",
+    "user_id": 462,
+    "timestamp": "2025-06-09T03:42:03",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 1328,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000240",
+    "event_type": "click",
+    "user_id": 124,
+    "timestamp": "2025-06-05T10:59:35",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 18371,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000241",
+    "event_type": "page_view",
+    "user_id": 209,
+    "timestamp": "2025-06-28T15:47:50",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 14306,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000242",
+    "event_type": "page_view",
+    "user_id": 461,
+    "timestamp": "2025-06-05T18:38:31",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 11819,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000243",
+    "event_type": "logout",
+    "user_id": 378,
+    "timestamp": "2025-06-11T15:03:06",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 29251,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000244",
+    "event_type": "search",
+    "user_id": 78,
+    "timestamp": "2025-06-26T12:37:40",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 17784,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000245",
+    "event_type": "search",
+    "user_id": 37,
+    "timestamp": "2025-06-25T18:46:13",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 29113,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000246",
+    "event_type": "login",
+    "user_id": 165,
+    "timestamp": "2025-06-12T23:50:00",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 14790,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000247",
+    "event_type": "purchase",
+    "user_id": 360,
+    "timestamp": "2025-06-11T05:55:58",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 11829,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000248",
+    "event_type": "click",
+    "user_id": 360,
+    "timestamp": "2025-06-05T22:51:12",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 29720,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000249",
+    "event_type": "login",
+    "user_id": 264,
+    "timestamp": "2025-06-24T22:18:56",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 6098,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000250",
+    "event_type": "logout",
+    "user_id": 166,
+    "timestamp": "2025-06-28T18:47:11",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 5392,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000251",
+    "event_type": "login",
+    "user_id": 429,
+    "timestamp": "2025-06-29T02:02:07",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 18254,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000252",
+    "event_type": "login",
+    "user_id": 237,
+    "timestamp": "2025-06-13T05:15:29",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 5195,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000253",
+    "event_type": "login",
+    "user_id": 76,
+    "timestamp": "2025-06-08T09:15:43",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 24869,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000254",
+    "event_type": "click",
+    "user_id": 471,
+    "timestamp": "2025-06-08T06:46:42",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 15550,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000255",
+    "event_type": "purchase",
+    "user_id": 249,
+    "timestamp": "2025-06-23T12:27:20",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 8857,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000256",
+    "event_type": "click",
+    "user_id": 52,
+    "timestamp": "2025-06-13T12:28:15",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 24700,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000257",
+    "event_type": "logout",
+    "user_id": 155,
+    "timestamp": "2025-06-16T06:54:14",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 978,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000258",
+    "event_type": "page_view",
+    "user_id": 93,
+    "timestamp": "2025-06-21T08:48:05",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 4298,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000259",
+    "event_type": "search",
+    "user_id": 272,
+    "timestamp": "2025-06-21T08:09:20",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 3075,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000260",
+    "event_type": "purchase",
+    "user_id": 416,
+    "timestamp": "2025-06-01T06:44:48",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 15400,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000261",
+    "event_type": "click",
+    "user_id": 137,
+    "timestamp": "2025-06-11T14:03:36",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 13722,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000262",
+    "event_type": "purchase",
+    "user_id": 496,
+    "timestamp": "2025-06-01T22:52:24",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 18570,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000263",
+    "event_type": "click",
+    "user_id": 191,
+    "timestamp": "2025-06-22T20:09:32",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 15805,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000264",
+    "event_type": "search",
+    "user_id": 20,
+    "timestamp": "2025-06-13T04:59:58",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 27543,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000265",
+    "event_type": "search",
+    "user_id": 41,
+    "timestamp": "2025-06-05T07:05:40",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 28416,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000266",
+    "event_type": "click",
+    "user_id": 9,
+    "timestamp": "2025-06-11T20:03:56",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 4267,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000267",
+    "event_type": "logout",
+    "user_id": 10,
+    "timestamp": "2025-06-19T01:31:24",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 19860,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000268",
+    "event_type": "search",
+    "user_id": 363,
+    "timestamp": "2025-06-02T11:23:42",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 25300,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000269",
+    "event_type": "purchase",
+    "user_id": 500,
+    "timestamp": "2025-06-14T05:46:32",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 29853,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000270",
+    "event_type": "click",
+    "user_id": 144,
+    "timestamp": "2025-06-03T22:35:28",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 252,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000271",
+    "event_type": "login",
+    "user_id": 235,
+    "timestamp": "2025-06-07T19:19:42",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 20281,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000272",
+    "event_type": "login",
+    "user_id": 350,
+    "timestamp": "2025-06-16T11:56:09",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 8446,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000273",
+    "event_type": "click",
+    "user_id": 62,
+    "timestamp": "2025-06-22T08:35:01",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 17332,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000274",
+    "event_type": "page_view",
+    "user_id": 324,
+    "timestamp": "2025-06-08T07:39:16",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 8873,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000275",
+    "event_type": "logout",
+    "user_id": 158,
+    "timestamp": "2025-06-15T19:02:11",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 1347,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000276",
+    "event_type": "login",
+    "user_id": 330,
+    "timestamp": "2025-06-06T17:16:03",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 11817,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000277",
+    "event_type": "click",
+    "user_id": 317,
+    "timestamp": "2025-06-05T05:41:10",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 24490,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000278",
+    "event_type": "page_view",
+    "user_id": 2,
+    "timestamp": "2025-06-05T10:43:44",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 27140,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000279",
+    "event_type": "search",
+    "user_id": 485,
+    "timestamp": "2025-06-14T01:06:52",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 19749,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000280",
+    "event_type": "page_view",
+    "user_id": 251,
+    "timestamp": "2025-06-18T19:22:02",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 14104,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000281",
+    "event_type": "purchase",
+    "user_id": 280,
+    "timestamp": "2025-06-13T20:42:21",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 12400,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000282",
+    "event_type": "purchase",
+    "user_id": 170,
+    "timestamp": "2025-06-29T23:50:32",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 27557,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000283",
+    "event_type": "logout",
+    "user_id": 359,
+    "timestamp": "2025-06-16T03:35:26",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 7339,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000284",
+    "event_type": "click",
+    "user_id": 102,
+    "timestamp": "2025-06-21T22:52:12",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 18645,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000285",
+    "event_type": "login",
+    "user_id": 323,
+    "timestamp": "2025-06-04T19:40:42",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 24023,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000286",
+    "event_type": "login",
+    "user_id": 15,
+    "timestamp": "2025-06-10T15:31:49",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 5762,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000287",
+    "event_type": "logout",
+    "user_id": 360,
+    "timestamp": "2025-06-02T04:37:23",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 8401,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000288",
+    "event_type": "purchase",
+    "user_id": 140,
+    "timestamp": "2025-06-11T21:11:09",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 14794,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000289",
+    "event_type": "logout",
+    "user_id": 364,
+    "timestamp": "2025-06-22T14:21:56",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 3447,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000290",
+    "event_type": "click",
+    "user_id": 335,
+    "timestamp": "2025-06-02T08:52:56",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 23863,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000291",
+    "event_type": "logout",
+    "user_id": 72,
+    "timestamp": "2025-06-11T00:54:59",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 18954,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000292",
+    "event_type": "page_view",
+    "user_id": 164,
+    "timestamp": "2025-06-29T06:56:13",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 19526,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000293",
+    "event_type": "login",
+    "user_id": 77,
+    "timestamp": "2025-06-29T16:36:11",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 985,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000294",
+    "event_type": "purchase",
+    "user_id": 100,
+    "timestamp": "2025-06-20T03:57:07",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 10748,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000295",
+    "event_type": "purchase",
+    "user_id": 69,
+    "timestamp": "2025-06-17T05:49:47",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 25354,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000296",
+    "event_type": "click",
+    "user_id": 144,
+    "timestamp": "2025-06-05T12:45:11",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 6342,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000297",
+    "event_type": "page_view",
+    "user_id": 260,
+    "timestamp": "2025-06-26T02:12:37",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 3569,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000298",
+    "event_type": "search",
+    "user_id": 77,
+    "timestamp": "2025-06-28T07:45:49",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 18412,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000299",
+    "event_type": "search",
+    "user_id": 34,
+    "timestamp": "2025-06-06T19:30:27",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 29401,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000300",
+    "event_type": "login",
+    "user_id": 463,
+    "timestamp": "2025-06-10T17:58:06",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 8188,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000301",
+    "event_type": "search",
+    "user_id": 154,
+    "timestamp": "2025-06-18T13:25:26",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 27725,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000302",
+    "event_type": "page_view",
+    "user_id": 347,
+    "timestamp": "2025-06-25T03:03:43",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 25005,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000303",
+    "event_type": "click",
+    "user_id": 323,
+    "timestamp": "2025-06-27T13:33:43",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 5315,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000304",
+    "event_type": "click",
+    "user_id": 246,
+    "timestamp": "2025-06-11T21:05:21",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 11814,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000305",
+    "event_type": "click",
+    "user_id": 378,
+    "timestamp": "2025-06-09T12:48:32",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 10226,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000306",
+    "event_type": "purchase",
+    "user_id": 313,
+    "timestamp": "2025-06-08T13:21:43",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 4661,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000307",
+    "event_type": "purchase",
+    "user_id": 246,
+    "timestamp": "2025-06-10T10:15:34",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 27946,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000308",
+    "event_type": "purchase",
+    "user_id": 118,
+    "timestamp": "2025-06-21T05:35:26",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 13104,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000309",
+    "event_type": "logout",
+    "user_id": 299,
+    "timestamp": "2025-06-21T19:35:59",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 18863,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000310",
+    "event_type": "logout",
+    "user_id": 417,
+    "timestamp": "2025-06-07T10:05:34",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 17167,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000311",
+    "event_type": "search",
+    "user_id": 94,
+    "timestamp": "2025-06-04T00:19:18",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 4884,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000312",
+    "event_type": "search",
+    "user_id": 201,
+    "timestamp": "2025-06-03T04:49:23",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 10799,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000313",
+    "event_type": "login",
+    "user_id": 376,
+    "timestamp": "2025-06-27T21:47:20",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 21524,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000314",
+    "event_type": "logout",
+    "user_id": 264,
+    "timestamp": "2025-06-26T20:28:05",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 29785,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000315",
+    "event_type": "purchase",
+    "user_id": 127,
+    "timestamp": "2025-06-01T17:56:21",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 3573,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000316",
+    "event_type": "page_view",
+    "user_id": 308,
+    "timestamp": "2025-06-02T12:58:16",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 8044,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000317",
+    "event_type": "page_view",
+    "user_id": 274,
+    "timestamp": "2025-06-09T22:28:41",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 6497,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000318",
+    "event_type": "search",
+    "user_id": 143,
+    "timestamp": "2025-06-25T19:22:24",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 7944,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000319",
+    "event_type": "logout",
+    "user_id": 350,
+    "timestamp": "2025-06-14T22:06:25",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 10809,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000320",
+    "event_type": "search",
+    "user_id": 161,
+    "timestamp": "2025-06-02T10:41:25",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 7067,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000321",
+    "event_type": "page_view",
+    "user_id": 262,
+    "timestamp": "2025-06-16T09:10:59",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 10750,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000322",
+    "event_type": "search",
+    "user_id": 344,
+    "timestamp": "2025-06-02T12:51:26",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 24156,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000323",
+    "event_type": "page_view",
+    "user_id": 78,
+    "timestamp": "2025-06-07T03:15:04",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 7105,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000324",
+    "event_type": "login",
+    "user_id": 127,
+    "timestamp": "2025-06-17T12:02:12",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 15463,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000325",
+    "event_type": "page_view",
+    "user_id": 40,
+    "timestamp": "2025-06-04T23:11:15",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 19668,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000326",
+    "event_type": "click",
+    "user_id": 239,
+    "timestamp": "2025-06-20T00:24:28",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 4567,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000327",
+    "event_type": "search",
+    "user_id": 323,
+    "timestamp": "2025-06-22T00:28:41",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 17012,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000328",
+    "event_type": "page_view",
+    "user_id": 180,
+    "timestamp": "2025-06-11T18:12:38",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 12657,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000329",
+    "event_type": "login",
+    "user_id": 208,
+    "timestamp": "2025-06-19T01:55:34",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 18046,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000330",
+    "event_type": "click",
+    "user_id": 367,
+    "timestamp": "2025-06-11T11:40:21",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 27519,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000331",
+    "event_type": "logout",
+    "user_id": 240,
+    "timestamp": "2025-06-22T19:05:24",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 2161,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000332",
+    "event_type": "click",
+    "user_id": 339,
+    "timestamp": "2025-06-27T01:58:53",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 19280,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000333",
+    "event_type": "login",
+    "user_id": 477,
+    "timestamp": "2025-06-22T06:16:04",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 25542,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000334",
+    "event_type": "purchase",
+    "user_id": 400,
+    "timestamp": "2025-06-07T05:38:13",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 1402,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000335",
+    "event_type": "purchase",
+    "user_id": 46,
+    "timestamp": "2025-06-02T04:28:41",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 1865,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000336",
+    "event_type": "search",
+    "user_id": 407,
+    "timestamp": "2025-06-17T22:30:30",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 5607,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000337",
+    "event_type": "page_view",
+    "user_id": 468,
+    "timestamp": "2025-06-29T21:35:09",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 16719,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000338",
+    "event_type": "click",
+    "user_id": 191,
+    "timestamp": "2025-06-25T01:40:01",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 293,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000339",
+    "event_type": "page_view",
+    "user_id": 113,
+    "timestamp": "2025-06-08T19:50:54",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 20348,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000340",
+    "event_type": "click",
+    "user_id": 57,
+    "timestamp": "2025-06-30T05:34:31",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 13637,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000341",
+    "event_type": "login",
+    "user_id": 261,
+    "timestamp": "2025-06-27T07:26:31",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 18095,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000342",
+    "event_type": "logout",
+    "user_id": 127,
+    "timestamp": "2025-06-15T23:16:59",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 11187,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000343",
+    "event_type": "page_view",
+    "user_id": 320,
+    "timestamp": "2025-06-26T20:31:51",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 22112,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000344",
+    "event_type": "login",
+    "user_id": 244,
+    "timestamp": "2025-06-26T01:39:30",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 6335,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000345",
+    "event_type": "page_view",
+    "user_id": 356,
+    "timestamp": "2025-06-22T14:09:14",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 14088,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000346",
+    "event_type": "search",
+    "user_id": 82,
+    "timestamp": "2025-06-10T19:02:38",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 11937,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000347",
+    "event_type": "page_view",
+    "user_id": 124,
+    "timestamp": "2025-06-02T15:00:08",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 15431,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000348",
+    "event_type": "purchase",
+    "user_id": 142,
+    "timestamp": "2025-06-20T08:40:01",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 4405,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000349",
+    "event_type": "purchase",
+    "user_id": 324,
+    "timestamp": "2025-06-18T16:49:58",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 18312,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000350",
+    "event_type": "page_view",
+    "user_id": 155,
+    "timestamp": "2025-06-13T02:44:36",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 24494,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000351",
+    "event_type": "page_view",
+    "user_id": 373,
+    "timestamp": "2025-06-10T22:05:09",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 28105,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000352",
+    "event_type": "page_view",
+    "user_id": 455,
+    "timestamp": "2025-06-16T14:31:16",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 23963,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000353",
+    "event_type": "search",
+    "user_id": 496,
+    "timestamp": "2025-06-14T00:46:31",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 25653,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000354",
+    "event_type": "login",
+    "user_id": 132,
+    "timestamp": "2025-06-15T07:48:05",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 29800,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000355",
+    "event_type": "logout",
+    "user_id": 236,
+    "timestamp": "2025-06-06T12:01:19",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 22632,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000356",
+    "event_type": "purchase",
+    "user_id": 239,
+    "timestamp": "2025-06-06T02:36:55",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 23589,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000357",
+    "event_type": "search",
+    "user_id": 161,
+    "timestamp": "2025-06-10T17:20:58",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 15183,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000358",
+    "event_type": "login",
+    "user_id": 488,
+    "timestamp": "2025-06-18T06:53:13",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 21784,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000359",
+    "event_type": "page_view",
+    "user_id": 265,
+    "timestamp": "2025-06-19T14:53:36",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 10278,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000360",
+    "event_type": "click",
+    "user_id": 388,
+    "timestamp": "2025-06-01T16:41:25",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 5515,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000361",
+    "event_type": "logout",
+    "user_id": 402,
+    "timestamp": "2025-06-29T03:29:27",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 4184,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000362",
+    "event_type": "logout",
+    "user_id": 371,
+    "timestamp": "2025-06-17T20:21:56",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 1769,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000363",
+    "event_type": "purchase",
+    "user_id": 3,
+    "timestamp": "2025-06-16T19:41:19",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 28652,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000364",
+    "event_type": "click",
+    "user_id": 411,
+    "timestamp": "2025-06-11T18:17:16",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 27449,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000365",
+    "event_type": "page_view",
+    "user_id": 303,
+    "timestamp": "2025-06-01T03:31:14",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 1650,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000366",
+    "event_type": "purchase",
+    "user_id": 7,
+    "timestamp": "2025-06-07T06:52:45",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 11609,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000367",
+    "event_type": "search",
+    "user_id": 496,
+    "timestamp": "2025-06-12T03:38:27",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 25410,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000368",
+    "event_type": "logout",
+    "user_id": 38,
+    "timestamp": "2025-06-07T21:07:51",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 18910,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000369",
+    "event_type": "logout",
+    "user_id": 244,
+    "timestamp": "2025-06-19T06:57:56",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 1709,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000370",
+    "event_type": "click",
+    "user_id": 198,
+    "timestamp": "2025-06-05T04:35:32",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 617,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000371",
+    "event_type": "page_view",
+    "user_id": 382,
+    "timestamp": "2025-06-15T16:16:18",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 10482,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000372",
+    "event_type": "logout",
+    "user_id": 484,
+    "timestamp": "2025-06-04T17:45:12",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 16625,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000373",
+    "event_type": "login",
+    "user_id": 4,
+    "timestamp": "2025-06-11T05:16:31",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 12634,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000374",
+    "event_type": "search",
+    "user_id": 277,
+    "timestamp": "2025-06-15T23:40:21",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 8471,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000375",
+    "event_type": "logout",
+    "user_id": 87,
+    "timestamp": "2025-06-21T14:04:34",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 21964,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000376",
+    "event_type": "click",
+    "user_id": 365,
+    "timestamp": "2025-06-28T14:55:09",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 19979,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000377",
+    "event_type": "purchase",
+    "user_id": 20,
+    "timestamp": "2025-06-15T12:31:44",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 7202,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000378",
+    "event_type": "login",
+    "user_id": 316,
+    "timestamp": "2025-06-03T02:46:41",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 5679,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000379",
+    "event_type": "search",
+    "user_id": 261,
+    "timestamp": "2025-06-25T06:31:15",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 15745,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000380",
+    "event_type": "search",
+    "user_id": 222,
+    "timestamp": "2025-06-19T13:41:49",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 19786,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000381",
+    "event_type": "login",
+    "user_id": 342,
+    "timestamp": "2025-06-18T18:05:33",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 15538,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000382",
+    "event_type": "page_view",
+    "user_id": 397,
+    "timestamp": "2025-06-18T15:36:42",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 17322,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000383",
+    "event_type": "logout",
+    "user_id": 97,
+    "timestamp": "2025-06-14T23:43:28",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 27857,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000384",
+    "event_type": "login",
+    "user_id": 191,
+    "timestamp": "2025-06-28T01:04:07",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 1123,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000385",
+    "event_type": "page_view",
+    "user_id": 290,
+    "timestamp": "2025-06-30T09:58:17",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 24139,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000386",
+    "event_type": "logout",
+    "user_id": 41,
+    "timestamp": "2025-06-22T15:29:55",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 8081,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000387",
+    "event_type": "logout",
+    "user_id": 335,
+    "timestamp": "2025-06-30T03:51:42",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 26024,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000388",
+    "event_type": "page_view",
+    "user_id": 90,
+    "timestamp": "2025-06-04T04:58:50",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 3451,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000389",
+    "event_type": "page_view",
+    "user_id": 228,
+    "timestamp": "2025-06-08T06:39:59",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 3690,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000390",
+    "event_type": "click",
+    "user_id": 474,
+    "timestamp": "2025-06-04T08:04:00",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 1369,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000391",
+    "event_type": "click",
+    "user_id": 445,
+    "timestamp": "2025-06-18T03:08:25",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 731,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000392",
+    "event_type": "logout",
+    "user_id": 170,
+    "timestamp": "2025-06-05T14:46:03",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 8391,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000393",
+    "event_type": "page_view",
+    "user_id": 195,
+    "timestamp": "2025-06-10T07:44:01",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 20568,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000394",
+    "event_type": "click",
+    "user_id": 360,
+    "timestamp": "2025-06-26T08:43:11",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 14473,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000395",
+    "event_type": "login",
+    "user_id": 373,
+    "timestamp": "2025-06-19T23:45:31",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 5049,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000396",
+    "event_type": "purchase",
+    "user_id": 182,
+    "timestamp": "2025-06-14T19:25:30",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 24172,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000397",
+    "event_type": "search",
+    "user_id": 118,
+    "timestamp": "2025-06-28T13:34:02",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 8535,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000398",
+    "event_type": "page_view",
+    "user_id": 270,
+    "timestamp": "2025-06-17T11:08:50",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 1033,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000399",
+    "event_type": "page_view",
+    "user_id": 390,
+    "timestamp": "2025-06-18T06:18:52",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 29082,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000400",
+    "event_type": "page_view",
+    "user_id": 419,
+    "timestamp": "2025-06-27T09:52:18",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 12834,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000401",
+    "event_type": "click",
+    "user_id": 169,
+    "timestamp": "2025-06-18T00:48:45",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 10525,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000402",
+    "event_type": "click",
+    "user_id": 385,
+    "timestamp": "2025-06-08T05:37:09",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 14946,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000403",
+    "event_type": "purchase",
+    "user_id": 36,
+    "timestamp": "2025-06-16T05:33:32",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 5000,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000404",
+    "event_type": "click",
+    "user_id": 374,
+    "timestamp": "2025-06-15T06:42:10",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 20375,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000405",
+    "event_type": "click",
+    "user_id": 449,
+    "timestamp": "2025-06-19T03:44:36",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 6426,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000406",
+    "event_type": "click",
+    "user_id": 290,
+    "timestamp": "2025-06-24T20:08:14",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 3080,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000407",
+    "event_type": "login",
+    "user_id": 127,
+    "timestamp": "2025-06-30T01:39:35",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 28171,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000408",
+    "event_type": "logout",
+    "user_id": 30,
+    "timestamp": "2025-06-28T16:57:42",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 3570,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000409",
+    "event_type": "logout",
+    "user_id": 47,
+    "timestamp": "2025-06-13T09:47:19",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 20762,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000410",
+    "event_type": "logout",
+    "user_id": 135,
+    "timestamp": "2025-06-11T11:29:26",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 10177,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000411",
+    "event_type": "page_view",
+    "user_id": 214,
+    "timestamp": "2025-06-28T05:37:53",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 24843,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000412",
+    "event_type": "logout",
+    "user_id": 205,
+    "timestamp": "2025-06-07T13:23:21",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 18182,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000413",
+    "event_type": "page_view",
+    "user_id": 381,
+    "timestamp": "2025-06-15T11:14:43",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 8202,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000414",
+    "event_type": "login",
+    "user_id": 40,
+    "timestamp": "2025-06-13T07:06:56",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 8401,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000415",
+    "event_type": "page_view",
+    "user_id": 26,
+    "timestamp": "2025-06-16T06:52:11",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 26988,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000416",
+    "event_type": "login",
+    "user_id": 408,
+    "timestamp": "2025-06-23T23:14:32",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 8193,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000417",
+    "event_type": "logout",
+    "user_id": 328,
+    "timestamp": "2025-06-01T08:16:03",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 15249,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000418",
+    "event_type": "logout",
+    "user_id": 217,
+    "timestamp": "2025-06-04T11:12:27",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 15127,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000419",
+    "event_type": "logout",
+    "user_id": 349,
+    "timestamp": "2025-06-08T10:25:16",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 26574,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000420",
+    "event_type": "login",
+    "user_id": 102,
+    "timestamp": "2025-06-20T04:58:56",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 5031,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000421",
+    "event_type": "logout",
+    "user_id": 85,
+    "timestamp": "2025-06-01T09:16:18",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 13286,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000422",
+    "event_type": "login",
+    "user_id": 140,
+    "timestamp": "2025-06-16T20:41:05",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 19128,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000423",
+    "event_type": "search",
+    "user_id": 265,
+    "timestamp": "2025-06-29T12:16:25",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 13325,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000424",
+    "event_type": "logout",
+    "user_id": 414,
+    "timestamp": "2025-06-05T03:38:33",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 13564,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000425",
+    "event_type": "login",
+    "user_id": 86,
+    "timestamp": "2025-06-05T15:23:18",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 14255,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000426",
+    "event_type": "click",
+    "user_id": 257,
+    "timestamp": "2025-06-23T11:23:27",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 11590,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000427",
+    "event_type": "page_view",
+    "user_id": 431,
+    "timestamp": "2025-06-05T00:43:31",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 303,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000428",
+    "event_type": "click",
+    "user_id": 60,
+    "timestamp": "2025-06-15T02:22:57",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 4978,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000429",
+    "event_type": "purchase",
+    "user_id": 445,
+    "timestamp": "2025-06-27T05:18:43",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 8514,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000430",
+    "event_type": "login",
+    "user_id": 101,
+    "timestamp": "2025-06-03T09:32:42",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 7052,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000431",
+    "event_type": "page_view",
+    "user_id": 295,
+    "timestamp": "2025-06-30T11:33:09",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 5760,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000432",
+    "event_type": "search",
+    "user_id": 56,
+    "timestamp": "2025-06-28T04:53:01",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 29493,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000433",
+    "event_type": "click",
+    "user_id": 235,
+    "timestamp": "2025-06-22T03:00:02",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 23922,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000434",
+    "event_type": "purchase",
+    "user_id": 52,
+    "timestamp": "2025-06-05T19:43:31",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 6273,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000435",
+    "event_type": "search",
+    "user_id": 376,
+    "timestamp": "2025-06-16T13:41:17",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 5731,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000436",
+    "event_type": "page_view",
+    "user_id": 423,
+    "timestamp": "2025-06-13T05:26:12",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 8823,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000437",
+    "event_type": "search",
+    "user_id": 153,
+    "timestamp": "2025-06-27T01:02:58",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 18670,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000438",
+    "event_type": "purchase",
+    "user_id": 178,
+    "timestamp": "2025-06-01T20:38:55",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 5204,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000439",
+    "event_type": "search",
+    "user_id": 460,
+    "timestamp": "2025-06-18T01:45:01",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 24482,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000440",
+    "event_type": "purchase",
+    "user_id": 388,
+    "timestamp": "2025-06-17T03:48:26",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 17874,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000441",
+    "event_type": "page_view",
+    "user_id": 242,
+    "timestamp": "2025-06-10T14:39:05",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 26920,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000442",
+    "event_type": "login",
+    "user_id": 10,
+    "timestamp": "2025-06-20T12:16:10",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 27440,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000443",
+    "event_type": "login",
+    "user_id": 238,
+    "timestamp": "2025-06-19T17:01:09",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 4020,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000444",
+    "event_type": "search",
+    "user_id": 48,
+    "timestamp": "2025-06-20T08:31:50",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 3277,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000445",
+    "event_type": "click",
+    "user_id": 281,
+    "timestamp": "2025-06-24T03:19:07",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 1393,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000446",
+    "event_type": "logout",
+    "user_id": 238,
+    "timestamp": "2025-06-17T04:18:47",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 1491,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000447",
+    "event_type": "purchase",
+    "user_id": 472,
+    "timestamp": "2025-06-22T16:30:02",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 22313,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000448",
+    "event_type": "click",
+    "user_id": 157,
+    "timestamp": "2025-06-28T09:00:28",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 12224,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000449",
+    "event_type": "click",
+    "user_id": 88,
+    "timestamp": "2025-06-10T10:58:56",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 29475,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000450",
+    "event_type": "search",
+    "user_id": 65,
+    "timestamp": "2025-06-30T07:44:45",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 29832,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000451",
+    "event_type": "logout",
+    "user_id": 450,
+    "timestamp": "2025-06-29T01:30:00",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 24501,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000452",
+    "event_type": "search",
+    "user_id": 28,
+    "timestamp": "2025-06-22T02:36:33",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 3000,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000453",
+    "event_type": "purchase",
+    "user_id": 421,
+    "timestamp": "2025-06-13T15:59:20",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 13139,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000454",
+    "event_type": "page_view",
+    "user_id": 19,
+    "timestamp": "2025-06-04T16:20:48",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 10704,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000455",
+    "event_type": "page_view",
+    "user_id": 379,
+    "timestamp": "2025-06-13T23:57:26",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 21419,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000456",
+    "event_type": "page_view",
+    "user_id": 290,
+    "timestamp": "2025-06-22T03:36:40",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 20032,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000457",
+    "event_type": "click",
+    "user_id": 116,
+    "timestamp": "2025-06-25T00:22:24",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 11174,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000458",
+    "event_type": "page_view",
+    "user_id": 60,
+    "timestamp": "2025-06-27T14:56:54",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 8605,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000459",
+    "event_type": "page_view",
+    "user_id": 216,
+    "timestamp": "2025-06-16T19:45:53",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 20329,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000460",
+    "event_type": "page_view",
+    "user_id": 176,
+    "timestamp": "2025-06-17T03:31:19",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 7929,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000461",
+    "event_type": "purchase",
+    "user_id": 252,
+    "timestamp": "2025-06-28T11:03:26",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 6520,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000462",
+    "event_type": "purchase",
+    "user_id": 490,
+    "timestamp": "2025-06-11T07:47:30",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 23506,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000463",
+    "event_type": "page_view",
+    "user_id": 436,
+    "timestamp": "2025-06-09T22:58:38",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 25608,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000464",
+    "event_type": "logout",
+    "user_id": 419,
+    "timestamp": "2025-06-21T19:00:27",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 14817,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000465",
+    "event_type": "search",
+    "user_id": 472,
+    "timestamp": "2025-06-12T15:55:19",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 17829,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000466",
+    "event_type": "logout",
+    "user_id": 470,
+    "timestamp": "2025-06-06T23:22:21",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 10316,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000467",
+    "event_type": "search",
+    "user_id": 10,
+    "timestamp": "2025-06-04T10:32:08",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 17465,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000468",
+    "event_type": "logout",
+    "user_id": 255,
+    "timestamp": "2025-06-19T12:00:18",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 20746,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000469",
+    "event_type": "search",
+    "user_id": 178,
+    "timestamp": "2025-06-13T13:24:31",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 26408,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000470",
+    "event_type": "login",
+    "user_id": 119,
+    "timestamp": "2025-06-27T09:24:04",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 14608,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000471",
+    "event_type": "page_view",
+    "user_id": 233,
+    "timestamp": "2025-06-19T11:02:52",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 21063,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000472",
+    "event_type": "logout",
+    "user_id": 493,
+    "timestamp": "2025-06-26T08:14:14",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 27538,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000473",
+    "event_type": "search",
+    "user_id": 97,
+    "timestamp": "2025-06-15T00:25:04",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 17583,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000474",
+    "event_type": "logout",
+    "user_id": 41,
+    "timestamp": "2025-06-26T17:12:23",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 980,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000475",
+    "event_type": "purchase",
+    "user_id": 385,
+    "timestamp": "2025-06-24T23:41:27",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 16855,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000476",
+    "event_type": "login",
+    "user_id": 244,
+    "timestamp": "2025-06-14T18:13:28",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 20622,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000477",
+    "event_type": "login",
+    "user_id": 87,
+    "timestamp": "2025-06-28T06:41:33",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 13388,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000478",
+    "event_type": "logout",
+    "user_id": 359,
+    "timestamp": "2025-06-26T21:46:03",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 20049,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000479",
+    "event_type": "click",
+    "user_id": 44,
+    "timestamp": "2025-06-28T13:47:13",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 19476,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000480",
+    "event_type": "purchase",
+    "user_id": 371,
+    "timestamp": "2025-06-19T03:32:47",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 27038,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000481",
+    "event_type": "search",
+    "user_id": 220,
+    "timestamp": "2025-06-30T04:06:12",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 5061,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000482",
+    "event_type": "purchase",
+    "user_id": 465,
+    "timestamp": "2025-06-23T11:17:55",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 28456,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000483",
+    "event_type": "purchase",
+    "user_id": 302,
+    "timestamp": "2025-06-02T14:12:25",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 26066,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000484",
+    "event_type": "search",
+    "user_id": 50,
+    "timestamp": "2025-06-08T19:12:48",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 11490,
+      "referrer": "douyin"
+    }
+  },
+  {
+    "event_id": "evt_000485",
+    "event_type": "login",
+    "user_id": 35,
+    "timestamp": "2025-06-22T20:03:55",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 11921,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000486",
+    "event_type": "search",
+    "user_id": 291,
+    "timestamp": "2025-06-26T14:34:50",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 16185,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000487",
+    "event_type": "click",
+    "user_id": 453,
+    "timestamp": "2025-06-03T11:19:17",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 8093,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000488",
+    "event_type": "click",
+    "user_id": 55,
+    "timestamp": "2025-06-26T17:58:47",
+    "payload": {
+      "page": "/home",
+      "duration_ms": 16087,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000489",
+    "event_type": "login",
+    "user_id": 407,
+    "timestamp": "2025-06-16T21:45:51",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 27671,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000490",
+    "event_type": "logout",
+    "user_id": 477,
+    "timestamp": "2025-06-11T23:20:58",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 11620,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000491",
+    "event_type": "logout",
+    "user_id": 460,
+    "timestamp": "2025-06-17T20:31:21",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 8020,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000492",
+    "event_type": "click",
+    "user_id": 228,
+    "timestamp": "2025-06-16T16:10:19",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 6574,
+      "referrer": "wechat"
+    }
+  },
+  {
+    "event_id": "evt_000493",
+    "event_type": "search",
+    "user_id": 252,
+    "timestamp": "2025-06-04T23:20:29",
+    "payload": {
+      "page": "/cart",
+      "duration_ms": 15645,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000494",
+    "event_type": "click",
+    "user_id": 421,
+    "timestamp": "2025-06-07T22:28:06",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 6950,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000495",
+    "event_type": "page_view",
+    "user_id": 450,
+    "timestamp": "2025-06-23T15:45:19",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 5026,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000496",
+    "event_type": "purchase",
+    "user_id": 276,
+    "timestamp": "2025-06-07T19:42:12",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 28935,
+      "referrer": "google"
+    }
+  },
+  {
+    "event_id": "evt_000497",
+    "event_type": "page_view",
+    "user_id": 352,
+    "timestamp": "2025-06-27T04:19:57",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 24507,
+      "referrer": "email"
+    }
+  },
+  {
+    "event_id": "evt_000498",
+    "event_type": "page_view",
+    "user_id": 180,
+    "timestamp": "2025-06-13T18:03:59",
+    "payload": {
+      "page": "/orders",
+      "duration_ms": 28225,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000499",
+    "event_type": "logout",
+    "user_id": 461,
+    "timestamp": "2025-06-08T07:58:36",
+    "payload": {
+      "page": "/products",
+      "duration_ms": 25285,
+      "referrer": "direct"
+    }
+  },
+  {
+    "event_id": "evt_000500",
+    "event_type": "login",
+    "user_id": 200,
+    "timestamp": "2025-06-24T23:37:12",
+    "payload": {
+      "page": "/profile",
+      "duration_ms": 4053,
+      "referrer": "google"
+    }
+  }
+]

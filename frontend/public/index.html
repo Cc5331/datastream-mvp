@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数据流任务管理系统 - DataStream MVP</title>
+
+    <!-- 样式 -->
+    <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="app">
+        <!-- 顶部导航栏 -->
+        <el-container style="height: 100vh">
+            <el-header class="app-header" style="height: 56px; padding: 0 20px;">
+                <div class="header-left">
+                    <h1 style="margin: 0; font-size: 18px; color: #409eff;">📊 数据流任务管理系统</h1>
+                    <span class="version-badge">MVP v1.0</span>
+                </div>
+                <div class="header-right">
+                    <el-button size="small" :type="currentView === 'canvas' ? 'primary' : ''" @click="currentView = 'canvas'">
+                        <el-icon><Monitor /></el-icon> 画布设计
+                    </el-button>
+                    <el-button size="small" :type="currentView === 'jobs' ? 'primary' : ''" @click="currentView = 'jobs'">
+                        <el-icon><List /></el-icon> 作业管理
+                    </el-button>
+                    <el-button size="small" :type="currentView === 'controls' ? 'primary' : ''" @click="currentView = 'controls'">
+                        <el-icon><Grid /></el-icon> 控件管理
+                    </el-button>
+                    <el-button size="small" type="info" @click="showHelp = true">
+                        <el-icon><QuestionFilled /></el-icon> 帮助
+                    </el-button>
+                </div>
+            </el-header>
+
+            <el-main style="padding: 0; overflow: hidden;">
+                <!-- 画布设计视图 -->
+                <div v-show="currentView === 'canvas'" class="canvas-view">
+                    <div class="canvas-toolbar">
+                        <span class="toolbar-title">{{ currentJobName || '未命名作业' }}</span>
+                        <div class="toolbar-actions">
+                            <el-input v-model="jobName" placeholder="作业名称" size="small" style="width: 200px; margin-right: 8px;"></el-input>
+                            <el-input-number v-model="parallelism" :min="1" :max="8" size="small" style="width: 100px; margin-right: 8px;"></el-input-number>
+                            <el-button size="small" type="primary" @click="saveDag" :loading="saving">
+                                <el-icon><Check /></el-icon> 保存
+                            </el-button>
+                            <el-button size="small" type="success" @click="submitJob" :loading="submitting">
+                                <el-icon><Upload /></el-icon> 提交运行
+                            </el-button>
+                            <el-button size="small" @click="exportDag">
+                                <el-icon><Download /></el-icon> 导出JSON
+                            </el-button>
+                            <el-button size="small" @click="importDagTrigger">
+                                <el-icon><Upload /></el-icon> 导入JSON
+                            </el-button>
+                            <input type="file" id="importFileInput" accept=".json" style="display:none">
+                            <el-button size="small" type="primary" plain @click="newCanvas">
+                                <el-icon><Plus /></el-icon> 新建画布
+                            </el-button>
+                            <el-button size="small" type="danger" @click="clearCanvas">
+                                <el-icon><Delete /></el-icon> 清空
+                            </el-button>
+                        </div>
+                    </div>
+                    <div class="canvas-body">
+                        <!-- 左侧控件面板 -->
+                        <div class="control-panel">
+                            <h3>📦 控件库</h3>
+                            <el-tabs v-model="controlTab" style="padding: 0 8px;">
+                                <el-tab-pane label="输入" name="input">
+                                    <div v-for="ctrl in controlsByCategory('input')" :key="ctrl.type"
+                                         class="control-item"
+                                         :data-type="ctrl.type"
+                                         draggable="true"
+                                         @dragstart="onDragStart($event, ctrl)">
+                                        <div class="control-icon input-icon">{{ ctrl.name.charAt(0) }}</div>
+                                        <div class="control-info">
+                                            <strong>{{ ctrl.name }}</strong>
+                                            <small>{{ ctrl.description?.substring(0, 20) }}...</small>
+                                        </div>
+                                    </div>
+                                </el-tab-pane>
+                                <el-tab-pane label="转换" name="transform">
+                                    <div v-for="ctrl in controlsByCategory('transform')" :key="ctrl.type"
+                                         class="control-item" draggable="true"
+                                         @dragstart="onDragStart($event, ctrl)">
+                                        <div class="control-icon transform-icon">{{ ctrl.name.charAt(0) }}</div>
+                                        <div class="control-info">
+                                            <strong>{{ ctrl.name }}</strong>
+                                            <small>{{ ctrl.description?.substring(0, 20) }}...</small>
+                                        </div>
+                                    </div>
+                                </el-tab-pane>
+                                <el-tab-pane label="输出" name="output">
+                                    <div v-for="ctrl in controlsByCategory('output')" :key="ctrl.type"
+                                         class="control-item" draggable="true"
+                                         @dragstart="onDragStart($event, ctrl)">
+                                        <div class="control-icon output-icon">{{ ctrl.name.charAt(0) }}</div>
+                                        <div class="control-info">
+                                            <strong>{{ ctrl.name }}</strong>
+                                            <small>{{ ctrl.description?.substring(0, 20) }}...</small>
+                                        </div>
+                                    </div>
+                                </el-tab-pane>
+                            </el-tabs>
+                        </div>
+
+                        <!-- 中间画布 -->
+                        <div id="dag-canvas" class="graph-container"></div>
+
+                        <!-- 右侧参数面板 -->
+                        <div class="param-panel" v-show="selectedNode">
+                            <h3>⚙️ 参数配置</h3>
+                            <el-form :model="nodeParams" label-position="top" size="small">
+                                <el-form-item v-for="(param, key) in (nodeParamSchema?.properties || {})" :key="key" :label="param.title || key">
+                                    <!-- 根据类型渲染不同控件 -->
+                                    <el-input v-if="param.type === 'string' && !param.enum"
+                                              v-model="nodeParams[key]" :placeholder="param.default || ''"></el-input>
+                                    <el-input-number v-if="param.type === 'integer' || param.type === 'number'"
+                                              v-model="nodeParams[key]" :default-value="param.default"></el-input-number>
+                                    <el-switch v-if="param.type === 'boolean'"
+                                              v-model="nodeParams[key]"></el-switch>
+                                    <el-select v-if="param.enum" v-model="nodeParams[key]" style="width:100%">
+                                        <el-option v-for="opt in param.enum" :key="opt" :label="opt" :value="opt"></el-option>
+                                    </el-select>
+                                    <el-input v-if="param.type === 'array'"
+                                              v-model="nodeParams[key]" placeholder="逗号分隔多个值"></el-input>
+                                </el-form-item>
+                            </el-form>
+                            <el-button size="small" type="primary" @click="applyParams" style="width:100%">应用参数</el-button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 作业管理视图 -->
+                <div v-show="currentView === 'jobs'" class="jobs-view">
+                    <el-table :data="jobs" style="width: 100%; height: 100%;" stripe @row-dblclick="openJob">
+                        <el-table-column prop="id" label="ID" width="60"></el-table-column>
+                        <el-table-column prop="name" label="作业名称" min-width="150"></el-table-column>
+                        <el-table-column prop="description" label="描述" min-width="200">
+                            <template #default="scope">
+                                <span>{{ scope.row.description || '-' }}</span>
+                            </template>
+                        </el-table-column>
+                        <el-table-column prop="status" label="状态" width="120">
+                            <template #default="scope">
+                                <el-tag :type="statusTag(scope.row.status)" size="small">{{ scope.row.status }}</el-tag>
+                            </template>
+                        </el-table-column>
+                        <el-table-column prop="parallelism" label="并行度" width="80"></el-table-column>
+                        <el-table-column label="错误详情" min-width="200">
+                            <template #default="scope">
+                                <el-tooltip v-if="jobErrors[scope.row.id]" :content="jobErrors[scope.row.id]" placement="top" effect="dark">
+                                    <el-tag type="danger" size="small" style="max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer;">
+                                        {{ jobErrors[scope.row.id]?.substring(0, 30) }}{{ jobErrors[scope.row.id]?.length > 30 ? '...' : '' }}
+                                    </el-tag>
+                                </el-tooltip>
+                                <span v-else style="color:#909399; font-size:12px;">-</span>
+                            </template>
+                        </el-table-column>
+                        <el-table-column prop="flinkJobId" label="Flink Job ID" min-width="180">
+                            <template #default="scope">
+                                <span style="font-size:12px; color:#999;">{{ scope.row.flinkJobId || '-' }}</span>
+                            </template>
+                        </el-table-column>
+                        <el-table-column prop="updatedAt" label="更新时间" width="170"></el-table-column>
+                        <el-table-column label="操作" width="250">
+                            <template #default="scope">
+                                <el-button size="small" type="primary" @click="openJob(scope.row)">编辑</el-button>
+                                <el-button size="small" type="success" @click="submitJobById(scope.row.id)"
+                                    :disabled="scope.row.status==='RUNNING'||scope.row.status==='SUBMITTED'">运行</el-button>
+                                <el-button size="small" @click="viewLogs(scope.row)">日志</el-button>
+                                <el-button size="small" type="danger" @click="deleteJob(scope.row.id)">删除</el-button>
+                            </template>
+                        </el-table-column>
+                    </el-table>
+                </div>
+
+                <!-- 控件管理视图 -->
+                <div v-show="currentView === 'controls'" class="controls-view">
+                    <el-table :data="controls" style="width:100%; height:100%;" stripe>
+                        <el-table-column prop="type" label="类型标识" width="140"></el-table-column>
+                        <el-table-column prop="name" label="名称" width="120"></el-table-column>
+                        <el-table-column prop="category" label="分类" width="80">
+                            <template #default="scope">
+                                <el-tag :type="scope.row.category==='input'?'success':scope.row.category==='output'?'warning':'info'" size="small">
+                                    {{ scope.row.category }}
+                                </el-tag>
+                            </template>
+                        </el-table-column>
+                        <el-table-column prop="description" label="描述" min-width="200"></el-table-column>
+                        <el-table-column prop="version" label="版本" width="80"></el-table-column>
+                        <el-table-column prop="jarPath" label="来源" width="120"></el-table-column>
+                        <el-table-column prop="enabled" label="启用" width="60">
+                            <template #default="scope">
+                                <el-switch v-model="scope.row.enabled" disabled></el-switch>
+                            </template>
+                        </el-table-column>
+                    </el-table>
+                </div>
+            </el-main>
+        </el-container>
+
+        <!-- 帮助对话框 -->
+        <el-dialog v-model="showHelp" title="帮助" width="600px">
+            <h4>🎯 数据流任务管理系统 MVP 使用说明</h4>
+            <ul>
+                <li><strong>画布设计</strong>：从左侧控件库拖拽控件到画布，连线构建数据流 DAG</li>
+                <li><strong>控件分类</strong>：输入（绿色）、转换（蓝色）、输出（橙色）</li>
+                <li><strong>参数配置</strong>：选中画布上的节点，在右侧面板配置参数</li>
+                <li><strong>保存/提交</strong>：保存 DAG 到数据库，或直接提交到 Flink 集群运行</li>
+                <li><strong>热加载</strong>：将控件 JAR 放入 backend/plugins/ 目录，前端自动显示新控件</li>
+            </ul>
+            <h4>⌨️ 快捷键</h4>
+            <ul>
+                <li><code>Delete</code> 删除选中节点</li>
+                <li><code>Ctrl+S</code> 保存</li>
+                <li><code>滚轮</code> 缩放画布</li>
+            </ul>
+        </el-dialog>
+
+        <!-- 运行日志对话框 -->
+        <el-dialog v-model="showLogs" title="运行日志" width="700px">
+            <div style="background: #1e1e1e; color: #d4d4d4; padding: 16px; border-radius: 8px; max-height: 400px; overflow-y: auto; font-family: monospace; font-size: 13px;">
+                <div v-for="log in jobLogs" :key="log.id" style="margin-bottom: 4px;">
+                    <span style="color: #888;">[{{ log.timestamp }}]</span>
+                    <span :style="{color: log.level==='ERROR'?'#f56c6c':log.level==='WARN'?'#e6a23c':'#67c23a'}">
+                        {{ log.level }}
+                    </span>
+                    <span>{{ log.message }}</span>
+                </div>
+                <div v-if="jobLogs.length === 0" style="color: #666;">暂无日志</div>
+            </div>
+        </el-dialog>
+    </div>
+
+    <!-- Vue 3 + Element Plus -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <script src="https://unpkg.com/element-plus@2.9.1"></script>
+    <script src="https://unpkg.com/@element-plus/icons-vue@2"></script>
+
+    <!-- AntV X6 -->
+    <script src="https://unpkg.com/@antv/x6/dist/x6.min.js"></script>
+    <script src="https://unpkg.com/axios@1.6.8/dist/axios.min.js"></script>
+
+
+    <!-- 主应用 -->
+    <script src="js/app.js"></script>
+</body>
+</html>
+
+
+

@@ -1,0 +1,177 @@
+name: datastream-mvp
+
+services:
+  # ---------- 存储 / 消息 ----------
+  mysql:
+    image: mysql:8.0
+    container_name: mvp-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: datastream
+      TZ: Asia/Shanghai
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    ports:
+      - "3307:3306"            # 本机 3306 可能被本地 MySQL 占用，故映射 3307
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./data/mysql_setup.sql:/docker-entrypoint-initdb.d/01-setup.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot123"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  kafka:
+    image: apache/kafka:3.8.0
+    container_name: mvp-kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,PLAINTEXT_HOST://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    ports:
+      - "29092:29092"          # 宿主机访问 localhost:29092；容器内互访 kafka:9092
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+
+  # ---------- Flink ----------
+  jobmanager:
+    build: ./docker/flink
+    image: datastream-flink:1.18.1
+    container_name: mvp-jobmanager
+    command: jobmanager
+    ports:
+      - "8081:8081"            # Flink Web UI / REST
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: jobmanager
+        jobmanager.memory.process.size: 1024m
+        parallelism.default: 1
+        rest.address: 0.0.0.0
+        rest.port: 8081
+        classloader.resolve-order: parent-first
+        state.checkpoints.dir: file:///flink-checkpoints
+    volumes:
+      - flink_checkpoints:/flink-checkpoints
+      - ./output:/output       # 作业输出目录（与宿主机共享）
+      - ./data:/data           # 作业输入数据目录
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8081"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  taskmanager:
+    build: ./docker/flink
+    image: datastream-flink:1.18.1
+    container_name: mvp-taskmanager
+    command: taskmanager
+    depends_on:
+      jobmanager:
+        condition: service_healthy
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: jobmanager
+        taskmanager.host: taskmanager
+        taskmanager.numberOfTaskSlots: 2
+        taskmanager.memory.process.size: 2048m
+        taskmanager.memory.managed.size: 256m
+        parallelism.default: 1
+        classloader.resolve-order: parent-first
+        state.checkpoints.dir: file:///flink-checkpoints
+    volumes:
+      - flink_checkpoints:/flink-checkpoints
+      - ./output:/output
+      - ./data:/data
+
+  sql-gateway:
+    build: ./docker/flink
+    image: datastream-flink:1.18.1
+    container_name: mvp-sql-gateway
+    command: ["/opt/flink/bin/sql-gateway.sh", "start-foreground"]
+    depends_on:
+      jobmanager:
+        condition: service_healthy
+    ports:
+      - "8083:8083"            # Flink SQL Gateway REST
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: jobmanager
+        sql-gateway.endpoint.rest.address: 0.0.0.0
+        sql-gateway.endpoint.rest.port: 8083
+        parallelism.default: 1
+        classloader.resolve-order: parent-first
+        state.checkpoints.dir: file:///flink-checkpoints
+    volumes:
+      - flink_checkpoints:/flink-checkpoints
+      - ./output:/output
+      - ./data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8083"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  # ---------- 应用 ----------
+  backend:
+    build: ./backend
+    image: datastream-backend:1.0.0
+    container_name: mvp-backend
+    depends_on:
+      jobmanager:
+        condition: service_healthy
+      sql-gateway:
+        condition: service_healthy
+    ports:
+      - "8080:8080"            # 后端 API
+    environment:
+      FLINK_CLUSTER_HOST: jobmanager
+      FLINK_CLUSTER_PORT: "8081"
+      FLINK_SQL_GATEWAY_HOST: sql-gateway
+      FLINK_SQL_GATEWAY_PORT: "8083"
+      FLINK_HOME: /opt/flink
+      PLUGIN_DIR: /app/plugins
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+    volumes:
+      - ./backend/data:/app/data          # H2 数据库持久化
+      - ./backend/plugins:/app/plugins    # 控件插件热加载
+      - ./output:/output
+      - ./data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  frontend:
+    build: ./frontend
+    image: datastream-frontend:1.0.0
+    container_name: mvp-frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "3000:3000"            # 前端页面
+    environment:
+      BACKEND_HOST: backend
+      BACKEND_PORT: "8080"
+      PORT: "3000"
+
+volumes:
+  mysql_data:
+  kafka_data:
+  flink_checkpoints:

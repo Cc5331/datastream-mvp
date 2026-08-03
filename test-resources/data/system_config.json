@@ -1,0 +1,33 @@
+{
+  "app_name": "数据流任务管理系统",
+  "version": "1.0.0",
+  "environment": "test",
+  "datasources": {
+    "csv": {
+      "enabled": true,
+      "max_file_size_mb": 50
+    },
+    "excel": {
+      "enabled": true,
+      "max_file_size_mb": 30
+    },
+    "mysql": {
+      "enabled": false,
+      "host": "localhost:3306"
+    },
+    "kafka": {
+      "enabled": false,
+      "bootstrap_servers": "localhost:9092"
+    }
+  },
+  "flink": {
+    "cluster_host": "localhost",
+    "cluster_port": 8081,
+    "default_parallelism": 2,
+    "checkpoint_interval_ms": 60000
+  },
+  "plugins": {
+    "dir": "./plugins",
+    "auto_reload_sec": 30
+  }
+}

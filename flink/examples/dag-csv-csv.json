@@ -1,0 +1,53 @@
+﻿{
+  \"jobName\": \"CSV to CSV 示例\",
+  \"parallelism\": 2,
+  \"nodes\": [
+    {
+      \"id\": \"csv_source_1\",
+      \"type\": \"csv_input\",
+      \"label\": \"CSV 输入\",
+      \"params\": {
+        \"path\": \"/data/input.csv\",
+        \"delimiter\": \",\",
+        \"hasHeader\": true
+      },
+      \"x\": 100,
+      \"y\": 200
+    },
+    {
+      \"id\": \"concat_1\",
+      \"type\": \"field_concat\",
+      \"label\": \"字段拼接\",
+      \"params\": {
+        \"fields\": \"col1, col2, col3\",
+        \"separator\": \"-\",
+        \"newFieldName\": \"merged\"
+      },
+      \"x\": 350,
+      \"y\": 200
+    },
+    {
+      \"id\": \"csv_output_1\",
+      \"type\": \"csv_output\",
+      \"label\": \"CSV 输出\",
+      \"params\": {
+        \"path\": \"/data/output.csv\",
+        \"delimiter\": \",\"
+      },
+      \"x\": 600,
+      \"y\": 200
+    }
+  ],
+  \"edges\": [
+    {
+      \"id\": \"edge1\",
+      \"source\": \"csv_source_1\",
+      \"target\": \"concat_1\"
+    },
+    {
+      \"id\": \"edge2\",
+      \"source\": \"concat_1\",
+      \"target\": \"csv_output_1\"
+    }
+  ]
+}

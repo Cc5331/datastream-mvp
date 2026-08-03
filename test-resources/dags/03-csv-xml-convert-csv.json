@@ -1,0 +1,53 @@
+{
+  "jobName": "XML<->JSON 转换测试",
+  "parallelism": 1,
+  "nodes": [
+    {
+      "id": "csv_in",
+      "type": "csv_input",
+      "label": "CSV 输入",
+      "params": {
+        "path": "test-resources/data/sales.csv",
+        "delimiter": ",",
+        "hasHeader": true
+      },
+      "x": 80,
+      "y": 250
+    },
+    {
+      "id": "convert",
+      "type": "xml_json",
+      "label": "XML<->JSON",
+      "params": {
+        "direction": "xml2json",
+        "sourceField": "payload",
+        "targetField": "result"
+      },
+      "x": 350,
+      "y": 250
+    },
+    {
+      "id": "csv_out",
+      "type": "csv_output",
+      "label": "CSV 输出",
+      "params": {
+        "path": "test-resources/data/output_converted.csv",
+        "delimiter": ","
+      },
+      "x": 620,
+      "y": 250
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "csv_in",
+      "target": "convert"
+    },
+    {
+      "id": "e2",
+      "source": "convert",
+      "target": "csv_out"
+    }
+  ]
+}

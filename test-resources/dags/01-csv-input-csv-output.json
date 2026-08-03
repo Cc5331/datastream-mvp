@@ -1,0 +1,36 @@
+{
+  "jobName": "CSV 透传测试",
+  "parallelism": 2,
+  "nodes": [
+    {
+      "id": "csv_in",
+      "type": "csv_input",
+      "label": "CSV 输入",
+      "params": {
+        "path": "test-resources/data/users.csv",
+        "delimiter": ",",
+        "hasHeader": true
+      },
+      "x": 100,
+      "y": 250
+    },
+    {
+      "id": "csv_out",
+      "type": "csv_output",
+      "label": "CSV 输出",
+      "params": {
+        "path": "test-resources/data/output_users.csv",
+        "delimiter": ","
+      },
+      "x": 400,
+      "y": 250
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "csv_in",
+      "target": "csv_out"
+    }
+  ]
+}

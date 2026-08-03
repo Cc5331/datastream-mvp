@@ -1,0 +1,10 @@
+target
+.idea
+data
+*.log
+*.txt
+app.*
+backend_*
+maven.log
+new_backend.log
+status_check*

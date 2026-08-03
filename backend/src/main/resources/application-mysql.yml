@@ -1,0 +1,43 @@
+spring:
+  application:
+    name: mvp-backend
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3306/mvp_backend?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8&useUnicode=true&allowPublicKeyRetrieval=true
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: root
+    password: YOUR_MYSQL_PASSWORD
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    date-format: yyyy-MM-dd HH:mm:ss
+
+logging:
+  file:
+    name: ./app.log
+
+flink:
+  home: ${FLINK_HOME:D:\\code\\flink-1.18.1}
+  cluster:
+    host: ${FLINK_CLUSTER_HOST:localhost}
+    port: ${FLINK_CLUSTER_PORT:8081}
+  sql-gateway:
+    host: ${FLINK_SQL_GATEWAY_HOST:}
+    port: ${FLINK_SQL_GATEWAY_PORT:8083}
+  parallelism:
+    default: 1
+
+plugin:
+  dir: ${PLUGIN_DIR:./plugins}
+
+server:
+  port: 8080
+
+spring.servlet.multipart.max-file-size: 50MB
+spring.servlet.multipart.max-request-size: 50MB

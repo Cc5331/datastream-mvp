@@ -1,0 +1,118 @@
+#!/bin/bash
+# =====================================================
+# ????????? - Linux ??????
+# =====================================================
+set -e
+
+PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+FLINK_VERSION="1.18.1"
+FLINK_DIR="$PROJECT_DIR/flink-1.18.1"
+BACKEND_DIR="$PROJECT_DIR/backend"
+FRONTEND_DIR="$PROJECT_DIR/frontend"
+NODE_VERSION="18"
+
+echo "================================================"
+echo "  ????????? - Linux ??"
+echo "  ????: $PROJECT_DIR"
+echo "================================================"
+
+# 1. ?? Java
+echo ""
+echo "[1/5] ?? Java 17+..."
+if command -v java &>/dev/null; then
+    JAVA_VER=$(java -version 2>&1 | head -1 | cut -d'"' -f2 | cut -d'.' -f1)
+    if [ "$JAVA_VER" -ge 17 ]; then
+        echo "  ? Java ??: $(java -version 2>&1 | head -1)"
+    else
+        echo "  ??  ?? Java 17+, ??: $(java -version 2>&1 | head -1)"
+        echo "  ??: sudo apt install openjdk-17-jdk  (Ubuntu)"
+        echo "        sudo yum install java-17-openjdk (CentOS)"
+        exit 1
+    fi
+else
+    echo "  ? ??? Java????? Java 17+"
+    exit 1
+fi
+
+# 2. ?? Node.js
+echo ""
+echo "[2/5] ?? Node.js..."
+if command -v node &>/dev/null; then
+    echo "  ? Node.js ??: $(node --version)"
+else
+    echo "  ??  ??? Node.js???????..."
+    curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | sudo -E bash -
+    sudo apt-get install -y nodejs
+    echo "  ? Node.js ???: $(node --version)"
+fi
+
+# 3. ??/?? Flink
+echo ""
+echo "[3/5] ?? Flink $FLINK_VERSION..."
+if [ ! -d "$FLINK_DIR" ]; then
+    echo "  ???? Flink $FLINK_VERSION..."
+    cd "$PROJECT_DIR"
+    curl -fSL "https://archive.apache.org/dist/flink/flink-${FLINK_VERSION}/flink-${FLINK_VERSION}-bin-scala_2.12.tgz" -o "flink-${FLINK_VERSION}.tgz"
+    tar -xzf "flink-${FLINK_VERSION}.tgz"
+    rm "flink-${FLINK_VERSION}.tgz"
+    echo "  ? Flink ????"
+else
+    echo "  ? Flink ???"
+fi
+
+# ???????
+if [ -f "$PROJECT_DIR/flink/conf/flink-conf.yaml" ]; then
+    cp "$PROJECT_DIR/flink/conf/flink-conf.yaml" "$FLINK_DIR/conf/"
+    echo "  ? ????????"
+fi
+
+# 4. ????
+echo ""
+echo "[4/5] ????..."
+cd "$BACKEND_DIR"
+if [ ! -f "target/mvp-backend-1.0.0.jar" ]; then
+    ./mvnw package -DskipTests -q 2>/dev/null || mvn package -DskipTests -q
+    echo "  ? ??????"
+else
+    echo "  ? ?????"
+fi
+
+# 5. ????
+echo ""
+echo "[5/5] ????..."
+
+# 5.1 ?? Flink ??
+echo "  ?? Flink ??..."
+cd "$FLINK_DIR"
+./bin/start-cluster.sh
+echo "  ? Flink Web UI: http://localhost:8081"
+
+# 5.2 ????
+echo "  ????..."
+cd "$BACKEND_DIR"
+nohup java -jar target/mvp-backend-1.0.0.jar --spring.profiles.active=linux > app.log 2>&1 &
+BACKEND_PID=$!
+echo "  ? ??: http://localhost:8080 (PID: $BACKEND_PID)"
+
+# 5.3 ????
+echo "  ????..."
+cd "$FRONTEND_DIR"
+nohup node serve.js > frontend.log 2>&1 &
+FRONTEND_PID=$!
+echo "  ? ??: http://localhost:3000 (PID: $FRONTEND_PID)"
+
+# ?? PID ??????
+echo "$BACKEND_PID" > "$PROJECT_DIR/.backend.pid"
+echo "$FRONTEND_PID" > "$PROJECT_DIR/.frontend.pid"
+
+echo ""
+echo "================================================"
+echo "  ?? ?????"
+echo "================================================"
+echo "  ????:    http://localhost:3000"
+echo "  ?? API:    http://localhost:8080"
+echo "  Flink Web:   http://localhost:8081"
+echo "================================================"
+echo ""
+echo "????: bash $PROJECT_DIR/stop-linux.sh"
+

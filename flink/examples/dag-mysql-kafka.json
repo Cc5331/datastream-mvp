@@ -1,0 +1,54 @@
+﻿{
+  \"jobName\": \"MySQL to Kafka 示例\",
+  \"parallelism\": 1,
+  \"nodes\": [
+    {
+      \"id\": \"mysql_source\",
+      \"type\": \"mysql_input\",
+      \"label\": \"MySQL 输入\",
+      \"params\": {
+        \"url\": \"jdbc:mysql://localhost:3306/source_db\",
+        \"table\": \"orders\",
+        \"username\": \"root\",
+        \"password\": \"root123\"
+      },
+      \"x\": 100,
+      \"y\": 300
+    },
+    {
+      \"id\": \"xml_convert\",
+      \"type\": \"xml_json\",
+      \"label\": \"XML 转 JSON\",
+      \"params\": {
+        \"direction\": \"xml2json\",
+        \"sourceField\": \"payload\",
+        \"targetField\": \"result\"
+      },
+      \"x\": 350,
+      \"y\": 300
+    },
+    {
+      \"id\": \"kafka_output\",
+      \"type\": \"kafka_output\",
+      \"label\": \"Kafka 输出\",
+      \"params\": {
+        \"topic\": \"output-orders\",
+        \"bootstrapServers\": \"localhost:9092\"
+      },
+      \"x\": 600,
+      \"y\": 300
+    }
+  ],
+  \"edges\": [
+    {
+      \"id\": \"e1\",
+      \"source\": \"mysql_source\",
+      \"target\": \"xml_convert\"
+    },
+    {
+      \"id\": \"e2\",
+      \"source\": \"xml_convert\",
+      \"target\": \"kafka_output\"
+    }
+  ]
+}

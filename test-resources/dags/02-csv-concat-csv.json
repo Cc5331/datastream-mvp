@@ -1,0 +1,57 @@
+{
+  "jobName": "字段拼接测试",
+  "parallelism": 2,
+  "nodes": [
+    {
+      "id": "csv_in",
+      "type": "csv_input",
+      "label": "CSV 输入",
+      "params": {
+        "path": "test-resources/data/users.csv",
+        "delimiter": ",",
+        "hasHeader": true
+      },
+      "x": 80,
+      "y": 250
+    },
+    {
+      "id": "concat",
+      "type": "field_concat",
+      "label": "字段拼接",
+      "params": {
+        "fields": [
+          "name",
+          "department",
+          "city"
+        ],
+        "separator": " - ",
+        "newFieldName": "简介"
+      },
+      "x": 350,
+      "y": 250
+    },
+    {
+      "id": "csv_out",
+      "type": "csv_output",
+      "label": "CSV 输出",
+      "params": {
+        "path": "test-resources/data/output_concat.csv",
+        "delimiter": ","
+      },
+      "x": 620,
+      "y": 250
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "csv_in",
+      "target": "concat"
+    },
+    {
+      "id": "e2",
+      "source": "concat",
+      "target": "csv_out"
+    }
+  ]
+}

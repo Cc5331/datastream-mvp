@@ -1,0 +1,38 @@
+﻿# ===== 运行时 / 依赖 =====
+flink-1.18.1/
+**/target/
+backend/data/
+node_modules/
+
+# ===== 输出与日志 =====
+output/
+*.log
+*.log.*
+*.gz
+*.err
+*_err.txt
+*_out.txt
+*_stdout.txt
+*_stderr.txt
+*.tmp
+*_temp_csv/
+
+# ===== 备份 / 遗留 =====
+*.bak
+*.v2bak
+frontend/public/old/
+
+# ===== 大数据测试文件（可用 gen_test_data.py 重新生成或自行下载）=====
+test-resources/data/test_input_*.csv
+test-resources/data/free-datasets-for-learning/
+
+# ===== IDE / 系统 =====
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+test-resources/data/*.nohdr
+test-resources/data/sample_data_converted.csv
+test-resources/data/processed_job_data_*.xlsx

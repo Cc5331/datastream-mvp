@@ -1,0 +1,56 @@
+{
+  "jobName": "订单全链路处理",
+  "parallelism": 2,
+  "nodes": [
+    {
+      "id": "orders_in",
+      "type": "csv_input",
+      "label": "订单输入",
+      "params": {
+        "path": "test-resources/data/orders.csv",
+        "delimiter": ",",
+        "hasHeader": true
+      },
+      "x": 80,
+      "y": 200
+    },
+    {
+      "id": "concat",
+      "type": "field_concat",
+      "label": "字段拼接",
+      "params": {
+        "fields": [
+          "product",
+          "status"
+        ],
+        "separator": "-",
+        "newFieldName": "product_status"
+      },
+      "x": 330,
+      "y": 200
+    },
+    {
+      "id": "output",
+      "type": "csv_output",
+      "label": "结果输出",
+      "params": {
+        "path": "test-resources/data/output_orders_full.csv",
+        "delimiter": ","
+      },
+      "x": 580,
+      "y": 200
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "orders_in",
+      "target": "concat"
+    },
+    {
+      "id": "e2",
+      "source": "concat",
+      "target": "output"
+    }
+  ]
+}

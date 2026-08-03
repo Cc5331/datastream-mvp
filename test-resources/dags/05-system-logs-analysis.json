@@ -1,0 +1,57 @@
+{
+  "jobName": "系统日志分析",
+  "parallelism": 4,
+  "nodes": [
+    {
+      "id": "logs_in",
+      "type": "csv_input",
+      "label": "日志输入",
+      "params": {
+        "path": "test-resources/data/system_logs.csv",
+        "delimiter": ",",
+        "hasHeader": true
+      },
+      "x": 80,
+      "y": 250
+    },
+    {
+      "id": "concat",
+      "type": "field_concat",
+      "label": "字段拼接",
+      "params": {
+        "fields": [
+          "service",
+          "level",
+          "message"
+        ],
+        "separator": " | ",
+        "newFieldName": "summary"
+      },
+      "x": 350,
+      "y": 250
+    },
+    {
+      "id": "csv_out",
+      "type": "csv_output",
+      "label": "日志输出",
+      "params": {
+        "path": "test-resources/data/output_logs.csv",
+        "delimiter": ","
+      },
+      "x": 620,
+      "y": 250
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "logs_in",
+      "target": "concat"
+    },
+    {
+      "id": "e2",
+      "source": "concat",
+      "target": "csv_out"
+    }
+  ]
+}

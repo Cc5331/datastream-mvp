@@ -1,0 +1,50 @@
+# Flink Standalone Cluster Configuration - MVP (all options)
+jobmanager.rpc.port: 6123
+jobmanager.rpc.address: localhost
+jobmanager.memory.process.size: 2048m
+
+taskmanager.host: localhost
+taskmanager.resource-id: tm-1
+taskmanager.numberOfTaskSlots: 4
+taskmanager.cpu.cores: 4.0
+
+# Memory components (all required by Flink 1.18)
+taskmanager.memory.task.heap.size: 1024m
+taskmanager.memory.task.off-heap.size: 0b
+taskmanager.memory.managed.size: 512m
+taskmanager.memory.network.min: 64mb
+taskmanager.memory.network.max: 64mb
+taskmanager.memory.framework.heap.size: 128m
+taskmanager.memory.framework.off-heap.size: 128m
+
+# Total Flink: 1024 + 0 + 64 + 512 + 128 + 128 = 1856m
+taskmanager.memory.flink.size: 1856m
+
+# JVM settings (must match)
+taskmanager.memory.jvm-metaspace.size: 256m
+taskmanager.memory.jvm-overhead.min: 256m
+taskmanager.memory.jvm-overhead.max: 256m
+
+# Total Process: 1856 + 256 + 256 = 2368m
+taskmanager.memory.process.size: 2368m
+
+parallelism.default: 1
+
+rest.port: 8081
+rest.address: 0.0.0.0
+
+classloader.resolve-order: parent-first
+
+# MVP overrides
+rest.port: 8081
+jobmanager.rpc.address: localhost
+jobmanager.rpc.port: 6123
+taskmanager.host: localhost
+taskmanager.resource-id: tm-1
+taskmanager.numberOfTaskSlots: 4
+taskmanager.cpu.cores: 4.0
+web.tempdir: D:/code/flink-tmp
+web.upload.dir: D:/code/flink-tmp/uploads
+# SQL Gateway
+sql-gateway.endpoint.rest.address: 0.0.0.0
+sql-gateway.endpoint.rest.port: 8083

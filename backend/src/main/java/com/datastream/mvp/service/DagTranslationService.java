@@ -1,0 +1,1119 @@
+package com.datastream.mvp.service;
+
+import com.datastream.mvp.dag.DagDefinition;
+import com.datastream.mvp.model.ControlRegistry;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import java.io.*;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.*;
+import java.util.concurrent.TimeUnit;
+import com.datastream.mvp.service.ExcelOutputConverter;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import org.apache.commons.csv.CSVFormat;
+import org.apache.commons.csv.CSVParser;
+import org.apache.commons.csv.CSVRecord;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class DagTranslationService {
+
+    private final ControlRegistryService controlService;
+    private final ObjectMapper objectMapper;
+    private final ExcelPreprocessor excelPreprocessor;
+    private final MysqlTableCreator mysqlTableCreator;
+
+    @Value("${flink.home:D:\\code\\flink-1.18.1}")
+    private String flinkHome;
+
+    @Value("${flink.cluster.host:localhost}")
+    private String flinkHost;
+
+    @Value("${flink.cluster.port:8081}")
+    private int flinkPort;
+
+    @Value("${flink.sql-gateway.host:}")
+    private String sqlGatewayHost;
+
+    @Value("${flink.sql-gateway.port:8083}")
+    private int sqlGatewayPort;
+
+    public String translate(DagDefinition dag) {
+        StringBuilder flinkSql = new StringBuilder();
+        flinkSql.append("-- DAG Job: ").append(dag.getJobName()).append("\n");
+        flinkSql.append("SET 'parallelism.default' = '").append(dag.getParallelism()).append("';\n\n");
+        boolean hasXmlJson = dag.getNodes().stream().anyMatch(n -> "xml_json".equals(n.getType()));
+        if (hasXmlJson) {
+            flinkSql.append("CREATE FUNCTION IF NOT EXISTS xml2json AS 'com.datastream.udf.XmlToJson' LANGUAGE JAVA;\n");
+            flinkSql.append("CREATE FUNCTION IF NOT EXISTS json2xml AS 'com.datastream.udf.JsonToXml' LANGUAGE JAVA;\n\n");
+        }
+
+        List<DagDefinition.DagNode> sortedNodes = topologicalSort(dag);
+        Map<String, String> tableAlias = new HashMap<>();
+        Map<String, String> nodeSchemas = new HashMap<>();
+
+        for (DagDefinition.DagNode node : sortedNodes) {
+            ControlRegistry control = controlService.findByType(node.getType());
+            String template = control.getFlinkTemplate();
+
+            if ("datagen_input".equals(node.getType())) {
+                String rps = node.getParams() != null ? node.getParams().getOrDefault("rowsPerSecond", "10").toString() : "10";
+                String fc = node.getParams() != null ? node.getParams().getOrDefault("fieldsConfig", "[]").toString() : "[]";
+                String rendered = generateDatagenDDL(sanitize(node.getId()), rps, fc);
+                nodeSchemas.put(node.getId(), extractFieldsFromDatagenConfig(fc));
+                log.debug("Stored schema for node {}: {}", node.getId(), nodeSchemas.get(node.getId()));
+                flinkSql.append("-- Node: ").append(node.getLabel()).append(" (").append(node.getId()).append(")\n");
+                flinkSql.append(rendered).append("\n\n");
+                tableAlias.put(node.getId(), sanitize(node.getId()));
+                continue;
+            }
+
+            if ("csv_input".equals(node.getType())) {
+                String path = node.getParams() != null ? node.getParams().getOrDefault("path", "/data/input.csv").toString().trim() : "/data/input.csv";
+                String delimiter = node.getParams() != null ? node.getParams().getOrDefault("delimiter", ",").toString().trim() : ",";
+                String hasHeader = node.getParams() != null ? node.getParams().getOrDefault("hasHeader", "true").toString().trim() : "true";
+                String fc = node.getParams() != null ? node.getParams().getOrDefault("fieldsConfig", "[]").toString() : "[]";
+                if (path.isEmpty() || !new java.io.File(path).isFile()) {
+                    throw new RuntimeException("CSV 输入文件不存在: " + path);
+                }
+                String effectiveDelimiter = autoDetectDelimiter(path, delimiter);
+                List<String> autoCols = null;
+                JsonNode fcNode = tryParseJsonArray(fc);
+                if (fcNode == null || !fcNode.isArray() || fcNode.size() == 0) {
+                    autoCols = detectCsvColumns(path, effectiveDelimiter, hasHeader);
+                }
+                String effectivePath = stripCsvHeaderIfNeeded(path, hasHeader);
+                String rendered = generateCsvInputDDL(sanitize(node.getId()), effectivePath, effectiveDelimiter, hasHeader, fc, autoCols);
+                String schema = extractFieldsFromDatagenConfig(fc);
+                if (schema != null) {
+                    nodeSchemas.put(node.getId(), schema);
+                } else {
+                    String ddlSchema = extractFieldsFromDdlTemplate(rendered);
+                    if (ddlSchema != null) nodeSchemas.put(node.getId(), ddlSchema);
+                }
+                log.debug("Stored schema for node {}: {}", node.getId(), nodeSchemas.get(node.getId()));
+                flinkSql.append("-- Node: ").append(node.getLabel()).append(" (").append(node.getId()).append(")\n");
+                flinkSql.append(rendered).append("\n\n");
+                tableAlias.put(node.getId(), sanitize(node.getId()));
+                continue;
+            }
+
+// Excel Input -> 先用 POI 转成临时 CSV，再按 CSV 输入处理（自动探测表头 schema）
+            if ("excel_input".equals(node.getType())) {
+                String path = node.getParams() != null ? node.getParams().getOrDefault("path", "").toString().trim() : "";
+                String delimiter = node.getParams() != null ? node.getParams().getOrDefault("delimiter", ",").toString().trim() : ",";
+                String hasHeader = node.getParams() != null ? node.getParams().getOrDefault("hasHeader", "true").toString().trim() : "true";
+                if (path.isEmpty()) {
+                    throw new RuntimeException("Excel 输入缺少 path 参数");
+                }
+                if (!new java.io.File(path).isFile()) {
+                    throw new RuntimeException("Excel 输入文件不存在: " + path);
+                }
+                String csvPath = excelPreprocessor.convertToCsv(path, delimiter, true);
+                if (csvPath == null) {
+                    throw new RuntimeException("Excel 输入转换失败（文件不是有效的 Excel 格式，请使用 .xlsx/.xls 文件）: " + path);
+                }
+                String effectiveDelimiter = autoDetectDelimiter(csvPath, delimiter);
+                List<String> autoCols = detectCsvColumns(csvPath, effectiveDelimiter, hasHeader);
+                String effectivePath = stripCsvHeaderIfNeeded(csvPath, hasHeader);
+                String rendered = generateCsvInputDDL(sanitize(node.getId()), effectivePath, effectiveDelimiter, hasHeader, "[]", autoCols);
+                String schema = extractFieldsFromDdlTemplate(rendered);
+                if (schema != null) nodeSchemas.put(node.getId(), schema);
+                log.info("Excel input {}: {} -> {} (schema: {})", node.getId(), path, csvPath, schema);
+                flinkSql.append("-- Node: ").append(node.getLabel()).append(" (").append(node.getId()).append(") [Excel Input -> Temp CSV]\n");
+                flinkSql.append(rendered).append("\n\n");
+                tableAlias.put(node.getId(), sanitize(node.getId()));
+                continue;
+            }
+// Excel Output -> 生成临时 CSV 输出，作业完成后自动转换为 .xlsx
+            if ("excel_output".equals(node.getType())) {
+                String actualPath = node.getParams() != null ? node.getParams().getOrDefault("path", "D:\\code\\比赛\\2026省服务外包\\output\\output.xlsx").toString().trim() : "/data/output.xlsx";
+                String delimiter = node.getParams() != null ? node.getParams().getOrDefault("delimiter", ",").toString().trim() : ",";
+                String sourceFields = findIncomingSourceSchema(node.getId(), dag.getEdges(), nodeSchemas);
+                String tempCsvPath = ExcelOutputConverter.getTempCsvPath(actualPath);
+
+                log.info("Excel output '{}': actual path={}, temp CSV path={}", node.getId(), actualPath, tempCsvPath);
+
+                StringBuilder excelDdl = new StringBuilder();
+                excelDdl.append("CREATE TABLE ").append(sanitize(node.getId())).append(" (\n");
+                if (sourceFields != null) {
+                    excelDdl.append(sourceFields).append("\n");
+                } else {
+                    excelDdl.append("  data STRING\n");
+                }
+                excelDdl.append(") WITH (\n");
+                excelDdl.append("  'connector' = 'filesystem',\n");
+                excelDdl.append("  'path' = '").append(tempCsvPath).append("',\n");
+                excelDdl.append("  'format' = 'csv',\n");
+                excelDdl.append("  'csv.delimiter' = '").append(delimiter).append("',\n");
+                excelDdl.append("  'sink.parallelism' = '1'\n");
+                excelDdl.append(");\n");
+                String rendered = excelDdl.toString();
+
+                flinkSql.append("-- Node: ").append(node.getLabel()).append(" (").append(node.getId()).append(") [Excel Output -> Temp CSV]\n");
+                flinkSql.append(rendered).append("\n\n");
+                tableAlias.put(node.getId(), sanitize(node.getId()));
+                continue;
+            }
+            // === Kafka Input (Flink SQL connector) ===
+            if ("kafka_input".equals(node.getType())) {
+                String topic = node.getParams() != null ? node.getParams().getOrDefault("topic", "test-topic").toString() : "test-topic";
+                String bs = node.getParams() != null ? node.getParams().getOrDefault("bootstrapServers", "localhost:9092").toString() : "localhost:9092";
+                String fc = node.getParams() != null ? node.getParams().getOrDefault("fieldsConfig", "[]").toString() : "[]";
+                String rendered = generateKafkaInputDDL(sanitize(node.getId()), topic, bs, fc);
+                String schema = extractFieldsFromDatagenConfig(fc);
+                if (schema != null) nodeSchemas.put(node.getId(), schema);
+                flinkSql.append("-- Node: ").append(node.getLabel()).append(" (").append(node.getId()).append(")\n");
+                flinkSql.append(rendered).append("\n\n");
+                tableAlias.put(node.getId(), sanitize(node.getId()));
+                continue;
+            }
+
+            // === Kafka Output (Flink SQL connector) ===
+            if ("kafka_output".equals(node.getType())) {
+                String topic = node.getParams() != null ? node.getParams().getOrDefault("topic", "output-topic").toString() : "output-topic";
+                String bs = node.getParams() != null ? node.getParams().getOrDefault("bootstrapServers", "localhost:9092").toString() : "localhost:9092";
+                String sourceFields = findIncomingSourceSchema(node.getId(), dag.getEdges(), nodeSchemas);
+                String rendered = generateKafkaOutputDDL(sanitize(node.getId()), topic, bs, sourceFields);
+                flinkSql.append("-- Node: ").append(node.getLabel()).append(" (").append(node.getId()).append(")\n");
+                flinkSql.append(rendered).append("\n\n");
+                tableAlias.put(node.getId(), sanitize(node.getId()));
+                continue;
+            }
+
+
+            if (template == null || template.isBlank()) {
+                log.warn("Control {} has no Flink template, skipping", node.getType());
+                continue;
+            }
+
+            if ("input".equals(control.getCategory())) {
+                String schema = extractFieldsFromDdlTemplate(template);
+                if (schema != null) { nodeSchemas.put(node.getId(), schema); }
+                flinkSql.append("-- Node: ").append(node.getLabel()).append(" (").append(node.getId()).append(")\n");
+                flinkSql.append(renderTemplate(template, node.getParams(), node.getId())).append("\n\n");
+            } else if ("output".equals(control.getCategory())) {
+                String sourceFields = findIncomingSourceSchema(node.getId(), dag.getEdges(), nodeSchemas);
+                String rendered;
+                Map<String, Object> renderParams = node.getParams();
+                if ("csv_output".equals(node.getType())) {
+                    // Flink filesystem sink writes a directory of part-* files; we write to a temp
+                    // dir and merge into the user's single file after the job completes.
+                    Map<String, Object> tmpParams = new HashMap<>();
+                    if (node.getParams() != null) tmpParams.putAll(node.getParams());
+                    String origPath = tmpParams.getOrDefault("path", "D:\\code\\比赛\\2026省服务外包\\output\\output.csv").toString().trim();
+                    tmpParams.put("path", origPath + ".tmp");
+                    renderParams = tmpParams;
+                }
+                if ("mysql_output".equals(node.getType()) && sourceFields != null) {
+                    mysqlTableCreator.ensureTable(node.getParams(), sourceFields);
+                }
+                if (sourceFields != null) {
+                    log.info("Schema propagation: replacing 'data STRING' with custom fields from source for node {}", node.getId());
+                    String modifiedTemplate = replaceDataStringInDDL(template, sourceFields);
+                    rendered = renderTemplate(modifiedTemplate, renderParams, node.getId());
+                } else {
+                    rendered = renderTemplate(template, renderParams, node.getId());
+                }
+                flinkSql.append(rendered).append("\n\n");
+
+            } else if ("transform".equals(control.getCategory())) {
+                log.debug("Processing transform node: {} with type: {}", node.getId(), node.getType());
+                String incomingSchema = findIncomingSourceSchema(node.getId(), dag.getEdges(), nodeSchemas);
+                if (incomingSchema != null) {
+                    if ("field_concat".equals(node.getType())) {
+                        String nfn = node.getParams() != null ? node.getParams().getOrDefault("newFieldName", "new_field").toString() : "new_field";
+                        nodeSchemas.put(node.getId(), incomingSchema + ",\n  " + nfn + " STRING");
+                    } else if ("xml_json".equals(node.getType())) {
+                        String tfn = node.getParams() != null ? node.getParams().getOrDefault("targetField", "result").toString() : "result";
+                        nodeSchemas.put(node.getId(), incomingSchema + ",\n  `" + tfn + "` STRING");
+                    } else {
+                        nodeSchemas.put(node.getId(), incomingSchema);
+                    }
+                }
+                // Transform SQL is embedded inline in the edge loop's INSERT INTO, not standalone
+                log.debug("Transform node {} SQL embedded in downstream INSERT for schema propagation", node.getId());
+                // (rendered template not output here - handled by edge loop)
+            }
+            tableAlias.put(node.getId(), sanitize(node.getId()));
+        }
+
+        // Edge loop with transform chain support
+        Map<String, String> nodeTypeMap = new HashMap<>();
+        Map<String, String> nodeCategoryMap = new HashMap<>();
+        Map<String, Map<String, Object>> transformNodeParams = new HashMap<>();
+        for (DagDefinition.DagNode n : dag.getNodes()) {
+            nodeTypeMap.put(n.getId(), n.getType());
+            ControlRegistry ctrl = controlService.findByType(n.getType());
+            nodeCategoryMap.put(n.getId(), ctrl.getCategory());
+            if ("transform".equals(ctrl.getCategory())) {
+                transformNodeParams.put(n.getId(), n.getParams());
+            }
+        }
+
+        for (DagDefinition.DagEdge edge : dag.getEdges()) {
+            String sourceTable = sanitize(edge.getSource());
+            String targetTable = sanitize(edge.getTarget());
+
+            String targetCategory = nodeCategoryMap.get(edge.getTarget());
+            if ("transform".equals(targetCategory)) { continue; }
+
+            String sourceCategory = nodeCategoryMap.get(edge.getSource());
+            if ("transform".equals(sourceCategory)) {
+                ControlRegistry sc = controlService.findByType(nodeTypeMap.get(edge.getSource()));
+                String ts = renderTemplate(sc.getFlinkTemplate(), transformNodeParams.get(edge.getSource()), edge.getSource());
+                for (DagDefinition.DagEdge ie : dag.getEdges()) {
+                    if (ie.getTarget().equals(edge.getSource())) {
+                        ts = ts.replace(sanitize(edge.getSource()), sanitize(ie.getSource()));
+                        break;
+                    }
+                }
+                flinkSql.append("INSERT INTO ").append(targetTable).append("\n").append(ts).append(";\n\n");
+                continue;
+            }
+
+            flinkSql.append("INSERT INTO ").append(targetTable)
+                    .append(" SELECT * FROM ").append(sourceTable).append(";\n");
+        }
+
+        log.info("Generated Flink SQL:\n{}", flinkSql.toString());
+        return flinkSql.toString();
+    }
+
+    public String submitToFlink(String flinkSql, int parallelism) {
+        String jobId = null;
+        if (checkFlinkCluster()) {
+            try {
+                log.info("Flink cluster available, submitting SQL via Gateway...");
+                jobId = submitViaSqlClient(flinkSql, parallelism);
+            } catch (Exception e) {
+                log.warn("SQL Gateway submission failed: {}. Will poll for jobs.", e.getMessage());
+            }
+        } else {
+            log.info("Flink cluster not available at {}:{}", flinkHost, flinkPort);
+        }
+        // Use real job ID if submitViaSqlClient found one; otherwise use fallback mock
+        if (jobId != null && !jobId.startsWith("flink-job-")) return jobId;
+        String mockJobId = "flink-job-" + UUID.randomUUID().toString();
+        log.info("No real Flink job ID captured, using fallback ID: {}", mockJobId);
+        return mockJobId;
+    }
+
+    private String pollFlinkJob(int maxWaitSec) {
+        try {
+            java.net.http.HttpClient c = java.net.http.HttpClient.newHttpClient();
+            for (int i = 0; i < maxWaitSec; i++) {
+                Thread.sleep(1000);
+                String r = c.send(java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("http://" + flinkHost + ":" + flinkPort + "/jobs/overview"))
+                    .GET().build(), java.net.http.HttpResponse.BodyHandlers.ofString()).body();
+                JsonNode j = objectMapper.readTree(r).get("jobs");
+                if (j != null && j.isArray()) {
+                    for (JsonNode jj : j) {
+                        String st = jj.has("state") ? jj.get("state").asText() : "";
+                        if ("RUNNING".equals(st) || "CREATED".equals(st)) {
+                            String jid = jj.get("jid").asText();
+                            log.info("Found active Flink job: {} ({})", jj.get("name").asText(), jid);
+                            return jid;
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) { log.warn("pollFlinkJob error: {}", e.getMessage()); }
+        return null;
+    }
+
+
+    /**
+     * Cancel a Flink job via Flink REST API
+     */
+    public void cancelFlinkJob(String flinkJobId) {
+        if (flinkJobId == null || flinkJobId.isEmpty() || flinkJobId.startsWith("mock-") || flinkJobId.startsWith("flink-job-")) {
+            log.info("Flink job ID is mock or empty, skipping Flink REST API call: {}", flinkJobId);
+            return;
+        }
+        try {
+            String cancelUrl = "http://" + flinkHost + ":" + flinkPort + "/jobs/" + flinkJobId + "?mode=cancel";
+            java.net.http.HttpClient httpClient = java.net.http.HttpClient.newHttpClient();
+            int statusCode = httpClient.send(
+                java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(cancelUrl))
+                    .method("PATCH", java.net.http.HttpRequest.BodyPublishers.noBody())
+                    .build(),
+                java.net.http.HttpResponse.BodyHandlers.discarding()
+            ).statusCode();
+            log.info("Flink job {} cancel request sent, Flink REST API status: {}", flinkJobId, statusCode);
+        } catch (Exception e) {
+            log.warn("Failed to cancel Flink job {}: {}", flinkJobId, e.getMessage());
+        }
+    }
+
+    private boolean checkFlinkCluster() {
+        try { java.net.Socket s = new java.net.Socket(flinkHost, flinkPort); s.close(); return true; }
+        catch (Exception e) { return false; }
+    }
+
+
+        private String submitViaSqlClient(String flinkSql, int parallelism) throws Exception {
+        Path tempSqlFile = Files.createTempFile("flink-job-", ".sql");
+        Files.writeString(tempSqlFile, flinkSql, StandardCharsets.UTF_8);
+        log.info("SQL written to: {}", tempSqlFile.toAbsolutePath());
+        // Capture job list before submission for downstream job detection
+        var initialHc = java.net.http.HttpClient.newHttpClient();
+        java.util.Set<String> initialBeforeIds = getCurrentJobIds(initialHc);
+
+        String jobId = trySqlGateway(flinkSql, parallelism);
+        if (jobId != null) { log.info("Job via SQL Gateway: {}", jobId); Files.deleteIfExists(tempSqlFile); return jobId; }
+
+        log.info("SQL Gateway down, trying sql-client.sh...");
+        jobId = trySqlClientScript(tempSqlFile);
+        if (jobId != null) { log.info("Job via sql-client.sh: {}", jobId); Files.deleteIfExists(tempSqlFile); return jobId; }
+
+        log.info("Polling for new Flink jobs (using pre-submission baseline)...");
+        jobId = submitViaFlinkRestApi(flinkSql, initialBeforeIds);
+        Files.deleteIfExists(tempSqlFile);
+        if (jobId == null) { jobId = "flink-job-" + UUID.randomUUID().toString(); log.info("Using fallback ID: {}", jobId); }
+        return jobId;
+    }
+
+    private String trySqlGateway(String flinkSql, int parallelism) {
+        try {
+            String gatewayHost = (sqlGatewayHost == null || sqlGatewayHost.isEmpty()) ? flinkHost : sqlGatewayHost;
+            String gatewayUrl = "http://" + gatewayHost + ":" + sqlGatewayPort;
+            java.net.http.HttpClient hc = java.net.http.HttpClient.newHttpClient();
+            String sr = hc.send(java.net.http.HttpRequest.newBuilder()
+                .uri(java.net.URI.create(gatewayUrl + "/v1/sessions"))
+                .header("Content-Type", "application/json")
+                .POST(java.net.http.HttpRequest.BodyPublishers.ofString("{}")).build(),
+                java.net.http.HttpResponse.BodyHandlers.ofString()).body();
+            JsonNode sj = objectMapper.readTree(sr);
+            if (!sj.has("sessionHandle")) {
+                log.warn("Gateway session create failed, response: " + sr);
+                return null;
+            }
+            String sh = sj.get("sessionHandle").asText();
+            log.info("Gateway session created: " + sh);
+
+            String[] stmts = flinkSql.split(";");
+            var beforeIds = getCurrentJobIds(hc);
+            String jid = null;
+
+            for (int i = 0; i < stmts.length; i++) {
+                String stmtRaw = stmts[i].replaceAll("(?m)^--.*\n?", "").trim();
+                if (stmtRaw.isEmpty()) continue;
+
+                log.info("Gateway stmt " + (i+1) + "/" + stmts.length + ": " + stmtRaw.substring(0, Math.min(80, stmtRaw.length())));
+                String body = objectMapper.createObjectNode().put("statement", stmtRaw + ";").toString();
+                String resp = hc.send(java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(gatewayUrl + "/v1/sessions/" + sh + "/statements"))
+                    .header("Content-Type", "application/json")
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(body)).build(),
+                    java.net.http.HttpResponse.BodyHandlers.ofString()).body();
+                JsonNode rj = objectMapper.readTree(resp);
+                if (rj.has("errors")) {
+                    log.warn("Gateway stmt " + (i+1) + " failed: " + rj.get("errors"));
+                    continue;
+                }
+                if (rj.has("operationHandle")) {
+                    String oh = rj.get("operationHandle").asText();
+                    log.info("Gateway stmt " + (i+1) + " operation handle: " + oh);
+
+                    boolean isInsert = stmtRaw.toUpperCase().startsWith("INSERT");
+                    int maxPolls = isInsert ? 20 : 10;
+
+                    for (int w = 0; w < maxPolls; w++) {
+                        Thread.sleep(500);
+                        String op = hc.send(java.net.http.HttpRequest.newBuilder()
+                            .uri(java.net.URI.create(gatewayUrl + "/v1/sessions/" + sh + "/operations/" + oh + "/status"))
+                            .GET().build(),
+                            java.net.http.HttpResponse.BodyHandlers.ofString()).body();
+                        // Handle empty response - fast operation completed
+                        if (op.isEmpty() || op.trim().isEmpty()) {
+                            log.debug("Gateway stmt " + (i+1) + " empty response - operation completed");
+                            if (isInsert) {
+                                for (int j = 0; j < 20; j++) {
+                                    String n = findNewFlinkJob(hc, beforeIds);
+                                    if (n != null) { jid = n; break; }
+                                    Thread.sleep(500);
+                                }
+                            }
+                            break;
+                        }
+                                                JsonNode oj = objectMapper.readTree(op);
+
+                        // Handle nested status: {"status": {"status": "COMPLETED"}}
+                        String os = null;
+                        if (oj.has("status")) {
+                            JsonNode st = oj.get("status");
+                            if (st.isObject() && st.has("status")) {
+                                os = st.get("status").asText();
+                            } else if (st.isTextual()) {
+                                os = st.asText();
+                            }
+                        }
+
+                        log.debug("Gateway stmt " + (i+1) + " poll " + (w+1) + "/" + maxPolls + " status: " + os);
+
+                        boolean _isDone = "COMPLETED".equals(os) || "FINISHED".equals(os) || "SUCCESS".equals(os) || (isInsert && "RUNNING".equals(os));
+                        if (!_isDone && os == null && !op.isEmpty() && op.startsWith("{") && !oj.has("errors")) {
+                            _isDone = true;
+                            log.debug("Gateway stmt " + (i+1) + " detected completion (empty status, no errors)");
+                        }
+                        if (_isDone) {
+                            log.info("Gateway stmt " + (i+1) + " completed (status=" + os + ")");
+                            if (isInsert) {
+                                if (oj.has("result") && oj.get("result").has("jobId")) {
+                                    jid = oj.get("result").get("jobId").asText();
+                                    log.info("Gateway returned jobId from result: " + jid);
+                                }
+                                if (jid == null && oj.has("info") && oj.get("info").isObject()) {
+                                    JsonNode infoNestedStatus = oj.get("info").get("status");
+                                    if (infoNestedStatus != null && infoNestedStatus.has("jobIds")) {
+                                        JsonNode jids = infoNestedStatus.get("jobIds");
+                                        if (jids.isArray() && jids.size() > 0) {
+                                            jid = jids.get(0).asText();
+                                            log.info("Gateway returned jobId from info.status.jobIds: " + jid);
+                                        }
+                                    }
+                                }
+                                if (jid == null) {
+                                    for (int j = 0; j < 20; j++) {
+                                        String n = findNewFlinkJob(hc, beforeIds);
+                                        if (n != null) { jid = n; break; }
+                                        Thread.sleep(500);
+                                    }
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+            try { hc.send(java.net.http.HttpRequest.newBuilder()
+                .uri(java.net.URI.create(gatewayUrl + "/v1/sessions/" + sh))
+                .DELETE().build(), java.net.http.HttpResponse.BodyHandlers.discarding()); } catch (Exception ign) {}
+            return jid;
+        } catch (Exception e) {
+            log.warn("Gateway failed: " + e.getMessage());
+            return null;
+        }
+    }
+    private String trySqlClientScript(Path sqlFile) {
+        try {
+            String b = null;
+            for (String bp : new String[]{"C:/Program Files/Git/bin/bash.exe", "C:/Program Files (x86)/Git/bin/bash.exe"}) {
+                if (new java.io.File(bp).exists()) { b = bp; break; }
+            }
+            if (b == null) { log.warn("bash.exe not found"); return null; }
+
+            String sc = flinkHome.replace("\\", "/") + "/bin/sql-client.sh";
+            String sf = sqlFile.toAbsolutePath().toString().replace("\\", "/");
+            log.info("Running: " + b + " " + sc + " -f " + sf);
+            ProcessBuilder pb = new ProcessBuilder(b, sc, "-f", sf);
+            pb.environment().put("FLINK_CONF_DIR", flinkHome.replace("\\", "/") + "/conf");
+            pb.environment().put("FLINK_HOME", flinkHome.replace("\\", "/"));
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+
+            // Read stdout with timeout (async to avoid blocking)
+            StringBuilder output = new StringBuilder();
+            Thread reader = new Thread(() -> {
+                try {
+                    java.io.BufferedReader br = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(p.getInputStream(), java.nio.charset.StandardCharsets.UTF_8));
+                    String line;
+                    while ((line = br.readLine()) != null) {
+                        output.append(line).append("\n");
+                    }
+                } catch (Exception e) { /* stream closed */ }
+            });
+            reader.setDaemon(true);
+            reader.start();
+
+            if (!p.waitFor(30, TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+                log.warn("sql-client.sh timed out after 30s");
+                return null;
+            }
+            reader.join(5000);
+
+            String all = output.toString();
+            log.info("sql-client.sh output: " + all.length() + " chars");
+
+            // Try to find Flink Job ID in output
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile(
+                "Job\\s+ID\\s*:\\s*([a-f0-9-]+)", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(all);
+            if (m.find()) {
+                String found = m.group(1);
+                log.info("Found job ID from sql-client.sh: " + found);
+                return found;
+            }
+            m = java.util.regex.Pattern.compile(
+                "([a-f0-9]{32}|[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})",
+                java.util.regex.Pattern.CASE_INSENSITIVE).matcher(all);
+            if (m.find()) {
+                String found = m.group(1);
+                log.info("Found job ID (hex) from sql-client.sh: " + found);
+                return found;
+            }
+
+            // SQL was submitted even without Job ID
+            log.info("sql-client.sh finished but no Job ID found, returning submission marker");
+                        return null; // sql-client finished but no Job ID
+        } catch (Exception e) {
+            log.warn("sql-client.sh failed: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private String submitViaFlinkRestApi(String flinkSql, java.util.Set<String> beforeIds) {
+        try {
+            var hc = java.net.http.HttpClient.newHttpClient();
+            log.info("submitViaFlinkRestApi: polling for new Flink jobs, before count: " + beforeIds.size());
+            for (int i = 0; i < 120; i++) {
+                Thread.sleep(500);
+                String resp = hc.send(java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("http://" + flinkHost + ":" + flinkPort + "/jobs/overview"))
+                    .GET().build(), java.net.http.HttpResponse.BodyHandlers.ofString()).body();
+                JsonNode jobs = objectMapper.readTree(resp).get("jobs");
+                if (jobs != null && jobs.isArray()) {
+                    for (int j = 0; j < jobs.size(); j++) {
+                        JsonNode job = jobs.get(j);
+                        String jid = job.get("jid").asText();
+                        if (!beforeIds.contains(jid)) {
+                            String state = job.has("state") ? job.get("state").asText() : "";
+                            log.info("Found new Flink job: " + job.get("name").asText() + " (" + jid + ") state=" + state);
+                            return jid;
+                        }
+                    }
+                    if (i % 10 == 0) {
+                        log.info("submitViaFlinkRestApi poll " + (i+1) + "/60: " + jobs.size() + " jobs, no new ones");
+                    }
+                }
+            }
+            log.warn("submitViaFlinkRestApi: no new jobs found after 30s polling");
+        } catch (Exception e) {
+            log.warn("REST poll error: " + e.getMessage());
+        }
+        return null;
+    }
+private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClient) throws Exception {
+        java.util.HashSet<String> ids = new java.util.HashSet<>();
+        try {
+            String jobsResp = httpClient.send(
+                java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("http://" + flinkHost + ":" + flinkPort + "/jobs/overview"))
+                    .GET().build(),
+                java.net.http.HttpResponse.BodyHandlers.ofString()
+            ).body();
+            JsonNode jobs = objectMapper.readTree(jobsResp).get("jobs");
+            if (jobs != null && jobs.isArray()) {
+                for (JsonNode j : jobs) { ids.add(j.get("jid").asText()); }
+            }
+        } catch (Exception e) { log.debug("getCurrentJobIds: {}", e.getMessage()); }
+        return ids;
+    }
+
+    private long getFlinkJobCount(java.net.http.HttpClient httpClient) throws Exception {
+        String jobsResp = httpClient.send(
+            java.net.http.HttpRequest.newBuilder()
+                .uri(java.net.URI.create("http://" + flinkHost + ":" + flinkPort + "/jobs/overview"))
+                .GET().build(),
+            java.net.http.HttpResponse.BodyHandlers.ofString()
+        ).body();
+        JsonNode jobs = objectMapper.readTree(jobsResp).get("jobs");
+        return jobs != null ? jobs.size() : 0;
+    }
+
+    private String findNewFlinkJob(java.net.http.HttpClient httpClient, java.util.Set<String> beforeIds) {
+        try {
+            String jobsResp = httpClient.send(
+                java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("http://" + flinkHost + ":" + flinkPort + "/jobs/overview"))
+                    .GET().build(),
+                java.net.http.HttpResponse.BodyHandlers.ofString()
+            ).body();
+            JsonNode jobs = objectMapper.readTree(jobsResp).get("jobs");
+            if (jobs != null && jobs.isArray()) {
+                // Pick the most recently started new job (any state, including FINISHED)
+                String bestJid = null;
+                long bestTime = -1;
+                for (int i = 0; i < jobs.size(); i++) {
+                    JsonNode j = jobs.get(i);
+                    String jid = j.get("jid").asText();
+                    if (!beforeIds.contains(jid)) {
+                        String state = j.has("state") ? j.get("state").asText() : "";
+                          // Accept any state (including FAILED)
+                          long startTime = j.has("start-time") ? j.get("start-time").asLong() : 0;
+                        if (startTime > bestTime) {
+                            bestTime = startTime;
+                            bestJid = jid;
+                        }
+                    }
+                }
+                if (bestJid != null) {
+                    log.info("Found new Flink job (most recent): " + bestJid);
+                    return bestJid;
+                }
+            }
+        } catch (Exception e) {
+            log.debug("findNewFlinkJob error: " + e.getMessage());
+        }
+        return null;
+    }
+
+    private List<DagDefinition.DagNode> topologicalSort(DagDefinition dag) {
+        List<DagDefinition.DagNode> sorted = new ArrayList<>();
+        Map<String, Integer> inDegree = new HashMap<>();
+        Map<String, List<String>> adj = new HashMap<>();
+        for (DagDefinition.DagNode node : dag.getNodes()) {
+            inDegree.put(node.getId(), 0);
+            adj.put(node.getId(), new ArrayList<>());
+        }
+        for (DagDefinition.DagEdge edge : dag.getEdges()) {
+            if (!adj.containsKey(edge.getSource())) adj.put(edge.getSource(), new ArrayList<>());
+            adj.get(edge.getSource()).add(edge.getTarget());
+            inDegree.put(edge.getTarget(), inDegree.getOrDefault(edge.getTarget(), 0) + 1);
+        }
+        java.util.Queue<String> queue = new java.util.LinkedList<>();
+        for (Map.Entry<String, Integer> entry : inDegree.entrySet()) {
+            if (entry.getValue() == 0) queue.add(entry.getKey());
+        }
+        Map<String, DagDefinition.DagNode> nodeMap = new HashMap<>();
+        for (DagDefinition.DagNode node : dag.getNodes()) {
+            nodeMap.put(node.getId(), node);
+        }
+        while (!queue.isEmpty()) {
+            String id = queue.poll();
+            sorted.add(nodeMap.get(id));
+            if (adj.containsKey(id)) {
+                for (String neighbor : adj.get(id)) {
+                    inDegree.put(neighbor, inDegree.get(neighbor) - 1);
+                    if (inDegree.get(neighbor) == 0) queue.add(neighbor);
+                }
+            }
+        }
+        return sorted;
+    }
+
+        private String generateDDLFromTemplate(String template, String tableName, Map<String, Object> params, String fieldsConfig) {
+        JsonNode fa = tryParseJsonArray(fieldsConfig);
+        StringBuilder schemaBuilder = new StringBuilder();
+        try {
+            if (fa != null && fa.isArray() && fa.size() > 0) {
+                for (int i = 0; i < fa.size(); i++) {
+                    JsonNode f = fa.get(i);
+                    String fn = f.has("name") ? f.get("name").asText() : "field" + i;
+                    String ft = f.has("type") ? f.get("type").asText() : "STRING";
+                    schemaBuilder.append("  ").append(fn).append(" ").append(ft);
+                    if (i < fa.size() - 1) schemaBuilder.append(",\n");
+                }
+            } else {
+                schemaBuilder.append("  data STRING");
+            }
+        } catch (Exception e) {
+            log.warn("Failed to parse fieldsConfig in generateDDLFromTemplate: {}", e.getMessage());
+            schemaBuilder.append("  data STRING");
+        }
+        String modifiedTemplate = replaceDataStringInDDL(template, schemaBuilder.toString());
+        return renderTemplate(modifiedTemplate, params, tableName);
+    }
+
+    private JsonNode tryParseJsonArray(String json) {
+        for (int attempt = 0; attempt < 4; attempt++) {
+            if (json == null || json.trim().isEmpty()) return null;
+            try {
+                JsonNode n = objectMapper.readTree(json.trim());
+                if (n.isArray()) return n;
+                if (n.isTextual()) { json = n.asText(); continue; }
+            } catch (Exception e) {
+                try {
+                    String cleaned = json.trim();
+                    if (cleaned.startsWith("\"") && cleaned.endsWith("\"")) {
+                        cleaned = cleaned.substring(1, cleaned.length() - 1);
+                    }
+                    cleaned = cleaned.replace("\\\"", "\"").replace("\\n", "\n").replace("\\t", "\t").replace("\\\\", "\\");
+                    JsonNode n = objectMapper.readTree(cleaned);
+                    if (n.isArray()) return n;
+                    if (n.isTextual()) { json = n.asText(); continue; }
+                } catch (Exception e2) {
+                    try {
+                        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\[.*?\\]", java.util.regex.Pattern.DOTALL).matcher(json);
+                        if (m.find()) {
+                            JsonNode n = objectMapper.readTree(m.group());
+                            if (n.isArray()) return n;
+                        }
+                    } catch (Exception e3) {}
+                }
+            }
+        }
+        return null;
+    }
+
+    private String findIncomingSourceTable(String nodeId, List<DagDefinition.DagEdge> edges, Map<String, String> tableAlias) {
+        for (DagDefinition.DagEdge edge : edges) {
+            if (edge.getTarget().equals(nodeId) && tableAlias.containsKey(edge.getSource())) {
+                return edge.getSource();
+            }
+        }
+        for (DagDefinition.DagEdge edge : edges) {
+            if (edge.getTarget().equals(nodeId)) {
+                return edge.getSource();
+            }
+        }
+        return null;
+    }
+
+    private String findTransformBetween(String sourceNodeId, String outputNodeId, List<DagDefinition.DagEdge> edges, List<DagDefinition.DagNode> nodes) {
+        for (DagDefinition.DagEdge edge : edges) {
+            if (edge.getSource().equals(sourceNodeId)) {
+                String midNode = edge.getTarget();
+                for (DagDefinition.DagEdge edge2 : edges) {
+                    if (edge2.getSource().equals(midNode) && edge2.getTarget().equals(outputNodeId)) {
+                        for (DagDefinition.DagNode n : nodes) {
+                            if (n.getId().equals(midNode)) {
+                                String cat = n.getCategory();
+                                if (cat != null && cat.equals("transform")) {
+                                    return n.getId();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private String findTransformSql(String transformNodeId, List<DagDefinition.DagEdge> edges, List<DagDefinition.DagNode> nodes) {
+        for (DagDefinition.DagNode node : nodes) {
+            if (node.getId().equals(transformNodeId)) {
+                String template;
+                try {
+                    template = controlService.findByType(node.getType()).getFlinkTemplate();
+                } catch (Exception e) {
+                    log.warn("Control not found for transform node {}: {}", node.getId(), e.getMessage());
+                    return null;
+                }
+                if (template == null || template.isBlank()) return null;
+                String sourceTable = null;
+                for (DagDefinition.DagEdge edge : edges) {
+                    if (edge.getTarget().equals(transformNodeId)) {
+                        sourceTable = edge.getSource();
+                        break;
+                    }
+                }
+                if (sourceTable == null) return null;
+                String rendered = renderTemplate(template, node.getParams(), transformNodeId);
+                rendered = rendered.replace(sanitize(transformNodeId), sanitize(sourceTable));
+                log.debug("Transform SQL for {}: {}", transformNodeId, rendered);
+                return rendered;
+            }
+        }
+        return null;
+    }
+
+    private String findIncomingSourceSchema(String nodeId, List<DagDefinition.DagEdge> edges, Map<String, String> nodeSchemas) {
+        for (DagDefinition.DagEdge edge : edges) {
+            if (edge.getTarget().equals(nodeId) && nodeSchemas.containsKey(edge.getSource())) {
+                return nodeSchemas.get(edge.getSource());
+            }
+        }
+        return null;
+    }
+
+    private String extractFieldsFromDdlTemplate(String template) {
+        try {
+            int ps = template.indexOf('('); int pe = template.indexOf(')');
+            if (ps > 0 && pe > ps) { String cols = template.substring(ps+1, pe).trim(); if (!cols.isEmpty()) return cols; }
+        } catch (Exception e) { log.warn("Failed to extract fields from DDL template: {}", e.getMessage()); }
+        return null;
+    }
+
+        private String replaceDataStringInDDL(String template, String newFields) {
+        // Replace "data STRING" with actual source schema
+        String result = template.replaceAll("(?m)^[ \\t]*data\\s+STRING[ \\t]*(,?)[ \\t]*$", newFields + "$1");
+        if (result.equals(template)) {
+            result = template.replaceAll("data\\s+STRING", newFields);
+        }
+        return result;
+    }
+
+    private String stripCsvHeaderIfNeeded(String path, String hasHeader) {
+        if (!"true".equalsIgnoreCase(hasHeader) || path == null || path.isEmpty()) return path;
+        try {
+            java.io.File f = new java.io.File(path);
+            if (!f.exists() || !f.isFile()) return path;
+            java.util.List<String> lines = java.nio.file.Files.readAllLines(f.toPath(), java.nio.charset.StandardCharsets.UTF_8);
+            if (lines.size() <= 1) return path;
+            String tmpPath = path + ".nohdr";
+            java.nio.file.Files.write(java.nio.file.Paths.get(tmpPath), lines.subList(1, lines.size()), java.nio.charset.StandardCharsets.UTF_8);
+            log.info("CSV header stripped: {} -> {} ({} data lines)", path, tmpPath, lines.size() - 1);
+            return tmpPath;
+        } catch (Exception e) {
+            log.warn("Failed to strip CSV header for {}: {}", path, e.getMessage());
+            return path;
+        }
+    }
+
+    private String renderTemplate(String template, Map<String, Object> params, String nodeId) {
+        String result = template;
+        result = result.replace("${id}", sanitize(nodeId));
+        if (params != null) {
+            for (Map.Entry<String, Object> entry : params.entrySet()) {
+                result = result.replace("${" + entry.getKey() + "}", entry.getValue() != null ? entry.getValue().toString() : "");
+            }
+        }
+        return result;
+    }
+
+    private String sanitize(String id) { return id.replaceAll("[^a-zA-Z0-9_]", "_"); }
+
+    private String extractFieldsFromDatagenConfig(String fieldsConfig) {
+        JsonNode fa = tryParseJsonArray(fieldsConfig);
+        if (fa != null && fa.isArray() && fa.size() > 0) {
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < fa.size(); i++) {
+                JsonNode f = fa.get(i);
+                String fn = f.has("name") ? f.get("name").asText() : "field" + i;
+                String ft = f.has("type") ? f.get("type").asText() : "STRING";
+                sb.append("  ").append(fn).append(" ").append(ft);
+                if (i < fa.size()-1) sb.append(",\n");
+            }
+            return sb.toString();
+        }
+        return null;
+    }
+
+
+    private List<String> detectCsvColumns(String path, String delimiter, String hasHeader) {
+        try {
+            java.io.File f = new java.io.File(path);
+            if (!f.exists() || !f.isFile()) return null;
+            String effDelim = autoDetectDelimiter(path, delimiter);
+            try (BufferedReader reader = Files.newBufferedReader(f.toPath(), StandardCharsets.UTF_8)) {
+                String firstLine = reader.readLine();
+                if (firstLine == null || firstLine.trim().isEmpty()) return null;
+                CSVFormat format = CSVFormat.DEFAULT.builder()
+                        .setDelimiter(effDelim.charAt(0))
+                        .setIgnoreEmptyLines(true)
+                        .build();
+                List<CSVRecord> records = CSVParser.parse(firstLine, format).getRecords();
+                if (records.isEmpty()) return null;
+                List<String> names = new ArrayList<>();
+                Set<String> used = new HashSet<>();
+                if ("true".equalsIgnoreCase(hasHeader)) {
+                    for (int i = 0; i < records.get(0).size(); i++) {
+                        String name = records.get(0).get(i).trim();
+                        String clean = sanitizeColumn(name);
+                        if (clean.isEmpty()) clean = "col" + (i + 1);
+                        String base = clean;
+                        int k = 2;
+                        while (used.contains(clean)) { clean = base + "_" + k; k++; }
+                        used.add(clean);
+                        names.add(clean);
+                    }
+                } else {
+                    int n = records.get(0).size();
+                    for (int i = 1; i <= n; i++) names.add("col" + i);
+                }
+                return names;
+            }
+        } catch (Exception e) {
+            log.warn("Failed to detect CSV columns for {}: {}", path, e.getMessage());
+            return null;
+        }
+    }
+
+    private String autoDetectDelimiter(String path, String fallback) {
+        try {
+            java.io.File f = new java.io.File(path);
+            if (!f.exists() || !f.isFile()) return fallback;
+            String firstLine;
+            try (BufferedReader reader = Files.newBufferedReader(f.toPath(), StandardCharsets.UTF_8)) {
+                firstLine = reader.readLine();
+            }
+            if (firstLine == null) return fallback;
+            char[] candidates = {',', '\t', ';', '|'};
+            char best = (fallback != null && !fallback.isEmpty()) ? fallback.charAt(0) : ',';
+            int bestCount = countOccurrences(firstLine, best);
+            for (char c : candidates) {
+                int cnt = countOccurrences(firstLine, c);
+                if (cnt > bestCount) { best = c; bestCount = cnt; }
+            }
+            return String.valueOf(best);
+        } catch (Exception e) {
+            return fallback;
+        }
+    }
+
+    private int countOccurrences(String s, char c) {
+        int n = 0;
+        for (int i = 0; i < s.length(); i++) if (s.charAt(i) == c) n++;
+        return n;
+    }
+
+    private String sanitizeColumn(String name) {
+        String s = name.trim().replaceAll("[^a-zA-Z0-9_\\u4e00-\\u9fa5]", "_");
+        if (s.isEmpty()) s = "col";
+        if (Character.isDigit(s.charAt(0))) s = "_" + s;
+        return s;
+    }
+
+    private String generateCsvInputDDL(String tableName, String path, String delimiter, String hasHeader, String fieldsConfig, List<String> autoCols) {
+        JsonNode fa = tryParseJsonArray(fieldsConfig);
+        StringBuilder ddl = new StringBuilder();
+        ddl.append("CREATE TABLE ").append(tableName).append(" (\n");
+        try {
+            if (fa != null && fa.isArray() && fa.size() > 0) {
+                for (int i = 0; i < fa.size(); i++) {
+                    JsonNode f = fa.get(i);
+                    String fn = f.has("name") ? f.get("name").asText() : "field" + i;
+                    String ft = f.has("type") ? f.get("type").asText() : "STRING";
+                    ddl.append("  `").append(fn).append("` ").append(ft);
+                    if (i < fa.size()-1) ddl.append(",");
+                    ddl.append("\n");
+                }
+            } else if (autoCols != null && !autoCols.isEmpty()) {
+                for (int i = 0; i < autoCols.size(); i++) {
+                    ddl.append("  `").append(autoCols.get(i)).append("` STRING");
+                    if (i < autoCols.size()-1) ddl.append(",");
+                    ddl.append("\n");
+                }
+            } else {
+                ddl.append("  data STRING\n");
+            }
+        } catch (Exception e) {
+            log.warn("Failed to parse csv fieldsConfig: {}", e.getMessage());
+            ddl.append("  data STRING\n");
+        }
+        ddl.append(") WITH (\n");
+        ddl.append("  'connector' = 'filesystem',\n");
+        ddl.append("  'path' = '").append(path).append("',\n");
+        ddl.append("  'format' = 'csv',\n");
+        ddl.append("  'csv.delimiter' = '").append(delimiter).append("',\n");
+        ddl.append("  'csv.ignore-parse-errors' = 'true',\n");
+        ddl.append("  'csv.allow-comments' = 'true'\n");
+        ddl.append(");\n");
+        return ddl.toString();
+    }
+
+    private String generateDatagenDDL(String tableName, String rowsPerSecond, String fieldsConfig) {
+        if (rowsPerSecond == null || rowsPerSecond.isEmpty()) rowsPerSecond = "10";
+        if (fieldsConfig == null || fieldsConfig.isEmpty()) fieldsConfig = "[]";
+        // Handle double-escaped JSON from UI (string inside string)
+        JsonNode fa = tryParseJsonArray(fieldsConfig);
+        StringBuilder ddl = new StringBuilder();
+        ddl.append("CREATE TABLE ").append(tableName).append(" (\n");
+        try {
+            if (fa != null && fa.isArray() && fa.size() > 0) {
+                for (int i = 0; i < fa.size(); i++) {
+                    JsonNode f = fa.get(i);
+                    String fn = f.has("name") ? f.get("name").asText() : "field" + i;
+                    String ft = f.has("type") ? f.get("type").asText() : "STRING";
+                    ddl.append("  ").append(fn).append(" ").append(ft);
+                    if (i < fa.size()-1) ddl.append(",");
+                    ddl.append("\n");
+                }
+            } else {
+                ddl.append("  data STRING\n");
+            }
+        } catch (Exception e) {
+            log.warn("Failed to parse fieldsConfig: {}", e.getMessage());
+            ddl.append("  data STRING\n");
+        }
+        ddl.append(") WITH (\n");
+        ddl.append("  'connector' = 'datagen',\n");
+        ddl.append("  'rows-per-second' = '").append(rowsPerSecond).append("'");
+        if (fa != null && fa.isArray()) {
+            for (int i = 0; i < fa.size(); i++) {
+                JsonNode f = fa.get(i);
+                String fn = f.has("name") ? f.get("name").asText() : "field" + i;
+                if (f.has("kind") && "sequence".equals(f.get("kind").asText())) {
+                    ddl.append(",\n  'fields.").append(fn).append(".kind' = 'sequence'");
+                    if (f.has("start")) ddl.append(",\n  'fields.").append(fn).append(".start' = '").append(f.get("start").asText()).append("'");
+                    if (f.has("end")) ddl.append(",\n  'fields.").append(fn).append(".end' = '").append(f.get("end").asText()).append("'");
+                } else {
+                    if (f.has("min")) ddl.append(",\n  'fields.").append(fn).append(".min' = '").append(f.get("min").asText()).append("'");
+                    if (f.has("max")) ddl.append(",\n  'fields.").append(fn).append(".max' = '").append(f.get("max").asText()).append("'");
+                    if (f.has("length")) ddl.append(",\n  'fields.").append(fn).append(".length' = '").append(f.get("length").asText()).append("'");
+                }
+            }
+        }
+        ddl.append("\n);\n");
+        return ddl.toString();
+    }
+
+    /**
+     * Generate Kafka input DDL (source table reading from Kafka topic)
+     */
+    private String generateKafkaInputDDL(String tableName, String topic, String bootstrapServers, String fieldsConfig) {
+        JsonNode fa = tryParseJsonArray(fieldsConfig);
+        StringBuilder ddl = new StringBuilder();
+        ddl.append("CREATE TABLE ").append(tableName).append(" (\n");
+        try {
+            if (fa != null && fa.isArray() && fa.size() > 0) {
+                for (int i = 0; i < fa.size(); i++) {
+                    JsonNode f = fa.get(i);
+                    String fn = f.has("name") ? f.get("name").asText() : "field" + i;
+                    String ft = f.has("type") ? f.get("type").asText() : "STRING";
+                    ddl.append("  ").append(fn).append(" ").append(ft);
+                    if (i < fa.size() - 1) ddl.append(",");
+                    ddl.append("\n");
+                }
+            } else {
+                ddl.append("  data STRING\n");
+            }
+        } catch (Exception e) {
+            log.warn("Failed to parse Kafka fieldsConfig: {}", e.getMessage());
+            ddl.append("  data STRING\n");
+        }
+        ddl.append(") WITH (\n");
+        ddl.append("  'connector' = 'kafka',\n");
+        ddl.append("  'topic' = '").append(topic).append("',\n");
+        ddl.append("  'properties.bootstrap.servers' = '").append(bootstrapServers).append("',\n");
+        ddl.append("  'properties.group.id' = 'flink-group-").append(tableName).append("',\n");
+        ddl.append("  'scan.startup.mode' = 'earliest-offset',\n");
+        ddl.append("  'format' = 'json',\n");
+        ddl.append("  'json.fail-on-missing-field' = 'false',\n");
+        ddl.append("  'json.ignore-parse-errors' = 'true'\n");
+        ddl.append(");\n");
+        return ddl.toString();
+    }
+
+    /**
+     * Generate Kafka output DDL (sink table writing to Kafka topic)
+     */
+    private String generateKafkaOutputDDL(String tableName, String topic, String bootstrapServers, String sourceFields) {
+        StringBuilder ddl = new StringBuilder();
+        ddl.append("CREATE TABLE ").append(tableName).append(" (\n");
+        if (sourceFields != null && !sourceFields.isEmpty()) {
+            ddl.append(sourceFields).append("\n");
+        } else {
+            ddl.append("  data STRING\n");
+        }
+        ddl.append(") WITH (\n");
+        ddl.append("  'connector' = 'kafka',\n");
+        ddl.append("  'topic' = '").append(topic).append("',\n");
+        ddl.append("  'properties.bootstrap.servers' = '").append(bootstrapServers).append("',\n");
+        ddl.append("  'format' = 'json'\n");
+        ddl.append(");\n");
+
+        return ddl.toString();
+    }
+}
+
+
+
+
+
+

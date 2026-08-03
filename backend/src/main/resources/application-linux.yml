@@ -1,0 +1,42 @@
+﻿spring:
+  application:
+    name: mvp-backend
+
+  datasource:
+    url: jdbc:h2:file:./data/mvpdb
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  h2:
+    console:
+      enabled: true
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    date-format: yyyy-MM-dd HH:mm:ss
+
+flink:
+  home: ./flink-1.18.1
+  cluster:
+    host: localhost
+    port: 8081
+  parallelism:
+    default: 1
+
+plugin:
+  dir: ./plugins
+
+server:
+  port: 8080
+
+spring.servlet.multipart.max-file-size: 50MB
+spring.servlet.multipart.max-request-size: 50MB

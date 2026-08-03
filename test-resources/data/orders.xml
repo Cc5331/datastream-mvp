@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<orders>
+  <order id="ORD000001">
+    <customer>张三</customer>
+    <items>
+      <item sku="NB-001" qty="2">
+        <name>笔记本电脑 Pro</name>
+        <price>6999.00</price>
+      </item>
+      <item sku="MS-002" qty="1">
+        <name>无线鼠标</name>
+        <price>199.00</price>
+      </item>
+    </items>
+    <total>14197.00</total>
+    <status>已完成</status>
+  </order>
+  <order id="ORD000002">
+    <customer>李四</customer>
+    <items>
+      <item sku="KB-001" qty="1">
+        <name>机械键盘</name>
+        <price>899.00</price>
+      </item>
+    </items>
+    <total>899.00</total>
+    <status>待发货</status>
+  </order>
+  <order id="ORD000003">
+    <customer>王五</customer>
+    <items>
+      <item sku="MT-001" qty="1">
+        <name>27寸4K显示器</name>
+        <price>2999.00</price>
+      </item>
+      <item sku="HP-002" qty="1">
+        <name>降噪耳机</name>
+        <price>1299.00</price>
+      </item>
+      <item sku="PD-001" qty="1">
+        <name>移动电源</name>
+        <price>199.00</price>
+      </item>
+    </items>
+    <total>4497.00</total>
+    <status>已完成</status>
+  </order>
+</orders>

@@ -1,0 +1,39 @@
+﻿{
+    "parallelism": 1,
+    "edges": [
+        {
+            "target": "mysql_out",
+            "source": "datagen_in",
+            "id": "e1",
+            "sourcePort": "out",
+            "targetPort": "in"
+        }
+    ],
+    "jobName": "Datagen → MySQL 测试",
+    "nodes": [
+        {
+            "id": "datagen_in",
+            "label": "Datagen 输入",
+            "params": {
+                "fieldsConfig": "[{\"name\":\"id\",\"type\":\"INT\",\"kind\":\"sequence\",\"start\":\"1\",\"end\":\"500\"},{\"name\":\"name\",\"type\":\"STRING\",\"length\":\"8\"},{\"name\":\"age\",\"type\":\"INT\",\"min\":\"18\",\"max\":\"80\"},{\"name\":\"salary\",\"type\":\"DOUBLE\",\"min\":\"5000\",\"max\":\"50000\"}]",
+                "rowsPerSecond": "3"
+            },
+            "type": "datagen_input",
+            "x": 100,
+            "y": 250
+        },
+        {
+            "id": "mysql_out",
+            "label": "MySQL 输出",
+            "params": {
+                "url": "jdbc:mysql://localhost:3306/flink_demo",
+                "table": "user_data",
+                "username": "root",
+                "password": ""
+            },
+            "type": "mysql_output",
+            "x": 450,
+            "y": 250
+        }
+    ]
+}
