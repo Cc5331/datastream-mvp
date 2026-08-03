@@ -36,3 +36,9 @@ Thumbs.db
 test-resources/data/*.nohdr
 test-resources/data/sample_data_converted.csv
 test-resources/data/processed_job_data_*.xlsx
+
+# ===== 比赛资料（不纳入版本库）=====
+任务管理平台.pdf
+数据流任务管理系统题目分析.docx
+完整分析报告+AIAgent增强方案.md
+学习路径.md
