@@ -21,19 +21,21 @@
 
 ### 1.2 当前已实现功能（2026-08 实测可用）
 - **画布**：左侧控件库拖拽控件到画布、端口连线、点选配置参数、Delete 删除、双击删除、保存 / 提交 / 导出 / 导入 JSON、新建画布、清空、Ctrl+S 保存。
-- **控件（11 个内置）**：
-  - 输入：`datagen_input`（模拟数据）、`csv_input`、`excel_input`、`kafka_input`、`mysql_input`（**只有定义，读取逻辑未实现**）
-  - 输出：`csv_output`、`excel_output`、`kafka_output`、`mysql_output`（**写入自动建表**）
-  - 转换：`field_concat`（字段拼接）、`xml_json`（XML 与 JSON 互转，需 UDF jar）
+- **控件（17 个内置）**：
+  - 输入：`datagen_input`（模拟数据）、`csv_input`、`excel_input`、`json_input`（JSON Lines 读取）、`kafka_input`、`mysql_input`（**JDBC 读库 + 字段自动推导**）
+  - 输出：`csv_output`、`excel_output`、`json_output`（JSON Lines 写出 + part 自动合并）、`kafka_output`、`mysql_output`（**写入自动建表**）
+  - 转换：`field_concat`（字段拼接）、`xml_json`（XML 与 JSON 互转，需 UDF jar）、`field_filter`（字段过滤）、`field_rename`（字段改名）、`row_filter`（行过滤）、`json_parse`（JSON 字段解析）
 - **已实测链路**：
   - CSV → CSV / Excel / MySQL（自动建表，中文无乱码）
   - Excel → CSV / MySQL（POI 转临时 CSV 接入）
   - Datagen → CSV / Excel
+  - MySQL → CSV（JDBC 读库，字段自动推导）
+  - JSON → JSON（JSON Lines 读写 + part 合并单文件）
+  - CSV → JSON（field_filter / field_rename / row_filter / json_parse 转换链路）
 - **作业管理**：状态机 DRAFT → SUBMITTED → RUNNING → COMPLETED / FAILED / CANCELLED；Flink 状态每 15s 轮询回写；日志落库可查。
 - **参数面板**：按控件 paramSchema 动态渲染（string / number / boolean / enum / array）。
 
 ### 1.3 未实现 / TODO（后续完善方向）
-- `mysql_input`（读库）：翻译层没有对应分支，拖入后提交会失败，需要补齐 JDBC 读取 + 字段自动推导。
 - Kafka 输入输出：模板存在，但本机未部署 Kafka，未实测。
 - 控件插件热加载（plugin 包）：只有骨架，MVP 实际使用内置注册表。
 - 性能基准测试脚本在 test-resources，未纳入 CI。
@@ -311,5 +313,6 @@
 | 2026-08-03 | MySQL 输出自动建表 MysqlTableCreator（类型映射 + 保留字反引号 + utf8mb4） | 新增 service |
 | 2026-08-02 | 元数据库默认 H2 file；保留 application-mysql.yml 切换方案 | application.yml |
 | 2026-08-03 | 完善 README.md：11 控件清单、API 表、启动方式、Docker、使用流程，修复旧文档代码块损坏 | 仅文档，无代码逻辑变更 |
+| 2026-08-05 | 补充 P0 功能缺口：mysql_input 读库（JDBC 自动推导字段）、json_input/output、field_filter/rename、row_filter、json_parse 转换控件、Kafka fieldsConfig | DagTranslationService / DataInitializer / FlinkJobStatusChecker / 前端注册表 |
 
 > 新改动请在下方继续追加，保持框架可追溯。

@@ -5,7 +5,7 @@
 ## 一、功能特性
 
 - **可视化画布**：AntV X6 拖拽建节点、端口连线、点选配置参数、Delete 键 / 双击删除、保存 / 提交 / 导出 / 导入 JSON、新建画布、清空画布、Ctrl+S 保存。
-- **11 个内置控件**：CSV / Excel / MySQL / Kafka / Datagen 输入输出 + 字段拼接 + XML↔JSON 转换。
+- **17 个内置控件**：CSV / Excel / JSON / MySQL / Kafka / Datagen 输入输出 + 字段拼接、字段过滤、字段改名、行过滤、JSON 解析 + XML↔JSON 转换。
 - **作业管理**：状态机 DRAFT → SUBMITTED → RUNNING → COMPLETED / FAILED / CANCELLED，Flink 状态每 15s 轮询回写，日志落库可查。
 - **动态参数面板**：按控件 paramSchema 自动渲染 string / number / boolean / enum / array 类型参数。
 - **MySQL 自动建表**：MySQL 输出控件自动建表（utf8mb4、类型映射、中文无乱码）。
@@ -35,7 +35,7 @@ mvn spring-boot:run
 
 - 后端地址：http://localhost:8080
 - 元数据库（默认 H2）：http://localhost:8080/h2-console ，JDBC URL `jdbc:h2:file:./data/mvpdb`，用户名 `sa`，密码留空
-- 启动时自动初始化 11 个内置控件
+- 启动时自动初始化 17 个内置控件
 
 #### 3. 启动前端
 
@@ -76,7 +76,7 @@ docker compose ps       :: 查看状态，全部应为 healthy
 7. 到 http://localhost:8081 查看 Flink Job 运行状态；到项目根目录 `output/` 查看输出文件。
 8. 使用 MySQL 输出控件时，提交成功后在 `dataflow` 库中查看自动创建的表。
 
-## 四、内置控件（11 个）
+## 四、内置控件（17 个）
 
 | 分类 | type | 说明 | 状态 |
 |------|------|------|------|
@@ -84,7 +84,13 @@ docker compose ps       :: 查看状态，全部应为 healthy
 | 输入 | csv_input | 读取 CSV 文件 | 可用 |
 | 输入 | excel_input | 读取 .xls / .xlsx（POI） | 可用 |
 | 输入 | kafka_input | 消费 Kafka 主题 | 需自建 Kafka |
-| 输入 | mysql_input | 读取 MySQL 表 | 规划中（仅注册，翻译层未实现） |
+| 输入 | mysql_input | 读取 MySQL 表（JDBC 自动推导字段） | 可用 |
+| 输入 | json_input | 读取 JSON Lines 文件（fieldsConfig 定义 schema） | 可用 |
+| 转换 | field_filter | 只保留指定字段 | 可用 |
+| 转换 | field_rename | 字段重命名（old=new） | 可用 |
+| 转换 | row_filter | 按条件过滤行（SQL WHERE 表达式） | 可用 |
+| 转换 | json_parse | 从 JSON 字段解析多个字段 | 可用 |
+| 输出 | json_output | 写 JSON Lines 文件（part 自动合并为单文件） | 可用 |
 | 转换 | field_concat | 多字段拼接为新字段 | 可用 |
 | 转换 | xml_json | XML ↔ JSON 互转 | 需 UDF jar |
 | 输出 | csv_output | 写 CSV 文件 | 可用 |
