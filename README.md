@@ -83,7 +83,7 @@ docker compose ps       :: 查看状态，全部应为 healthy
 | 输入 | datagen_input | 内置随机数据生成器 | 可用 |
 | 输入 | csv_input | 读取 CSV 文件 | 可用 |
 | 输入 | excel_input | 读取 .xls / .xlsx（POI） | 可用 |
-| 输入 | kafka_input | 消费 Kafka 主题 | 需自建 Kafka |
+| 输入 | kafka_input | 消费 Kafka 主题（支持体验开关 autoStop 自动停止） | 需自建 Kafka |
 | 输入 | mysql_input | 读取 MySQL 表（JDBC 自动推导字段） | 可用 |
 | 输入 | json_input | 读取 JSON Lines 文件（fieldsConfig 定义 schema） | 可用 |
 | 转换 | field_filter | 只保留指定字段 | 可用 |
@@ -97,6 +97,12 @@ docker compose ps       :: 查看状态，全部应为 healthy
 | 输出 | excel_output | 写 .xlsx（临时 CSV + POI 转换） | 可用 |
 | 输出 | kafka_output | 写 Kafka 主题 | 需自建 Kafka |
 | 输出 | mysql_output | 写 MySQL 表（自动建表 utf8mb4） | 可用 |
+
+### Kafka 控件说明
+
+- 本机使用 Docker 版 Kafka：先 `docker compose up -d kafka`。`kafka_input` / `kafka_output` 的 `bootstrapServers` 填宿主机地址 **`localhost:29092`**（容器内互访用 `kafka:9092`）。
+- `kafka_input` 用 `fieldsConfig` 定义消息字段（JSON 数组，如 `[{"name":"key","type":"STRING"}]`），需与 `kafka_output` 写入的 JSON 字段对应。
+- `kafka_input` 支持**体验模式**：勾选 `autoStop`（消费完自动停止）并设置 `stopAfterSeconds`（秒），作业运行超时后自动取消并合并输出文件，方便本地测试。Kafka 是无界流，默认作业不会自然结束。
 
 ## 五、元数据库（H2 / MySQL）
 
