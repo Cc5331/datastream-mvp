@@ -20,6 +20,13 @@ import java.net.http.HttpResponse;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.Set;
 
 @Slf4j
 @Service
@@ -205,7 +212,7 @@ convertExcelOutputsIfNeeded(job);
                 String tempCsvPath = ExcelOutputConverter.getTempCsvPath(actualPath);
 
                 log.info("Converting CSV to Excel for job {}: {} -> {}", job.getId(), tempCsvPath, actualPath);
-                String header = findSourceHeader(dagNode, node.has("id") ? node.get("id").asText() : "");
+                String header = findSourceHeader(dagNode, node.has("id") ? node.get("id").asText() : "", delimiter);
                 boolean success;
                 java.io.File tempDir = new java.io.File(tempCsvPath);
                 if (header != null && !header.trim().isEmpty() && tempDir.isDirectory()) {
@@ -246,51 +253,196 @@ convertExcelOutputsIfNeeded(job);
         }
     }
 
-    private String findSourceHeader(JsonNode dagNode, String targetNodeId) {
+    private String findSourceHeader(JsonNode dagNode, String targetNodeId, String delimiter) {
         try {
             JsonNode edges = dagNode.get("edges");
             JsonNode nodes = dagNode.get("nodes");
             if (edges == null || nodes == null || targetNodeId == null) return null;
-            String srcId = null;
-            for (JsonNode e : edges) {
-                if (e.has("target") && targetNodeId.equals(e.get("target").asText())) { srcId = e.get("source").asText(); break; }
-            }
-            if (srcId == null) return null;
-            for (JsonNode n : nodes) {
-                if (!n.has("id") || !srcId.equals(n.get("id").asText())) continue;
-                String type = n.has("type") ? n.get("type").asText() : "";
-                JsonNode params = n.get("params");
-                if (params == null) return null;
-                String hasHeader = params.has("hasHeader") ? params.get("hasHeader").asText() : "true";
-                if (!"true".equalsIgnoreCase(hasHeader)) return null;
-                if ("csv_input".equals(type)) {
-                    String p = params.has("path") ? params.get("path").asText().trim() : "";
-                    java.io.File f = new java.io.File(p);
-                    if (!f.isFile()) return null;
-                    try (java.io.BufferedReader r = java.nio.file.Files.newBufferedReader(f.toPath(), java.nio.charset.StandardCharsets.UTF_8)) {
-                        return r.readLine();
-                    }
-                } else if ("excel_input".equals(type)) {
-                    String p = params.has("path") ? params.get("path").asText().trim() : "";
-                    String csvPath = p.replaceAll("(?i)\\.(xlsx|xls)$", "") + "_converted.csv";
-                    java.io.File f = new java.io.File(csvPath);
-                    if (!f.isFile()) return null;
-                    try (java.io.BufferedReader r = java.nio.file.Files.newBufferedReader(f.toPath(), java.nio.charset.StandardCharsets.UTF_8)) {
-                        return r.readLine();
-                    }
+            Set<String> transformTypes = Set.of(
+                    "field_filter", "field_rename", "row_filter", "json_parse", "xml_json", "field_concat");
+            // 沿边从输出节点向上收集节点链：输入节点在链尾，transform 依次在前
+            List<String> chain = new ArrayList<>();
+            String cur = targetNodeId;
+            boolean isInput = false;
+            for (int hop = 0; hop < 10 && !isInput; hop++) {
+                String srcId = null;
+                for (JsonNode e : edges) {
+                    if (e.has("target") && cur.equals(e.get("target").asText())) { srcId = e.get("source").asText(); break; }
                 }
-                return null;
+                if (srcId == null) return null;
+                String type = findNodeType(nodes, srcId);
+                if (type == null) return null;
+                chain.add(srcId);
+                if (transformTypes.contains(type)) {
+                    cur = srcId;
+                } else {
+                    isInput = true;
+                }
             }
+            if (chain.isEmpty()) return null;
+            // 输入节点是链尾，先取它的字段列表
+            String inputId = chain.get(chain.size() - 1);
+            List<String> fields = sourceHeaderFields(nodes, inputId, delimiter);
+            if (fields == null) return null;
+            // 再从输入往输出方向应用 transform，得到精确表头
+            for (int i = chain.size() - 2; i >= 0; i--) {
+                fields = applyTransformHeader(nodes, chain.get(i), fields);
+                if (fields == null) return null;
+            }
+            if (fields.isEmpty()) return null;
+            return String.join(delimiter, fields);
         } catch (Exception e) {
             log.warn("findSourceHeader error: {}", e.getMessage());
         }
         return null;
     }
 
-    private void prependSourceHeaderIfNeeded(JsonNode dagNode, String targetNodeId, java.io.File out) {
+    private String findNodeType(JsonNode nodes, String nodeId) {
+        for (JsonNode n : nodes) {
+            if (n.has("id") && nodeId.equals(n.get("id").asText())) {
+                return n.has("type") ? n.get("type").asText() : "";
+            }
+        }
+        return null;
+    }
+
+    private List<String> sourceHeaderFields(JsonNode nodes, String inputId, String delimiter) {
+        try {
+            for (JsonNode n : nodes) {
+                if (!n.has("id") || !inputId.equals(n.get("id").asText())) continue;
+                String type = n.has("type") ? n.get("type").asText() : "";
+                JsonNode params = n.get("params");
+                if (params == null) return null;
+                if ("csv_input".equals(type) || "excel_input".equals(type)) {
+                    String hasHeader = params.has("hasHeader") ? params.get("hasHeader").asText() : "true";
+                    if (!"true".equalsIgnoreCase(hasHeader)) return null;
+                    String p = params.has("path") ? params.get("path").asText().trim() : "";
+                    String filePath = p;
+                    if ("excel_input".equals(type)) {
+                        filePath = p.replaceAll("(?i)\\.(xlsx|xls)$", "") + "_converted.csv";
+                    }
+                    String delim = params.has("delimiter") ? params.get("delimiter").asText().trim() : ",";
+                    java.io.File f = new java.io.File(filePath);
+                    if (!f.isFile()) return null;
+                    try (java.io.BufferedReader r = java.nio.file.Files.newBufferedReader(f.toPath(), java.nio.charset.StandardCharsets.UTF_8)) {
+                        String line = r.readLine();
+                        if (line == null) return null;
+                        return parseHeaderList(line, delim);
+                    }
+                } else if ("mysql_input".equals(type)) {
+                    String url = params.has("url") ? params.get("url").asText().trim() : "";
+                    String table = params.has("table") ? params.get("table").asText().trim() : "";
+                    String username = params.has("username") ? params.get("username").asText().trim() : "root";
+                    String password = params.has("password") ? params.get("password").asText() : "";
+                    if (url.isEmpty() || table.isEmpty()) return null;
+                    return mysqlColumnNameList(url, table, username, password);
+                } else if ("json_input".equals(type) || "datagen_input".equals(type) || "kafka_input".equals(type)) {
+                    String fc = params.has("fieldsConfig") ? params.get("fieldsConfig").asText() : "[]";
+                    return fieldsConfigNameList(fc);
+                }
+                return null;
+            }
+        } catch (Exception e) {
+            log.warn("sourceHeaderFields error: {}", e.getMessage());
+            return null;
+        }
+        return null;
+    }
+
+    private List<String> applyTransformHeader(JsonNode nodes, String transformId, List<String> fields) {
+        for (JsonNode n : nodes) {
+            if (!n.has("id") || !transformId.equals(n.get("id").asText())) continue;
+            String type = n.has("type") ? n.get("type").asText() : "";
+            JsonNode params = n.get("params");
+            if ("field_filter".equals(type)) {
+                String keepRaw = params != null && params.has("fields") ? params.get("fields").asText() : "";
+                List<String> keep = parseHeaderList(keepRaw, ",");
+                if (keep == null) return fields;
+                List<String> out = new ArrayList<>();
+                for (String f : fields) {
+                    if (keep.contains(f)) out.add(f);
+                }
+                return out;
+            } else if ("field_rename".equals(type)) {
+                String mapRaw = params != null && params.has("mappings") ? params.get("mappings").asText() : "";
+                java.util.Map<String, String> m = new java.util.LinkedHashMap<>();
+                for (String part : mapRaw.split(",")) {
+                    String p = part.trim();
+                    if (p.isEmpty()) continue;
+                    int eq = p.indexOf('=');
+                    if (eq > 0 && eq < p.length() - 1) m.put(p.substring(0, eq).trim(), p.substring(eq + 1).trim());
+                }
+                List<String> out = new ArrayList<>();
+                for (String f : fields) out.add(m.getOrDefault(f, f));
+                return out;
+            } else if ("json_parse".equals(type)) {
+                String fc = params != null && params.has("fieldsConfig") ? params.get("fieldsConfig").asText() : "[]";
+                List<String> extra = fieldsConfigNameList(fc);
+                if (extra == null) return fields;
+                List<String> out = new ArrayList<>(fields);
+                for (String e : extra) {
+                    if (!out.contains(e)) out.add(e);
+                }
+                return out;
+            } else if ("field_concat".equals(type)) {
+                String nfn = params != null && params.has("newFieldName") ? params.get("newFieldName").asText().trim() : "concat_field";
+                if (nfn.isEmpty()) return fields;
+                List<String> out = new ArrayList<>(fields);
+                if (!out.contains(nfn)) out.add(nfn);
+                return out;
+            }
+            // row_filter / xml_json：schema 透传
+            return fields;
+        }
+        return fields;
+    }
+
+    private List<String> parseHeaderList(String line, String delimiter) {
+        if (line == null || line.isEmpty()) return null;
+        List<String> out = new ArrayList<>();
+        for (String part : line.split(java.util.regex.Pattern.quote(delimiter))) {
+            String t = part.trim();
+            if (t.length() >= 2 && t.startsWith("\"") && t.endsWith("\"")) t = t.substring(1, t.length() - 1);
+            if (!t.isEmpty()) out.add(t);
+        }
+        return out.isEmpty() ? null : out;
+    }
+
+    private List<String> fieldsConfigNameList(String fieldsConfig) {
+        try {
+            if (fieldsConfig == null || fieldsConfig.trim().isEmpty()) return null;
+            JsonNode arr = objectMapper.readTree(fieldsConfig);
+            if (arr == null || !arr.isArray() || arr.size() == 0) return null;
+            List<String> names = new ArrayList<>();
+            for (JsonNode f : arr) {
+                if (f.has("name")) names.add(f.get("name").asText());
+            }
+            return names.isEmpty() ? null : names;
+        } catch (Exception e) {
+            log.warn("fieldsConfig header parse error: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private List<String> mysqlColumnNameList(String url, String table, String username, String password) {
+        String quoted = "\u0060" + table.replace("\u0060", "\u0060\u0060") + "\u0060";
+        try (Connection conn = DriverManager.getConnection(url, username, password);
+             Statement st = conn.createStatement();
+             ResultSet rs = st.executeQuery("SELECT * FROM " + quoted + " LIMIT 0")) {
+            ResultSetMetaData md = rs.getMetaData();
+            List<String> names = new ArrayList<>();
+            for (int i = 1; i <= md.getColumnCount(); i++) names.add(md.getColumnLabel(i));
+            return names.isEmpty() ? null : names;
+        } catch (Exception e) {
+            log.warn("mysql header query error: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private void prependSourceHeaderIfNeeded(JsonNode dagNode, String targetNodeId, String delimiter, java.io.File out) {
         try {
             if (!out.exists() || out.length() == 0) return;
-            String header = findSourceHeader(dagNode, targetNodeId);
+            String header = findSourceHeader(dagNode, targetNodeId, delimiter);
             if (header == null || header.trim().isEmpty()) return;
             String firstLine;
             try (java.io.BufferedReader r = java.nio.file.Files.newBufferedReader(out.toPath(), java.nio.charset.StandardCharsets.UTF_8)) {
@@ -345,7 +497,8 @@ convertExcelOutputsIfNeeded(job);
                 java.io.File out = new java.io.File(actualPath);
                 if (out.exists()) out.delete();
                 java.nio.file.Files.write(out.toPath(), sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                prependSourceHeaderIfNeeded(dagNode, node.has("id") ? node.get("id").asText() : "", out);
+                String delimiter = params.has("delimiter") ? params.get("delimiter").asText().trim() : ",";
+                prependSourceHeaderIfNeeded(dagNode, node.has("id") ? node.get("id").asText() : "", delimiter, out);
 
                 JobLog l = new JobLog();
                 l.setJobId(job.getId()); l.setLevel("INFO");
