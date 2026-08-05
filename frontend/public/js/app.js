@@ -33,6 +33,14 @@ const api = {
     async cancelJob(id) {
         await axios.post(`${API_BASE}/jobs/${id}/cancel`);
     },
+    async copyJob(id) {
+        const res = await axios.post(`${API_BASE}/jobs/${id}/copy`);
+        return res.data;
+    },
+    async updateSchedule(id, payload) {
+        const res = await axios.post(`${API_BASE}/jobs/${id}/schedule`, payload);
+        return res.data;
+    },
     async getLogs(jobId) {
         const res = await axios.get(`${API_BASE}/jobs/${jobId}/logs`);
         return res.data;
@@ -66,6 +74,10 @@ const app = createApp({
         const showLogs = ref(false);
         const jobLogs = ref([]);
         const jobErrors = ref({});
+        const scheduleDialogVisible = ref(false);
+        const scheduleJob = ref(null);
+        const scheduleEnabled = ref(false);
+        const cronExpression = ref('');
 
         // 选中节点状态
         const selectedNode = ref(null);
@@ -628,7 +640,46 @@ const app = createApp({
             }
         }
 
-        // 查看作业日志
+        // 复制作业
+        async function copyJobById(id) {
+            try {
+                const copied = await api.copyJob(id);
+                ElMessage.success('已复制为新作业: ' + copied.name);
+                await loadJobs();
+            } catch (err) {
+                ElMessage.error('复制失败: ' + (err.response?.data?.message || err.message));
+            }
+        }
+
+        // 打开调度设置对话框
+        function openScheduleDialog(row) {
+            scheduleJob.value = row;
+            scheduleEnabled.value = !!row.scheduleEnabled;
+            cronExpression.value = row.cronExpression || '';
+            scheduleDialogVisible.value = true;
+        }
+
+        // 保存调度设置
+        async function saveSchedule() {
+            if (!scheduleJob.value) return;
+            if (scheduleEnabled.value && !cronExpression.value.trim()) {
+                ElMessage.warning('启用定时调度必须填写 cron 表达式');
+                return;
+            }
+            try {
+                const saved = await api.updateSchedule(scheduleJob.value.id, {
+                    scheduleEnabled: scheduleEnabled.value,
+                    cronExpression: cronExpression.value.trim()
+                });
+                ElMessage.success('调度设置已保存');
+                scheduleDialogVisible.value = false;
+                await loadJobs();
+            } catch (err) {
+                ElMessage.error('保存失败: ' + (err.response?.data?.message || err.message));
+            }
+        }
+
+        // 查看作业日志
         async function viewLogs(row) {
             if (!row || !row.id) {
                 ElMessage.warning('作业不存在');
@@ -681,7 +732,9 @@ const app = createApp({
             selectedNode, nodeParams, nodeParamSchema, jobErrors,
             controlsByCategory, onDragStart, saveDag, submitJob,
             exportDag, importDagTrigger, importDag, clearCanvas, newCanvas, applyParams,
-            openJob, submitJobById, deleteJob, viewLogs, statusTag
+            openJob, submitJobById, deleteJob, viewLogs, statusTag,
+            copyJobById, openScheduleDialog, saveSchedule,
+            scheduleDialogVisible, scheduleJob, scheduleEnabled, cronExpression
         };
     }
 });

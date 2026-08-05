@@ -11,4 +11,5 @@ public interface JobDefinitionRepository extends JpaRepository<JobDefinition, Lo
     List<JobDefinition> findByStatusOrderByUpdatedAtDesc(JobDefinition.JobStatus status);
     List<JobDefinition> findAllByOrderByUpdatedAtDesc();
     List<JobDefinition> findByStatusIn(List<JobDefinition.JobStatus> statuses);
+    List<JobDefinition> findByScheduleEnabledTrue();
 }

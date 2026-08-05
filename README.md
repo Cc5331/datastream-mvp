@@ -7,9 +7,11 @@
 - **可视化画布**：AntV X6 拖拽建节点、端口连线、点选配置参数、Delete 键 / 双击删除、保存 / 提交 / 导出 / 导入 JSON、新建画布、清空画布、Ctrl+S 保存。
 - **17 个内置控件**：CSV / Excel / JSON / MySQL / Kafka / Datagen 输入输出 + 字段拼接、字段过滤、字段改名、行过滤、JSON 解析 + XML↔JSON 转换。
 - **作业管理**：状态机 DRAFT → SUBMITTED → RUNNING → COMPLETED / FAILED / CANCELLED，Flink 状态每 15s 轮询回写，日志落库可查。
+- **作业复制 / 定时调度**：一键复制作业（名称追加「（副本）」，状态重置 DRAFT）；作业可配置 cron 表达式定时自动提交（JobScheduler 每 30s 扫描，运行中不重复提交）。
 - **动态参数面板**：按控件 paramSchema 自动渲染 string / number / boolean / enum / array 类型参数。
 - **MySQL 自动建表**：MySQL 输出控件自动建表（utf8mb4、类型映射、中文无乱码）。
-- **已实测链路**：CSV → CSV / Excel / MySQL；Excel → CSV / MySQL；Datagen → CSV / Excel。
+- **已实测链路**：CSV → CSV / Excel / MySQL；Excel → CSV / MySQL；Datagen → CSV / Excel；JSON → JSON；CSV → JSON（字段过滤 / 改名 / 行过滤 / JSON 解析）；CSV → Kafka → CSV；MySQL → CSV。
+- **性能基准**：`test-resources/benchmark.py` 真实提交 Flink 作业产出报告（见「性能基准测试」章节）。
 
 ## 二、快速启动
 
@@ -172,6 +174,10 @@ curl http://localhost:8083/v1/info  :: SQL Gateway 信息
 
 ```bat
 stop-docker.bat                :: 停止容器（保留数据卷）
+
+
+> 已实测（2026-08）：`docker compose build` 构建 3 个镜像成功；全容器启动后通过 `curl localhost:8080/api/jobs` 创建 CSV 输入（`/data/sales.csv`）→ CSV 输出（`/output/docker_verify.csv`）作业，提交到容器内 Flink 运行并 COMPLETED，输出文件合并落盘到宿主 `output/`。
+> 注意：SQL Gateway 需通过 `rest.address: jobmanager` 指向 JobManager；健康检查使用 `bash -c`（镜像内 `/bin/sh` 为 dash，不支持 `/dev/tcp`），以上已固化在 `docker-compose.yml`。
 docker compose down -v         :: 停止并删除数据卷
 ```
 
@@ -208,6 +214,8 @@ docker compose down -v         :: 停止并删除数据卷
 | DELETE | /api/jobs/{id} | 删除作业 |
 | POST | /api/jobs/{id}/submit | 提交作业到 Flink |
 | POST | /api/jobs/{id}/cancel | 取消作业 |
+| POST | /api/jobs/{id}/copy | 复制作业（新作业状态 DRAFT，名称追加「（副本）」） |
+| POST | /api/jobs/{id}/schedule | 设置定时调度（body: `{scheduleEnabled, cronExpression}`，启用时自动校验 cron 并计算 nextFireTime） |
 | GET | /api/jobs/{id}/logs | 作业日志 |
 | GET | /api/jobs/{id}/preview | DAG 翻译预览 |
 
@@ -269,6 +277,25 @@ public class RedisLookupPlugin implements DataStreamPlugin {
 | Apache Flink | 1.18.1 Standalone（JobManager 8081 / SQL Gateway 8083） |
 | 前端 | Vue 3 + Element Plus 2.9.1 + AntV X6 3.1.7 + axios |
 | 其他 | Lombok、Jackson、Apache Commons CSV、Apache POI（Excel） |
+
+## 性能基准测试
+
+`test-resources/benchmark.py` 会通过后端 REST 创建作业 → 提交真实 Flink 作业 → 轮询状态统计耗时与吞吐，并采集 CPU / 内存利用率，最后生成 `test-results/benchmark_report.md`。
+
+```bat
+python test-resources/benchmark.py
+```
+
+前置条件：后端 8080、Flink 8081 已启动（psutil 未安装时资源列显示 `-`，不影响结果）。
+
+实测结果（2026-08-05，32 vCPU / 16G RAM，CSV 透传）：
+
+| 数据量 | 并行度 1 | 并行度 2 | 并行度 4 |
+|--------|---------|---------|---------|
+| 100,000 行 | 11,628 行/s | 18,774 行/s | 49,032 行/s |
+| 1,000,000 行 | 76,139 行/s | 112,015 行/s | 217,795 行/s |
+
+完整报告见 `test-results/benchmark_report.md`。
 
 ## 十一、相关文档
 

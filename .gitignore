@@ -42,3 +42,5 @@ test-resources/data/processed_job_data_*.xlsx
 数据流任务管理系统题目分析.docx
 完整分析报告+AIAgent增强方案.md
 学习路径.md
+# ===== 基准测试输出 =====
+test-results/benchmark-output/

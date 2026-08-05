@@ -45,6 +45,10 @@ public class JobDefinition {
     private LocalDateTime submittedAt;
     private LocalDateTime completedAt;
 
+    private String cronExpression;              // 定时调度 cron 表达式（如 0 */5 * * * ?）
+    private Boolean scheduleEnabled = false;    // 是否启用定时调度
+    private LocalDateTime nextFireTime;         // 下次调度触发时间
+
     public enum JobStatus {
         DRAFT, SUBMITTED, RUNNING, COMPLETED, FAILED, CANCELLED
     }

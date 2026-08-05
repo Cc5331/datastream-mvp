@@ -48,10 +48,18 @@ public class JobService {
 
     public JobDefinition update(Long id, JobDefinition update) {
         JobDefinition existing = findById(id);
-        existing.setName(update.getName());
-        existing.setDescription(update.getDescription());
-        existing.setDagJson(update.getDagJson());
-        existing.setParallelism(update.getParallelism());
+        if (update.getName() != null) existing.setName(update.getName());
+        if (update.getDescription() != null) existing.setDescription(update.getDescription());
+        if (update.getDagJson() != null) existing.setDagJson(update.getDagJson());
+        if (update.getParallelism() != null) existing.setParallelism(update.getParallelism());
+        if (update.getScheduleEnabled() != null) existing.setScheduleEnabled(update.getScheduleEnabled());
+        if (update.getCronExpression() != null && !update.getCronExpression().isBlank()) {
+            existing.setCronExpression(update.getCronExpression().trim());
+            existing.setNextFireTime(computeNextFireTime(update.getCronExpression()));
+        } else if (update.getCronExpression() != null && update.getCronExpression().isBlank()) {
+            existing.setCronExpression(null);
+            existing.setNextFireTime(null);
+        }
         existing.setUpdatedAt(LocalDateTime.now());
         return jobRepo.save(existing);
     }
@@ -106,6 +114,62 @@ public class JobService {
         jobRepo.save(job);
         addLog(id, "INFO", "作业已取消，Flink Job ID: " + job.getFlinkJobId());
     }
+    /**
+     * 复制作业（深拷贝 DAG，状态重置为 DRAFT，名称追加（副本），默认不继承调度）
+     */
+    public JobDefinition copy(Long id) {
+        JobDefinition source = findById(id);
+        JobDefinition copy = new JobDefinition();
+        copy.setName(source.getName() + "（副本）");
+        copy.setDescription(source.getDescription());
+        copy.setDagJson(source.getDagJson());
+        copy.setParallelism(source.getParallelism());
+        copy.setCronExpression(source.getCronExpression());
+        copy.setScheduleEnabled(Boolean.FALSE);
+        copy.setNextFireTime(null);
+        copy.setStatus(JobDefinition.JobStatus.DRAFT);
+        copy.setCreatedAt(LocalDateTime.now());
+        copy.setUpdatedAt(LocalDateTime.now());
+        JobDefinition saved = jobRepo.save(copy);
+        addLog(saved.getId(), "INFO", "作业已复制，来源作业 ID=" + id);
+        return saved;
+    }
+
+    /**
+     * 更新定时调度配置（启用开关 + cron 表达式），并计算下次触发时间
+     */
+    public JobDefinition updateSchedule(Long id, Boolean enabled, String cronExpression) {
+        JobDefinition job = findById(id);
+        boolean enable = enabled != null && enabled;
+        if (enable) {
+            if (cronExpression == null || cronExpression.isBlank()) {
+                throw new RuntimeException("启用定时调度必须填写 cron 表达式");
+            }
+            job.setCronExpression(cronExpression.trim());
+            job.setNextFireTime(computeNextFireTime(cronExpression));
+        } else {
+            if (cronExpression != null && !cronExpression.isBlank()) {
+                job.setCronExpression(cronExpression.trim());
+            }
+            job.setNextFireTime(null);
+        }
+        job.setScheduleEnabled(enable);
+        job.setUpdatedAt(LocalDateTime.now());
+        JobDefinition saved = jobRepo.save(job);
+        addLog(id, "INFO", "定时调度已" + (enable ? "启用: " + job.getCronExpression() : "停用"));
+        return saved;
+    }
+
+    private LocalDateTime computeNextFireTime(String cronExpression) {
+        if (cronExpression == null || cronExpression.isBlank()) return null;
+        try {
+            return org.springframework.scheduling.support.CronExpression.parse(cronExpression.trim())
+                    .next(LocalDateTime.now());
+        } catch (IllegalArgumentException e) {
+            throw new RuntimeException("无效的 cron 表达式: " + cronExpression + "（" + e.getMessage() + "）");
+        }
+    }
+
     public List<JobLog> getLogs(Long jobId) {
         return logRepo.findByJobIdOrderByTimestampDesc(jobId);
     }

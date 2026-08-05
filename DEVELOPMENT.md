@@ -33,12 +33,12 @@
   - JSON → JSON（JSON Lines 读写 + part 合并单文件）
   - CSV → JSON（field_filter / field_rename / row_filter / json_parse 转换链路）
   - CSV → Kafka → CSV（Docker Kafka 3.8 实测：生产者写 3000 条 JSON 消息，消费者读回写 CSV，中文正常）
-- **作业管理**：状态机 DRAFT → SUBMITTED → RUNNING → COMPLETED / FAILED / CANCELLED；Flink 状态每 15s 轮询回写；日志落库可查。
+- **作业管理**：状态机 DRAFT → SUBMITTED → RUNNING → COMPLETED / FAILED / CANCELLED；Flink 状态每 15s 轮询回写；日志落库可查；一键复制作业（名称追加「（副本）」）；按 cron 定时自动提交（JobScheduler 每 30s 扫描，运行中不重复提交）。
 - **参数面板**：按控件 paramSchema 动态渲染（string / number / boolean / enum / array）。
 
 ### 1.3 未实现 / TODO（后续完善方向）
 - 控件插件热加载（plugin 包）：只有骨架，MVP 实际使用内置注册表。
-- 性能基准测试脚本在 test-resources，未纳入 CI。
+- 性能基准测试脚本已改造为真实提交 Flink 作业并产出报告（test-results/benchmark_report.md），暂未纳入 CI。
 
 ---
 
@@ -297,8 +297,8 @@
 1. **补齐 MySQL Input（读库）**——框架已有占位，收益最大。
 2. **更多转换控件**（字段过滤、字段改名、行过滤、JSON 解析）——按 7.1 流程。
 3. **文件格式扩展**（JSON / Parquet / 多 Sheet Excel）——按 7.3 流程。
-4. **作业级增强**：定时调度、版本历史、复制作业。
-5. **性能基准**：完善 test-resources/benchmark.py，产出 8vCPU 报告。
+4. **作业级增强**：✅ 定时调度、✅ 复制作业（已实现）；版本历史待做。
+5. **性能基准**：✅ 已完成（真实提交 Flink 作业，产出 8vCPU 目标环境报告，实测机器 32 vCPU）。
 6. **Docker 全容器化收尾**：docker-compose.yml 已有雏形，补齐后端/前端镜像与一键脚本。
 7. **UDF 扩展**：udf/ 工程追加自定义函数，翻译层 CREATE FUNCTION 注入。
 
@@ -318,5 +318,8 @@
 | 2026-08-05 | 修复 MySQL/JSON/Datagen/Kafka 输入转 CSV/Excel 缺失字段名表头：findSourceHeader 支持 JDBC 列名与 fieldsConfig，并沿 transform 链精确合成表头（field_filter/field_rename/json_parse/field_concat） | FlinkJobStatusChecker |
 | 2026-08-05 | Kafka 链路实测：docker compose 启动 Kafka 3.8（宿主机 29092），CSV→Kafka 输出 3000 条 JSON 消息、Kafka→CSV 消费回写验证通过；注意 bootstrapServers 用宿主机地址 localhost:29092 | 仅验证 + 文档 |
 | 2026-08-05 | Kafka 输入体验开关：kafka_input 新增 autoStop/stopAfterSeconds，运行超时后自动取消 Flink 作业并合并输出；合并逻辑兼容 .part-*.inprogress（cancel 后也能出完整文件） | DataInitializer / 前端注册表 / FlinkJobStatusChecker |
+| 2026-08-05 | 性能基准：test-resources/benchmark.py 改造为真实提交（POST /api/jobs 建作业 → submit → 15s 轮询 → completedAt-submittedAt 算吞吐），psutil 可选采集 CPU/内存，报告输出 test-results/benchmark_report.md；实测 100k/1M 行 × 并行度 1/2/4 | test-resources/benchmark.py / test-results/ |
+| 2026-08-05 | Docker 全链路验证：修复 compose 健康检查（镜像 /bin/sh 为 dash 不支持 /dev/tcp，改 bash -c）、SQL Gateway rest.address 指向 jobmanager；build+up 全容器启动并跑通 CSV→CSV 真实链路 | docker-compose.yml / docker/ |
+| 2026-08-05 | 作业复制 + 定时调度：POST /api/jobs/{id}/copy 深拷贝 DAG 重置 DRAFT；JobDefinition 新增 cronExpression/scheduleEnabled/nextFireTime，JobScheduler 每 30s 扫描按 cron 提交（运行中不重复、失败推进下次）；前端作业列表新增复制/调度按钮与调度对话框 | JobController / JobService / JobScheduler / JobDefinition / JobDefinitionRepository / 前端 app.js + index.html |
 
 > 新改动请在下方继续追加，保持框架可追溯。

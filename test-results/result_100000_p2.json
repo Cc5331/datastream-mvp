@@ -1,0 +1,10 @@
+{
+  "data_size": 100000,
+  "parallelism": 2,
+  "rows_processed": 100000,
+  "elapsed_seconds": 5.33,
+  "throughput_rows_per_sec": 18774.26,
+  "input_size_mb": 8.73,
+  "output_size_mb": 8.83,
+  "timestamp": "2026-08-05T10:39:51.852041"
+}

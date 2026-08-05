@@ -50,6 +50,21 @@ public class JobController {
         return jobService.submit(id);
     }
 
+    @PostMapping("/{id}/copy")
+    public JobDefinition copy(@PathVariable Long id) {
+        return jobService.copy(id);
+    }
+
+    @PostMapping("/{id}/schedule")
+    public JobDefinition schedule(@PathVariable Long id, @RequestBody ScheduleRequest request) {
+        return jobService.updateSchedule(id, request.scheduleEnabled(), request.cronExpression());
+    }
+
+    /**
+     * 定时调度配置请求体
+     */
+    public record ScheduleRequest(Boolean scheduleEnabled, String cronExpression) {}
+
     @PostMapping("/{id}/cancel")
     public ResponseEntity<Void> cancel(@PathVariable Long id) {
         jobService.cancel(id);

@@ -165,11 +165,19 @@
                             </template>
                         </el-table-column>
                         <el-table-column prop="updatedAt" label="更新时间" width="170"></el-table-column>
-                        <el-table-column label="操作" width="250">
+                        <el-table-column label="调度" width="130">
+                            <template #default="scope">
+                                <el-tag v-if="scope.row.scheduleEnabled" type="warning" size="small">{{ scope.row.cronExpression || '已启用' }}</el-tag>
+                                <span v-else style="color:#909399; font-size:12px;">-</span>
+                            </template>
+                        </el-table-column>
+                        <el-table-column label="操作" width="330">
                             <template #default="scope">
                                 <el-button size="small" type="primary" @click="openJob(scope.row)">编辑</el-button>
                                 <el-button size="small" type="success" @click="submitJobById(scope.row.id)"
                                     :disabled="scope.row.status==='RUNNING'||scope.row.status==='SUBMITTED'">运行</el-button>
+                                <el-button size="small" @click="copyJobById(scope.row.id)">复制</el-button>
+                                <el-button size="small" type="warning" @click="openScheduleDialog(scope.row)">调度</el-button>
                                 <el-button size="small" @click="viewLogs(scope.row)">日志</el-button>
                                 <el-button size="small" type="danger" @click="deleteJob(scope.row.id)">删除</el-button>
                             </template>
@@ -232,6 +240,25 @@
                 </div>
                 <div v-if="jobLogs.length === 0" style="color: #666;">暂无日志</div>
             </div>
+        </el-dialog>
+
+        <!-- 定时调度对话框 -->
+        <el-dialog v-model="scheduleDialogVisible" title="定时调度" width="480px">
+            <el-form label-width="100px">
+                <el-form-item label="目标作业">
+                    <span>{{ scheduleJob ? scheduleJob.name : '' }}</span>
+                </el-form-item>
+                <el-form-item label="启用调度">
+                    <el-switch v-model="scheduleEnabled"></el-switch>
+                </el-form-item>
+                <el-form-item label="Cron 表达式">
+                    <el-input v-model="cronExpression" placeholder="例如 0 */5 * * * ?（每 5 分钟一次）"></el-input>
+                </el-form-item>
+                <el-form-item>
+                    <el-button type="primary" @click="saveSchedule">保存</el-button>
+                    <el-button @click="scheduleDialogVisible = false">取消</el-button>
+                </el-form-item>
+            </el-form>
         </el-dialog>
     </div>
 
