@@ -317,5 +317,6 @@
 | 2026-08-05 | 修复前端「导入 JSON」失效：index.html 文件 input 缺少 @change="importDag" 绑定 | 前端 index.html |
 | 2026-08-05 | 修复 MySQL/JSON/Datagen/Kafka 输入转 CSV/Excel 缺失字段名表头：findSourceHeader 支持 JDBC 列名与 fieldsConfig，并沿 transform 链精确合成表头（field_filter/field_rename/json_parse/field_concat） | FlinkJobStatusChecker |
 | 2026-08-05 | Kafka 链路实测：docker compose 启动 Kafka 3.8（宿主机 29092），CSV→Kafka 输出 3000 条 JSON 消息、Kafka→CSV 消费回写验证通过；注意 bootstrapServers 用宿主机地址 localhost:29092 | 仅验证 + 文档 |
+| 2026-08-05 | Kafka 输入体验开关：kafka_input 新增 autoStop/stopAfterSeconds，运行超时后自动取消 Flink 作业并合并输出；合并逻辑兼容 .part-*.inprogress（cancel 后也能出完整文件） | DataInitializer / 前端注册表 / FlinkJobStatusChecker |
 
 > 新改动请在下方继续追加，保持框架可追溯。

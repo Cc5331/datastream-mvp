@@ -37,6 +37,7 @@ public class FlinkJobStatusChecker {
     private final JobLogRepository logRepo;
     private final ObjectMapper objectMapper;
     private final ExcelOutputConverter excelOutputConverter;
+    private final DagTranslationService dagTranslationService;
 
     @Value("${flink.cluster.host:localhost}")
     private String flinkHost;
@@ -102,6 +103,7 @@ public class FlinkJobStatusChecker {
             for (JobDefinition job : activeJobs) {
                 String flinkJobId = job.getFlinkJobId();
                 if (flinkJobId == null) continue;
+                if (autoStopKafkaJobIfNeeded(job)) continue;
 
                 boolean needsResolution = flinkJobId.startsWith("flink-job-") || flinkJobId.startsWith("mock-") || flinkJobId.startsWith("sql-submitted-");
                 if (needsResolution && !newJobCandidates.isEmpty()) {
@@ -149,6 +151,11 @@ public class FlinkJobStatusChecker {
                         l.setTimestamp(LocalDateTime.now());
                         logRepo.save(l);
                         if (localStatus == JobStatus.COMPLETED) {
+                            convertExcelOutputsIfNeeded(job);
+                            mergeCsvOutputsIfNeeded(job);
+                            mergeJsonOutputsIfNeeded(job);
+                        }
+                        if (localStatus == JobStatus.CANCELLED) {
                             convertExcelOutputsIfNeeded(job);
                             mergeCsvOutputsIfNeeded(job);
                             mergeJsonOutputsIfNeeded(job);
@@ -216,7 +223,7 @@ convertExcelOutputsIfNeeded(job);
                 boolean success;
                 java.io.File tempDir = new java.io.File(tempCsvPath);
                 if (header != null && !header.trim().isEmpty() && tempDir.isDirectory()) {
-                    java.io.File[] parts = tempDir.listFiles((d, n) -> n.startsWith("part-"));
+                    java.io.File[] parts = tempDir.listFiles((d, n) -> n.startsWith("part-") || n.startsWith(".part-"));
                     if (parts != null && parts.length > 0) {
                         java.util.Arrays.sort(parts);
                         StringBuilder hdrSb = new StringBuilder(header).append("\n");
@@ -484,7 +491,7 @@ convertExcelOutputsIfNeeded(job);
                     log.warn("CSV output temp dir not found for job {}: {}", job.getId(), tempDir);
                     continue;
                 }
-                java.io.File[] parts = dir.listFiles((d, n) -> n.startsWith("part-"));
+                java.io.File[] parts = dir.listFiles((d, n) -> n.startsWith("part-") || n.startsWith(".part-"));
                 if (parts == null || parts.length == 0) {
                     log.warn("No part files in temp dir for job {}: {}", job.getId(), tempDir);
                     continue;
@@ -509,6 +516,60 @@ convertExcelOutputsIfNeeded(job);
             }
         } catch (Exception e) {
             log.warn("Failed to merge csv outputs for job {}: {}", job.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * 体验模式：Kafka 输入作业（autoStop=true）运行超过 stopAfterSeconds 后自动停止，
+     * 并合并输出文件，方便本地测试查看结果（Kafka 是无界流，不会自然结束）。
+     */
+    private boolean autoStopKafkaJobIfNeeded(JobDefinition job) {
+        try {
+            if (job.getStatus() != JobStatus.RUNNING && job.getStatus() != JobStatus.SUBMITTED) return false;
+            String flinkJobId = job.getFlinkJobId();
+            if (flinkJobId == null || flinkJobId.startsWith("mock-") || flinkJobId.startsWith("flink-job-")) return false;
+            String dagJson = job.getDagJson();
+            if (dagJson == null || dagJson.isEmpty()) return false;
+            JsonNode dagNode = objectMapper.readTree(dagJson);
+            JsonNode nodes = dagNode.get("nodes");
+            if (nodes == null || !nodes.isArray()) return false;
+            boolean kafkaAutoStop = false;
+            long stopAfterSeconds = 30;
+            for (JsonNode node : nodes) {
+                if (!"kafka_input".equals(node.has("type") ? node.get("type").asText() : "")) continue;
+                JsonNode params = node.get("params");
+                if (params == null) continue;
+                JsonNode as = params.get("autoStop");
+                if (as != null && as.asBoolean(false)) {
+                    kafkaAutoStop = true;
+                    JsonNode ss = params.get("stopAfterSeconds");
+                    if (ss != null && ss.canConvertToLong()) stopAfterSeconds = Math.max(1, ss.asLong());
+                }
+            }
+            if (!kafkaAutoStop) return false;
+            java.time.LocalDateTime submitTime = job.getSubmittedAt() != null ? job.getSubmittedAt() : job.getUpdatedAt();
+            if (submitTime == null) return false;
+            long elapsed = java.time.Duration.between(submitTime, LocalDateTime.now()).getSeconds();
+            if (elapsed < stopAfterSeconds) return false;
+
+            log.info("Kafka auto-stop: job {} ran {}s >= {}s, cancelling Flink job {}", job.getId(), elapsed, stopAfterSeconds, flinkJobId);
+            dagTranslationService.cancelFlinkJob(flinkJobId);
+            job.setStatus(JobStatus.CANCELLED);
+            job.setUpdatedAt(LocalDateTime.now());
+            job.setCompletedAt(LocalDateTime.now());
+            jobRepo.save(job);
+            JobLog l = new JobLog();
+            l.setJobId(job.getId()); l.setLevel("INFO");
+            l.setMessage("体验模式自动停止：Kafka 输入作业运行 " + elapsed + "s，已取消并合并输出");
+            l.setTimestamp(LocalDateTime.now());
+            logRepo.save(l);
+            convertExcelOutputsIfNeeded(job);
+            mergeCsvOutputsIfNeeded(job);
+            mergeJsonOutputsIfNeeded(job);
+            return true;
+        } catch (Exception e) {
+            log.warn("autoStopKafkaJobIfNeeded error for job {}: {}", job.getId(), e.getMessage());
+            return false;
         }
     }
 
@@ -591,7 +652,7 @@ convertExcelOutputsIfNeeded(job);
                     log.warn("JSON output temp dir not found for job {}: {}", job.getId(), tempDir);
                     continue;
                 }
-                java.io.File[] parts = dir.listFiles((d, n) -> n.startsWith("part-"));
+                java.io.File[] parts = dir.listFiles((d, n) -> n.startsWith("part-") || n.startsWith(".part-"));
                 if (parts == null || parts.length == 0) {
                     log.warn("No part files in temp dir for job {}: {}", job.getId(), tempDir);
                     continue;

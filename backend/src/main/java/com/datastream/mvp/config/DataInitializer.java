@@ -77,7 +77,7 @@ public class DataInitializer implements CommandLineRunner {
         // Kafka Input
         createControl("kafka_input", "Kafka Input", "input",
                 "Read Kafka",
-                "{\"type\":\"object\",\"properties\":{\"topic\":{\"type\":\"string\",\"title\":\"Topic\",\"default\":\"test-topic\"},\"bootstrapServers\":{\"type\":\"string\",\"title\":\"Bootstrap\",\"default\":\"localhost:9092\"},\"fieldsConfig\":{\"type\":\"string\",\"title\":\"Fields config (JSON)\",\"default\":\"[{\\\"name\\\":\\\"key\\\",\\\"type\\\":\\\"STRING\\\"},{\\\"name\\\":\\\"value\\\",\\\"type\\\":\\\"STRING\\\"}]\"}},\"required\":[\"topic\",\"bootstrapServers\"]}",
+                "{\"type\":\"object\",\"properties\":{\"topic\":{\"type\":\"string\",\"title\":\"Topic\",\"default\":\"test-topic\"},\"bootstrapServers\":{\"type\":\"string\",\"title\":\"Bootstrap\",\"default\":\"localhost:9092\"},\"fieldsConfig\":{\"type\":\"string\",\"title\":\"Fields config (JSON)\",\"default\":\"[{\\\"name\\\":\\\"key\\\",\\\"type\\\":\\\"STRING\\\"},{\\\"name\\\":\\\"value\\\",\\\"type\\\":\\\"STRING\\\"}]\"}},\"autoStop\":{\"type\":\"boolean\",\"title\":\"体验模式：消费完自动停止\",\"default\":false},\"stopAfterSeconds\":{\"type\":\"number\",\"title\":\"自动停止延迟（秒）\",\"default\":30},\"required\":[\"topic\",\"bootstrapServers\"]}",
                 "",
                 "1.0.0", "built-in");
         // Kafka Output
