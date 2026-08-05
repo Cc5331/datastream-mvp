@@ -32,11 +32,11 @@
   - MySQL → CSV（JDBC 读库，字段自动推导）
   - JSON → JSON（JSON Lines 读写 + part 合并单文件）
   - CSV → JSON（field_filter / field_rename / row_filter / json_parse 转换链路）
+  - CSV → Kafka → CSV（Docker Kafka 3.8 实测：生产者写 3000 条 JSON 消息，消费者读回写 CSV，中文正常）
 - **作业管理**：状态机 DRAFT → SUBMITTED → RUNNING → COMPLETED / FAILED / CANCELLED；Flink 状态每 15s 轮询回写；日志落库可查。
 - **参数面板**：按控件 paramSchema 动态渲染（string / number / boolean / enum / array）。
 
 ### 1.3 未实现 / TODO（后续完善方向）
-- Kafka 输入输出：模板存在，但本机未部署 Kafka，未实测。
 - 控件插件热加载（plugin 包）：只有骨架，MVP 实际使用内置注册表。
 - 性能基准测试脚本在 test-resources，未纳入 CI。
 
@@ -316,5 +316,6 @@
 | 2026-08-05 | 补充 P0 功能缺口：mysql_input 读库（JDBC 自动推导字段）、json_input/output、field_filter/rename、row_filter、json_parse 转换控件、Kafka fieldsConfig | DagTranslationService / DataInitializer / FlinkJobStatusChecker / 前端注册表 |
 | 2026-08-05 | 修复前端「导入 JSON」失效：index.html 文件 input 缺少 @change="importDag" 绑定 | 前端 index.html |
 | 2026-08-05 | 修复 MySQL/JSON/Datagen/Kafka 输入转 CSV/Excel 缺失字段名表头：findSourceHeader 支持 JDBC 列名与 fieldsConfig，并沿 transform 链精确合成表头（field_filter/field_rename/json_parse/field_concat） | FlinkJobStatusChecker |
+| 2026-08-05 | Kafka 链路实测：docker compose 启动 Kafka 3.8（宿主机 29092），CSV→Kafka 输出 3000 条 JSON 消息、Kafka→CSV 消费回写验证通过；注意 bootstrapServers 用宿主机地址 localhost:29092 | 仅验证 + 文档 |
 
 > 新改动请在下方继续追加，保持框架可追溯。
