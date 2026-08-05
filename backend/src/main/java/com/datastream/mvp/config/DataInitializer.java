@@ -83,7 +83,7 @@ public class DataInitializer implements CommandLineRunner {
         // Kafka Output
         createControl("kafka_output", "Kafka Output", "output",
                 "Write Kafka",
-                "{\"type\":\"object\",\"properties\":{\"topic\":{\"type\":\"string\",\"title\":\"Topic\",\"default\":\"test-topic\"},\"bootstrapServers\":{\"type\":\"string\",\"title\":\"Bootstrap\",\"default\":\"localhost:9092\"}},\"required\":[\"topic\",\"bootstrapServers\"]}",
+                "{\"type\":\"object\",\"properties\":{\"topic\":{\"type\":\"string\",\"title\":\"Topic\",\"default\":\"test-topic\"},\"bootstrapServers\":{\"type\":\"string\",\"title\":\"Bootstrap\",\"default\":\"localhost:9092\"},\"fieldsConfig\":{\"type\":\"string\",\"title\":\"字段定义（JSON 数组）\",\"default\":\"[{\\\"name\\\":\\\"key\\\",\\\"type\\\":\\\"STRING\\\"},{\\\"name\\\":\\\"value\\\",\\\"type\\\":\\\"STRING\\\"}]\"}},\"required\":[\"topic\",\"bootstrapServers\"]}",
                 "",
                 "1.0.0", "built-in");
         // Field Concat (transform)
@@ -98,6 +98,43 @@ public class DataInitializer implements CommandLineRunner {
                 "XML and JSON format conversion (schema pass-through)",
                 "{\"type\":\"object\",\"properties\":{\"direction\":{\"type\":\"string\",\"title\":\"Direction\",\"enum\":[\"xml2json\",\"json2xml\"],\"default\":\"xml2json\"},\"sourceField\":{\"type\":\"string\",\"title\":\"Source field\",\"default\":\"payload\"},\"targetField\":{\"type\":\"string\",\"title\":\"Target field\",\"default\":\"result\"}},\"required\":[\"direction\",\"sourceField\"]}",
                 "SELECT *, ${direction}(`${sourceField}`) AS `${targetField}` FROM ${id}",
+                "1.0.0", "built-in");
+
+        // 字段过滤
+        createControl("field_filter", "字段过滤", "transform",
+                "只保留指定字段",
+                "{\"type\":\"object\",\"properties\":{\"fields\":{\"type\":\"string\",\"title\":\"保留字段（逗号分隔）\",\"default\":\"id,name\"}},\"required\":[\"fields\"]}",
+                "",
+                "1.0.0", "built-in");
+        // 字段改名
+        createControl("field_rename", "字段改名", "transform",
+                "字段重命名",
+                "{\"type\":\"object\",\"properties\":{\"mappings\":{\"type\":\"string\",\"title\":\"改名映射（old=new，逗号分隔）\",\"default\":\"id=userId\"}},\"required\":[\"mappings\"]}",
+                "",
+                "1.0.0", "built-in");
+        // 行过滤
+        createControl("row_filter", "行过滤", "transform",
+                "按条件过滤行",
+                "{\"type\":\"object\",\"properties\":{\"condition\":{\"type\":\"string\",\"title\":\"过滤条件（SQL WHERE 表达式）\",\"default\":\"age > 18\"}},\"required\":[\"condition\"]}",
+                "SELECT * FROM ${id} WHERE ${condition}",
+                "1.0.0", "built-in");
+        // JSON 解析
+        createControl("json_parse", "JSON 解析", "transform",
+                "从 JSON 字段解析出多个字段",
+                "{\"type\":\"object\",\"properties\":{\"sourceField\":{\"type\":\"string\",\"title\":\"JSON 源字段\",\"default\":\"payload\"},\"fieldsConfig\":{\"type\":\"string\",\"title\":\"解析字段（JSON 数组）\",\"default\":\"[{\\\"name\\\":\\\"id\\\",\\\"type\\\":\\\"INT\\\"},{\\\"name\\\":\\\"name\\\",\\\"type\\\":\\\"STRING\\\"}]\"}},\"required\":[\"sourceField\",\"fieldsConfig\"]}",
+                "",
+                "1.0.0", "built-in");
+        // JSON 输入
+        createControl("json_input", "JSON 输入", "input",
+                "读取 JSON 文件（JSON Lines）",
+                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"title\":\"文件路径\",\"default\":\"D:\\\\code\\\\比赛\\\\2026省服务外包\\\\test-resources\\\\data\\\\sample.json\"},\"fieldsConfig\":{\"type\":\"string\",\"title\":\"字段定义（JSON 数组）\",\"default\":\"[{\\\"name\\\":\\\"id\\\",\\\"type\\\":\\\"INT\\\"},{\\\"name\\\":\\\"name\\\",\\\"type\\\":\\\"STRING\\\"}]\"}},\"required\":[\"path\"]}",
+                "",
+                "1.0.0", "built-in");
+        // JSON 输出
+        createControl("json_output", "JSON 输出", "output",
+                "将数据写入 JSON 文件（JSON Lines）",
+                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"title\":\"输出路径（.json）\",\"default\":\"D:\\\\code\\\\比赛\\\\2026省服务外包\\\\output\\\\output.json\"}},\"required\":[\"path\"]}",
+                "CREATE TABLE ${id} (\n  data STRING\n) WITH (\n  'connector' = 'filesystem',\n  'path' = '${path}',\n  'format' = 'json',\n  'sink.parallelism' = '1'\n);",
                 "1.0.0", "built-in");
 
         log.info("Seeded {} built-in controls", controlRepo.count());

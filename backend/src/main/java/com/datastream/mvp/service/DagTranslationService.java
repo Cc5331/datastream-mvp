@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.*;
+import java.sql.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -134,6 +135,42 @@ public class DagTranslationService {
                 tableAlias.put(node.getId(), sanitize(node.getId()));
                 continue;
             }
+
+            // MySQL Input -> JDBC 读表，字段从表结构自动推导
+            if ("mysql_input".equals(node.getType())) {
+                String url = node.getParams() != null && node.getParams().get("url") != null ? node.getParams().get("url").toString().trim() : "";
+                String table = node.getParams() != null && node.getParams().get("table") != null ? node.getParams().get("table").toString().trim() : "";
+                String username = node.getParams() != null && node.getParams().get("username") != null ? node.getParams().get("username").toString().trim() : "root";
+                String password = node.getParams() != null && node.getParams().get("password") != null ? node.getParams().get("password").toString() : "";
+                if (url.isEmpty() || table.isEmpty()) {
+                    throw new RuntimeException("MySQL 输入缺少 url / table 参数");
+                }
+                String fields = inferMysqlFields(url, table, username, password);
+                String rendered = generateMysqlInputDDL(sanitize(node.getId()), url, table, username, password, fields);
+                nodeSchemas.put(node.getId(), fields);
+                log.info("MySQL input {}: {}.{} -> {} fields", node.getId(), url, table, fields.split("\n").length);
+                flinkSql.append("-- Node: ").append(node.getLabel()).append(" (").append(node.getId()).append(") [MySQL Input]\n");
+                flinkSql.append(rendered).append("\n\n");
+                tableAlias.put(node.getId(), sanitize(node.getId()));
+                continue;
+            }
+
+            // JSON Input -> filesystem + json format，schema 由 fieldsConfig 指定
+            if ("json_input".equals(node.getType())) {
+                String path = node.getParams() != null && node.getParams().get("path") != null ? node.getParams().get("path").toString().trim() : "";
+                String fc = node.getParams() != null && node.getParams().get("fieldsConfig") != null ? node.getParams().get("fieldsConfig").toString() : "[]";
+                if (path.isEmpty() || !new java.io.File(path).isFile()) {
+                    throw new RuntimeException("JSON 输入文件不存在: " + path);
+                }
+                String rendered = generateJsonInputDDL(sanitize(node.getId()), path, fc);
+                String schema = extractFieldsFromDatagenConfig(fc);
+                if (schema != null) nodeSchemas.put(node.getId(), schema);
+                flinkSql.append("-- Node: ").append(node.getLabel()).append(" (").append(node.getId()).append(") [JSON Input]\n");
+                flinkSql.append(rendered).append("\n\n");
+                tableAlias.put(node.getId(), sanitize(node.getId()));
+                continue;
+            }
+
 // Excel Output -> 生成临时 CSV 输出，作业完成后自动转换为 .xlsx
             if ("excel_output".equals(node.getType())) {
                 String actualPath = node.getParams() != null ? node.getParams().getOrDefault("path", "D:\\code\\比赛\\2026省服务外包\\output\\output.xlsx").toString().trim() : "/data/output.xlsx";
@@ -192,8 +229,11 @@ public class DagTranslationService {
 
 
             if (template == null || template.isBlank()) {
-                log.warn("Control {} has no Flink template, skipping", node.getType());
-                continue;
+                if (!"transform".equals(control.getCategory())) {
+                    log.warn("Control {} has no Flink template, skipping", node.getType());
+                    continue;
+                }
+                // transform 控件的 SQL 由边循环内联生成，模板可以为空
             }
 
             if ("input".equals(control.getCategory())) {
@@ -205,7 +245,7 @@ public class DagTranslationService {
                 String sourceFields = findIncomingSourceSchema(node.getId(), dag.getEdges(), nodeSchemas);
                 String rendered;
                 Map<String, Object> renderParams = node.getParams();
-                if ("csv_output".equals(node.getType())) {
+                if ("csv_output".equals(node.getType()) || "json_output".equals(node.getType())) {
                     // Flink filesystem sink writes a directory of part-* files; we write to a temp
                     // dir and merge into the user's single file after the job completes.
                     Map<String, Object> tmpParams = new HashMap<>();
@@ -236,6 +276,16 @@ public class DagTranslationService {
                     } else if ("xml_json".equals(node.getType())) {
                         String tfn = node.getParams() != null ? node.getParams().getOrDefault("targetField", "result").toString() : "result";
                         nodeSchemas.put(node.getId(), incomingSchema + ",\n  `" + tfn + "` STRING");
+                    } else if ("field_filter".equals(node.getType())) {
+                        nodeSchemas.put(node.getId(), filterSchemaFields(incomingSchema, parseFieldList(node.getParams())));
+                    } else if ("field_rename".equals(node.getType())) {
+                        nodeSchemas.put(node.getId(), renameSchemaFields(incomingSchema, parseRenameMappings(node.getParams())));
+                    } else if ("row_filter".equals(node.getType())) {
+                        nodeSchemas.put(node.getId(), incomingSchema);
+                    } else if ("json_parse".equals(node.getType())) {
+                        String jfc = node.getParams() != null && node.getParams().get("fieldsConfig") != null ? node.getParams().get("fieldsConfig").toString() : "[]";
+                        String extra = extractFieldsFromDatagenConfig(jfc);
+                        nodeSchemas.put(node.getId(), extra != null ? incomingSchema + ",\n" + extra : incomingSchema);
                     } else {
                         nodeSchemas.put(node.getId(), incomingSchema);
                     }
@@ -269,13 +319,27 @@ public class DagTranslationService {
 
             String sourceCategory = nodeCategoryMap.get(edge.getSource());
             if ("transform".equals(sourceCategory)) {
-                ControlRegistry sc = controlService.findByType(nodeTypeMap.get(edge.getSource()));
-                String ts = renderTemplate(sc.getFlinkTemplate(), transformNodeParams.get(edge.getSource()), edge.getSource());
+                String transformType = nodeTypeMap.get(edge.getSource());
+                String upstreamTable = null;
                 for (DagDefinition.DagEdge ie : dag.getEdges()) {
                     if (ie.getTarget().equals(edge.getSource())) {
-                        ts = ts.replace(sanitize(edge.getSource()), sanitize(ie.getSource()));
+                        upstreamTable = sanitize(ie.getSource());
                         break;
                     }
+                }
+                if (upstreamTable == null) upstreamTable = sourceTable;
+                String ts;
+                Map<String, Object> tp = transformNodeParams.get(edge.getSource());
+                if ("field_filter".equals(transformType)) {
+                    ts = "SELECT " + buildFieldFilterSelect(tp) + " FROM " + upstreamTable;
+                } else if ("field_rename".equals(transformType)) {
+                    ts = "SELECT " + buildFieldRenameSelect(tp, findIncomingSourceSchema(edge.getSource(), dag.getEdges(), nodeSchemas)) + " FROM " + upstreamTable;
+                } else if ("json_parse".equals(transformType)) {
+                    ts = "SELECT " + buildJsonParseSelect(tp, findIncomingSourceSchema(edge.getSource(), dag.getEdges(), nodeSchemas)) + " FROM " + upstreamTable;
+                } else {
+                    ControlRegistry sc = controlService.findByType(transformType);
+                    ts = renderTemplate(sc.getFlinkTemplate(), tp, edge.getSource());
+                    ts = ts.replace(sanitize(edge.getSource()), upstreamTable);
                 }
                 flinkSql.append("INSERT INTO ").append(targetTable).append("\n").append(ts).append(";\n\n");
                 continue;
@@ -877,6 +941,259 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
     }
 
     private String sanitize(String id) { return id.replaceAll("[^a-zA-Z0-9_]", "_"); }
+
+    private List<String> parseFieldList(Map<String, Object> params) {
+        String raw = params != null && params.get("fields") != null ? params.get("fields").toString() : "";
+        raw = raw.trim();
+        if (raw.startsWith("[") && raw.endsWith("]")) raw = raw.substring(1, raw.length() - 1);
+        List<String> out = new ArrayList<>();
+        for (String p : raw.split(",")) {
+            String t = p.trim();
+            if (t.isEmpty()) continue;
+            out.add(t);
+        }
+        if (out.isEmpty()) throw new RuntimeException("字段过滤: 请填写要保留的字段（逗号分隔）");
+        return out;
+    }
+
+    private Map<String, String> parseRenameMappings(Map<String, Object> params) {
+        String raw = params != null && params.get("mappings") != null ? params.get("mappings").toString() : "";
+        Map<String, String> m = new LinkedHashMap<>();
+        for (String part : raw.split(",")) {
+            String p = part.trim();
+            if (p.isEmpty()) continue;
+            int eq = p.indexOf('=');
+            if (eq <= 0 || eq >= p.length() - 1) {
+                throw new RuntimeException("字段改名: 映射格式应为 oldName=newName，收到: " + p);
+            }
+            m.put(p.substring(0, eq).trim(), p.substring(eq + 1).trim());
+        }
+        if (m.isEmpty()) throw new RuntimeException("字段改名: 请填写改名映射（逗号分隔的 old=new）");
+        return m;
+    }
+
+    private List<String> parseSchemaFieldNames(String schema) {
+        List<String> names = new ArrayList<>();
+        if (schema == null) return names;
+        for (String line : schema.split("\n")) {
+            String t = line.trim();
+            if (t.isEmpty()) continue;
+            if (t.endsWith(",")) t = t.substring(0, t.length() - 1).trim();
+            String name = parseSchemaFieldName(t);
+            if (name != null) names.add(name);
+        }
+        return names;
+    }
+
+    private String parseSchemaFieldName(String line) {
+        if (line == null || line.isEmpty()) return null;
+        int sp = line.indexOf(' ');
+        if (sp <= 0) return null;
+        String name = line.substring(0, sp).trim();
+        if (name.startsWith("`") && name.endsWith("`") && name.length() >= 2) {
+            name = name.substring(1, name.length() - 1).replace("``", "`");
+        }
+        return name;
+    }
+
+    private String quoteFlinkField(String raw) {
+        String name = raw == null ? "" : raw.trim().replace("`", "");
+        if (name.isEmpty()) return "`col`";
+        return "`" + name.replace("`", "``") + "`";
+    }
+
+    private String filterSchemaFields(String incomingSchema, List<String> keep) {
+        if (incomingSchema == null) throw new RuntimeException("字段过滤: 无法获取上游字段，请确认连线");
+        List<String> available = parseSchemaFieldNames(incomingSchema);
+        List<String> missing = new ArrayList<>();
+        for (String k : keep) {
+            if (!available.contains(k)) missing.add(k);
+        }
+        if (!missing.isEmpty()) {
+            throw new RuntimeException("字段过滤: 字段不存在: " + String.join(", ", missing) + "（可选字段: " + String.join(", ", available) + "）");
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String line : incomingSchema.split("\n")) {
+            String t = line.trim();
+            if (t.isEmpty()) continue;
+            if (t.endsWith(",")) t = t.substring(0, t.length() - 1).trim();
+            String name = parseSchemaFieldName(t);
+            if (name == null || !keep.contains(name)) continue;
+            if (sb.length() > 0) sb.append(",\n");
+            sb.append("  ").append(t);
+        }
+        return sb.length() == 0 ? incomingSchema : sb.toString();
+    }
+
+    private String renameSchemaFields(String incomingSchema, Map<String, String> mappings) {
+        if (incomingSchema == null) throw new RuntimeException("字段改名: 无法获取上游字段，请确认连线");
+        List<String> available = parseSchemaFieldNames(incomingSchema);
+        for (Map.Entry<String, String> e : mappings.entrySet()) {
+            if (!available.contains(e.getKey())) {
+                throw new RuntimeException("字段改名: 字段不存在: " + e.getKey() + "（可选字段: " + String.join(", ", available) + "）");
+            }
+            if (available.contains(e.getValue())) {
+                throw new RuntimeException("字段改名: 新字段名与已有字段冲突: " + e.getValue());
+            }
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String line : incomingSchema.split("\n")) {
+            String t = line.trim();
+            if (t.isEmpty()) continue;
+            if (t.endsWith(",")) t = t.substring(0, t.length() - 1).trim();
+            String name = parseSchemaFieldName(t);
+            if (name == null) continue;
+            String newName = mappings.get(name);
+            int sp = t.indexOf(' ');
+            String type = sp > 0 ? t.substring(sp).trim() : "STRING";
+            if (sb.length() > 0) sb.append(",\n");
+            sb.append("  ").append(quoteFlinkField(newName != null ? newName : name)).append(" ").append(type);
+        }
+        return sb.toString();
+    }
+
+    private String buildFieldFilterSelect(Map<String, Object> params) {
+        List<String> names = parseFieldList(params);
+        List<String> quoted = new ArrayList<>();
+        for (String n : names) quoted.add(quoteFlinkField(n));
+        return String.join(", ", quoted);
+    }
+
+    private String buildFieldRenameSelect(Map<String, Object> params, String incomingSchema) {
+        Map<String, String> mappings = parseRenameMappings(params);
+        List<String> names = parseSchemaFieldNames(incomingSchema);
+        List<String> parts = new ArrayList<>();
+        for (String n : names) {
+            String nn = mappings.get(n);
+            parts.add(nn != null ? quoteFlinkField(n) + " AS " + quoteFlinkField(nn) : quoteFlinkField(n));
+        }
+        if (parts.isEmpty()) throw new RuntimeException("字段改名: 无法获取上游字段，请确认连线");
+        return String.join(", ", parts);
+    }
+
+    private String buildJsonParseSelect(Map<String, Object> params, String incomingSchema) {
+        String srcField = params != null && params.get("sourceField") != null ? params.get("sourceField").toString().trim() : "";
+        String fc = params != null && params.get("fieldsConfig") != null ? params.get("fieldsConfig").toString() : "[]";
+        if (srcField.isEmpty()) throw new RuntimeException("JSON 解析: 请填写 sourceField 参数");
+        JsonNode fa = tryParseJsonArray(fc);
+        if (fa == null || !fa.isArray() || fa.size() == 0) {
+            throw new RuntimeException("JSON 解析: fieldsConfig 为空，请按 [{\"name\":\"id\",\"type\":\"INT\"}] 填写");
+        }
+        List<String> incoming = parseSchemaFieldNames(incomingSchema);
+        List<String> parts = new ArrayList<>();
+        for (String n : incoming) parts.add(quoteFlinkField(n));
+        for (JsonNode f : fa) {
+            String fn = f.has("name") ? f.get("name").asText().trim() : "";
+            String ft = f.has("type") ? f.get("type").asText().trim() : "STRING";
+            String path = f.has("path") && !f.get("path").asText().trim().isEmpty() ? f.get("path").asText().trim() : "$." + fn;
+            if (fn.isEmpty()) throw new RuntimeException("JSON 解析: 解析字段缺少 name");
+            if (incoming.contains(fn)) {
+                throw new RuntimeException("JSON 解析: 解析字段与上游字段冲突: " + fn);
+            }
+            parts.add("CAST(JSON_VALUE(" + quoteFlinkField(srcField) + ", '" + path.replace("'", "''") + "') AS " + ft + ") AS " + quoteFlinkField(fn));
+        }
+        return String.join(", ", parts);
+    }
+
+    private String inferMysqlFields(String url, String table, String username, String password) {
+        String quotedTable = "`" + table.replace("`", "``") + "`";
+        try (Connection conn = DriverManager.getConnection(url, username, password);
+             Statement st = conn.createStatement();
+             ResultSet rs = st.executeQuery("SELECT * FROM " + quotedTable + " LIMIT 0")) {
+            ResultSetMetaData md = rs.getMetaData();
+            StringBuilder sb = new StringBuilder();
+            for (int i = 1; i <= md.getColumnCount(); i++) {
+                String name = md.getColumnLabel(i);
+                String flinkType = mysqlToFlinkType(md.getColumnType(i), md.getPrecision(i), md.getScale(i));
+                if (sb.length() > 0) sb.append(",\n");
+                sb.append("  ").append(quoteFlinkField(name)).append(" ").append(flinkType);
+            }
+            if (sb.length() == 0) throw new RuntimeException("MySQL 输入: 表无字段: " + table);
+            return sb.toString();
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("MySQL 输入读取表结构失败: " + e.getMessage() + "（请检查 url/table/username/password 与网络）", e);
+        }
+    }
+
+    private String generateMysqlInputDDL(String tableName, String url, String table, String username, String password, String fields) {
+        StringBuilder ddl = new StringBuilder();
+        ddl.append("CREATE TABLE ").append(tableName).append(" (\n");
+        ddl.append(fields).append("\n");
+        ddl.append(") WITH (\n");
+        ddl.append("  'connector' = 'jdbc',\n");
+        ddl.append("  'url' = '").append(url.replace("'", "''")).append("',\n");
+        ddl.append("  'table-name' = '").append(table.replace("'", "''")).append("',\n");
+        ddl.append("  'username' = '").append(username.replace("'", "''")).append("',\n");
+        ddl.append("  'password' = '").append(password.replace("'", "''")).append("',\n");
+        ddl.append("  'driver' = 'com.mysql.cj.jdbc.Driver',\n");
+        ddl.append("  'scan.fetch-size' = '1000'\n");
+        ddl.append(");\n");
+        return ddl.toString();
+    }
+
+    private String generateJsonInputDDL(String tableName, String path, String fieldsConfig) {
+        JsonNode fa = tryParseJsonArray(fieldsConfig);
+        StringBuilder ddl = new StringBuilder();
+        ddl.append("CREATE TABLE ").append(tableName).append(" (\n");
+        try {
+            if (fa != null && fa.isArray() && fa.size() > 0) {
+                for (int i = 0; i < fa.size(); i++) {
+                    JsonNode f = fa.get(i);
+                    String fn = f.has("name") ? f.get("name").asText() : "field" + i;
+                    String ft = f.has("type") ? f.get("type").asText() : "STRING";
+                    ddl.append("  ").append(quoteFlinkField(fn)).append(" ").append(ft);
+                    if (i < fa.size() - 1) ddl.append(",");
+                    ddl.append("\n");
+                }
+            } else {
+                ddl.append("  data STRING\n");
+            }
+        } catch (Exception e) {
+            log.warn("Failed to parse json fieldsConfig: {}", e.getMessage());
+            ddl.append("  data STRING\n");
+        }
+        ddl.append(") WITH (\n");
+        ddl.append("  'connector' = 'filesystem',\n");
+        ddl.append("  'path' = '").append(path.replace("'", "''")).append("',\n");
+        ddl.append("  'format' = 'json',\n");
+        ddl.append("  'json.ignore-parse-errors' = 'true',\n");
+        ddl.append("  'json.fail-on-missing-field' = 'false'\n");
+        ddl.append(");\n");
+        return ddl.toString();
+    }
+
+    private String mysqlToFlinkType(int jdbcType, int precision, int scale) {
+        switch (jdbcType) {
+            case java.sql.Types.INTEGER: return "INT";
+            case java.sql.Types.BIGINT: return "BIGINT";
+            case java.sql.Types.SMALLINT: return "SMALLINT";
+            case java.sql.Types.TINYINT: return "TINYINT";
+            case java.sql.Types.FLOAT:
+            case java.sql.Types.REAL: return "FLOAT";
+            case java.sql.Types.DOUBLE: return "DOUBLE";
+            case java.sql.Types.DECIMAL:
+            case java.sql.Types.NUMERIC: return "DECIMAL(" + Math.max(precision, 1) + "," + Math.max(scale, 0) + ")";
+            case java.sql.Types.BIT:
+            case java.sql.Types.BOOLEAN: return "BOOLEAN";
+            case java.sql.Types.CHAR:
+            case java.sql.Types.VARCHAR:
+            case java.sql.Types.LONGVARCHAR:
+            case java.sql.Types.NCHAR:
+            case java.sql.Types.NVARCHAR:
+            case java.sql.Types.LONGNVARCHAR: return "STRING";
+            case java.sql.Types.DATE: return "DATE";
+            case java.sql.Types.TIME: return "TIME";
+            case java.sql.Types.TIMESTAMP: return "TIMESTAMP(3)";
+            case java.sql.Types.BINARY:
+            case java.sql.Types.VARBINARY:
+            case java.sql.Types.LONGVARBINARY:
+            case java.sql.Types.BLOB: return "BYTES";
+            default: return "STRING";
+        }
+    }
+
 
     private String extractFieldsFromDatagenConfig(String fieldsConfig) {
         JsonNode fa = tryParseJsonArray(fieldsConfig);

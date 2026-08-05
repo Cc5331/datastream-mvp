@@ -144,6 +144,7 @@ public class FlinkJobStatusChecker {
                         if (localStatus == JobStatus.COMPLETED) {
                             convertExcelOutputsIfNeeded(job);
                             mergeCsvOutputsIfNeeded(job);
+                            mergeJsonOutputsIfNeeded(job);
                         }
                         if (localStatus == JobStatus.FAILED) {
                             fetchFlinkJobError(job, flinkJobId);
@@ -174,6 +175,7 @@ public class FlinkJobStatusChecker {
                         logRepo.save(l);
 convertExcelOutputsIfNeeded(job);
                         mergeCsvOutputsIfNeeded(job);
+                        mergeJsonOutputsIfNeeded(job);
                     }
                 }
             }
@@ -413,4 +415,53 @@ convertExcelOutputsIfNeeded(job);
             log.warn("Failed to fetch Flink exceptions for job {}: {}", job.getId(), exc.getMessage());
         }
     }
+    private void mergeJsonOutputsIfNeeded(JobDefinition job) {
+        try {
+            String dagJson = job.getDagJson();
+            if (dagJson == null || dagJson.isEmpty()) return;
+            JsonNode dagNode = objectMapper.readTree(dagJson);
+            JsonNode nodes = dagNode.get("nodes");
+            if (nodes == null || !nodes.isArray()) return;
+
+            for (JsonNode node : nodes) {
+                String type = node.has("type") ? node.get("type").asText() : "";
+                if (!"json_output".equals(type)) continue;
+
+                JsonNode params = node.get("params");
+                if (params == null) continue;
+                String actualPath = params.has("path") ? params.get("path").asText().trim() : "";
+                if (actualPath.isEmpty()) continue;
+
+                String tempDir = actualPath + ".tmp";
+                java.io.File dir = new java.io.File(tempDir);
+                if (!dir.isDirectory()) {
+                    log.warn("JSON output temp dir not found for job {}: {}", job.getId(), tempDir);
+                    continue;
+                }
+                java.io.File[] parts = dir.listFiles((d, n) -> n.startsWith("part-"));
+                if (parts == null || parts.length == 0) {
+                    log.warn("No part files in temp dir for job {}: {}", job.getId(), tempDir);
+                    continue;
+                }
+                java.util.Arrays.sort(parts);
+                StringBuilder sb = new StringBuilder();
+                for (java.io.File pf : parts) {
+                    sb.append(new String(java.nio.file.Files.readAllBytes(pf.toPath()), java.nio.charset.StandardCharsets.UTF_8));
+                }
+                java.io.File out = new java.io.File(actualPath);
+                if (out.exists()) out.delete();
+                java.nio.file.Files.write(out.toPath(), sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+                JobLog l = new JobLog();
+                l.setJobId(job.getId()); l.setLevel("INFO");
+                l.setMessage("JSON output merged: " + actualPath + " (" + parts.length + " part file(s))");
+                l.setTimestamp(LocalDateTime.now());
+                logRepo.save(l);
+                log.info("Merged {} JSON part files into {} for job {}", parts.length, actualPath, job.getId());
+            }
+        } catch (Exception e) {
+            log.warn("Failed to merge json outputs for job {}: {}", job.getId(), e.getMessage());
+        }
+    }
+
 }
