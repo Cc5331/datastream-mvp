@@ -4,6 +4,7 @@ import com.datastream.mvp.model.ControlRegistry;
 import com.datastream.mvp.repository.ControlRegistryRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
 
@@ -15,6 +16,12 @@ import java.time.LocalDateTime;
 public class DataInitializer implements CommandLineRunner {
 
     private final ControlRegistryRepository controlRepo;
+
+    @Value("${app.mysql.default-username:root}")
+    private String defaultMysqlUsername;
+
+    @Value("${app.mysql.default-password:}")
+    private String defaultMysqlPassword;
 
     @Override
     public void run(String... args) {
@@ -63,14 +70,14 @@ public class DataInitializer implements CommandLineRunner {
         // MySQL Input
         createControl("mysql_input", "MySQL Input", "input",
                 "Read MySQL",
-                "{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\",\"title\":\"JDBC URL\",\"default\":\"jdbc:mysql://localhost:3306/flink_demo\"},\"table\":{\"type\":\"string\",\"title\":\"Table\",\"default\":\"output_table\"},\"username\":{\"type\":\"string\",\"title\":\"User\",\"default\":\"root\"},\"password\":{\"type\":\"string\",\"title\":\"Password\",\"default\":\"YOUR_MYSQL_PASSWORD\"}},\"required\":[\"url\",\"table\",\"username\"]}",
+                mysqlParamSchema(),
                 "",
                 "1.0.0", "built-in");
 
         // MySQL Output
         createControl("mysql_output", "MySQL Output", "output",
                 "Write MySQL",
-                "{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\",\"title\":\"JDBC URL\",\"default\":\"jdbc:mysql://localhost:3306/flink_demo\"},\"table\":{\"type\":\"string\",\"title\":\"Table\",\"default\":\"output_table\"},\"username\":{\"type\":\"string\",\"title\":\"User\",\"default\":\"root\"},\"password\":{\"type\":\"string\",\"title\":\"Password\",\"default\":\"YOUR_MYSQL_PASSWORD\"}},\"required\":[\"url\",\"table\",\"username\"]}",
+                mysqlParamSchema(),
                 "CREATE TABLE ${id} (\n  data STRING\n) WITH (\n  'connector' = 'jdbc',\n  'url' = '${url}',\n  'table-name' = '${table}',\n  'username' = '${username}',\n  'password' = '${password}',\n  'driver' = 'com.mysql.cj.jdbc.Driver'\n);",
                 "1.0.0", "built-in");
 
@@ -138,6 +145,13 @@ public class DataInitializer implements CommandLineRunner {
                 "1.0.0", "built-in");
 
         log.info("Seeded {} built-in controls", controlRepo.count());
+    }
+
+    /**
+     * MySQL 输入/输出控件参数 schema（用户名/密码默认值来自环境变量，避免硬编码密钥）
+     */
+    private String mysqlParamSchema() {
+        return "{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\",\"title\":\"JDBC URL\",\"default\":\"jdbc:mysql://localhost:3306/flink_demo\"},\"table\":{\"type\":\"string\",\"title\":\"Table\",\"default\":\"output_table\"},\"username\":{\"type\":\"string\",\"title\":\"User\",\"default\":\"" + defaultMysqlUsername + "\"},\"password\":{\"type\":\"string\",\"title\":\"Password\",\"default\":\"" + defaultMysqlPassword + "\"}},\"required\":[\"url\",\"table\",\"username\"]}";
     }
 
     private void createControl(String type, String name, String category, String description,

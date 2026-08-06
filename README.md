@@ -147,7 +147,7 @@ docker compose up -d --build
 | 后端 API | http://localhost:8080 | REST API |
 | Flink Web UI | http://localhost:8081 | 作业监控 |
 | SQL Gateway | http://localhost:8083 | Flink SQL 网关 |
-| MySQL | localhost:3307 | root / root123 |
+| MySQL | localhost:3307 | root / 密码见 `.env`（默认 `root123`） |
 | Kafka | localhost:29092 | bootstrap.servers |
 
 > 本机 3306 / 9092 可能被本地 MySQL / Kafka 占用，容器映射到 3307 / 29092 避免冲突。
@@ -157,7 +157,7 @@ docker compose up -d --build
 | 控件 | 参数 | 值 |
 |------|------|-----|
 | MySQL 输出 | url | `jdbc:mysql://mysql:3306/flink_demo?useSSL=false&serverTimezone=Asia/Shanghai` |
-| MySQL 输出 | username / password | `root` / `root123` |
+| MySQL 输出 | username / password | `root` / 密码见 `.env`（默认 `root123`） |
 | Kafka 输入 / 输出 | bootstrap.servers | `kafka:9092` |
 | CSV 输入 | path | `/data/xxx.csv`（对应项目根目录 `data/`） |
 | CSV 输出 | path | `/output/xxx.csv`（对应项目根目录 `output/`） |

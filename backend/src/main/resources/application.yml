@@ -42,5 +42,11 @@ plugin:
 server:
   port: 8080
 
+app:
+  mysql:
+    # mysql_input/mysql_output 控件默认用户名与密码（预填 + 预览用），通过环境变量注入，不入库
+    default-username: ${MYSQL_USERNAME:root}
+    default-password: ${MYSQL_PASSWORD:}
+
 spring.servlet.multipart.max-file-size: 50MB
 spring.servlet.multipart.max-request-size: 50MB

@@ -49,7 +49,7 @@
 | JDK | 17 |
 | Spring Boot | 3.2.5（web / data-jpa / validation） |
 | 元数据库 | H2 file：backend/data/mvpdb（application.yml）；可切 MySQL（application-mysql.yml） |
-| 业务 MySQL | 本机 localhost:3306，root/YOUR_MYSQL_PASSWORD，库 dataflow；Docker 版映射 3307 |
+| 业务 MySQL | 本机 localhost:3306，库 dataflow（账号/密码见 `.env`：`MYSQL_USERNAME`/`MYSQL_PASSWORD`）；Docker 版映射 3307 |
 | Flink | 1.18.1 Standalone：JobManager 8081、SQL Gateway 8083、sql-client |
 | 前端 | Vue 3（unpkg 全局版）+ Element Plus 2.9.1 + AntV X6 3.1.7 + axios；serve.js 静态服务并反代 /api |
 | 其他 | Lombok、Jackson、Apache Commons CSV、Apache POI（Excel）、java.net.http（调 Flink REST） |
@@ -129,7 +129,7 @@
     curl http://localhost:8080/api/controls          # 控件注册表
     curl http://localhost:8081/jobs/overview         # Flink 作业
     curl http://localhost:8081/taskmanagers          # Flink TaskManager（若 404 说明集群未起）
-    mysql -u root -pYOUR_MYSQL_PASSWORD dataflow -e "SHOW TABLES;"
+    mysql -u root -p dataflow -e "SHOW TABLES;"   # 密码见 .env / MYSQL_PASSWORD
 
 ---
 

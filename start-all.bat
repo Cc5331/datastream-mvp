@@ -51,4 +51,4 @@ echo To check SQL Gateway:
 echo   curl http://localhost:8083/v1/info
 echo.
 echo To check MySQL data:
-echo   mysql -u root -pYOUR_MYSQL_PASSWORD -e "SELECT * FROM flink_demo.user_data;"
+echo   mysql -u root -p -e "SELECT * FROM flink_demo.user_data;"   (密码见 .env 中 MYSQL_PASSWORD)

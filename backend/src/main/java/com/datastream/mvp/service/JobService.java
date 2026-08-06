@@ -10,6 +10,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -29,6 +30,9 @@ public class JobService {
     private final DagTranslationService dagTranslationService;
     private final ObjectMapper objectMapper;
     private final ExcelPreprocessor excelPreprocessor;
+
+    @Value("${app.mysql.default-password:}")
+    private String defaultMysqlPassword;
 
     public List<JobDefinition> findAll() {
         return jobRepo.findAllByOrderByUpdatedAtDesc();
@@ -203,7 +207,7 @@ public class JobService {
                         String url = params.has("url") ? params.get("url").asText() : "jdbc:mysql://localhost:3306/flink_demo";
                         String table = params.has("table") ? params.get("table").asText() : "user_data";
                         String username = params.has("username") ? params.get("username").asText() : "root";
-                        String password = params.has("password") ? params.get("password").asText() : "YOUR_MYSQL_PASSWORD";
+                        String password = params.has("password") ? params.get("password").asText() : defaultMysqlPassword;
                         try (java.sql.Connection conn = java.sql.DriverManager.getConnection(url, username, password);
                              java.sql.Statement stmt = conn.createStatement();
                              java.sql.ResultSet rs = stmt.executeQuery("SELECT * FROM " + table + " LIMIT 20")) {

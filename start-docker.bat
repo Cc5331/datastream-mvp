@@ -38,7 +38,7 @@ echo    前端页面:      http://localhost:3000
 echo    后端 API:      http://localhost:8080
 echo    Flink Web UI:  http://localhost:8081
 echo    SQL Gateway:   http://localhost:8083
-echo    MySQL(本机):   localhost:3307   root / root123
+echo    MySQL(本机):   localhost:3307   root / root123（默认，可用 .env 中 MYSQL_ROOT_PASSWORD 覆盖）
 echo    Kafka(本机):   localhost:29092
 echo ============================================
 echo.

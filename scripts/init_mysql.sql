@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS user_data (
 );
 
 -- Optional: Create user for Flink JDBC connection
--- CREATE USER 'flink'@'%' IDENTIFIED BY 'flink123';
+-- 示例：CREATE USER 'flink'@'%' IDENTIFIED BY '<密码请在 .env 配置>';
 -- GRANT ALL PRIVILEGES ON flink_demo.* TO 'flink'@'%';
 -- FLUSH PRIVILEGES;
 
