@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 600" width="960" height="600" role="img" aria-label="数据流任务管理系统插画">
+  <defs>
+    <linearGradient id="heroBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1e3a8a"/>
+      <stop offset="55%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#38bdf8"/>
+    </linearGradient>
+    <linearGradient id="nodeIn" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#34d399"/>
+      <stop offset="100%" stop-color="#10b981"/>
+    </linearGradient>
+    <linearGradient id="nodeMid" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#60a5fa"/>
+      <stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+    <linearGradient id="nodeOut" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fbbf24"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+    <radialGradient id="glowBlue" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0%" stop-color="#60a5fa" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#60a5fa" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowAmber" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0%" stop-color="#fbbf24" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#fbbf24" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
+    <filter id="cardShadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="10" stdDeviation="18" flood-color="#0f2557" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+
+  <!-- 背景 -->
+  <rect x="0" y="0" width="960" height="600" rx="28" fill="url(#heroBg)"/>
+  <circle cx="820" cy="90" r="180" fill="url(#glowBlue)" filter="url(#soft)"/>
+  <circle cx="120" cy="520" r="200" fill="url(#glowAmber)" filter="url(#soft)"/>
+  <circle cx="480" cy="300" r="260" fill="url(#glowBlue)" opacity="0.35" filter="url(#soft)"/>
+
+  <!-- 网格点阵 -->
+  <g fill="#ffffff" opacity="0.16">
+    <circle cx="60" cy="60" r="2"/><circle cx="160" cy="60" r="2"/><circle cx="260" cy="60" r="2"/><circle cx="360" cy="60" r="2"/>
+    <circle cx="60" cy="160" r="2"/><circle cx="160" cy="160" r="2"/><circle cx="260" cy="160" r="2"/><circle cx="360" cy="160" r="2"/>
+    <circle cx="60" cy="260" r="2"/><circle cx="160" cy="260" r="2"/><circle cx="260" cy="260" r="2"/><circle cx="360" cy="260" r="2"/>
+    <circle cx="600" cy="340" r="2"/><circle cx="700" cy="340" r="2"/><circle cx="800" cy="340" r="2"/><circle cx="900" cy="340" r="2"/>
+    <circle cx="600" cy="440" r="2"/><circle cx="700" cy="440" r="2"/><circle cx="800" cy="440" r="2"/><circle cx="900" cy="440" r="2"/>
+    <circle cx="600" cy="540" r="2"/><circle cx="700" cy="540" r="2"/><circle cx="800" cy="540" r="2"/><circle cx="900" cy="540" r="2"/>
+  </g>
+
+  <!-- 连线（底层光晕） -->
+  <g stroke="#ffffff" stroke-width="7" fill="none" opacity="0.18" filter="url(#soft)">
+    <path d="M 250 240 C 340 180, 400 200, 470 250"/>
+    <path d="M 510 300 C 580 350, 640 330, 710 290"/>
+    <path d="M 250 360 C 340 400, 410 380, 470 360"/>
+  </g>
+
+  <!-- 连线（上层，带流动动画） -->
+  <g stroke="#e0f2fe" stroke-width="3" fill="none" stroke-linecap="round">
+    <path d="M 250 240 C 340 180, 400 200, 470 250" stroke-dasharray="10 14">
+      <animate attributeName="stroke-dashoffset" from="240" to="0" dur="2.6s" repeatCount="indefinite"/>
+    </path>
+    <path d="M 510 300 C 580 350, 640 330, 710 290" stroke-dasharray="10 14">
+      <animate attributeName="stroke-dashoffset" from="240" to="0" dur="3.1s" repeatCount="indefinite"/>
+    </path>
+    <path d="M 250 360 C 340 400, 410 380, 470 360" stroke-dasharray="10 14">
+      <animate attributeName="stroke-dashoffset" from="240" to="0" dur="2.2s" repeatCount="indefinite"/>
+    </path>
+  </g>
+
+  <!-- 流动粒子 -->
+  <g fill="#ffffff">
+    <circle r="4">
+      <animateMotion dur="2.6s" repeatCount="indefinite" path="M 250 240 C 340 180, 400 200, 470 250"/>
+    </circle>
+    <circle r="3.4" fill="#fde68a">
+      <animateMotion dur="3.1s" repeatCount="indefinite" path="M 510 300 C 580 350, 640 330, 710 290"/>
+    </circle>
+    <circle r="3.4">
+      <animateMotion dur="2.2s" repeatCount="indefinite" path="M 250 360 C 340 400, 410 380, 470 360"/>
+    </circle>
+  </g>
+
+  <!-- 输入节点（文件） -->
+  <g filter="url(#cardShadow)">
+    <rect x="110" y="200" width="150" height="84" rx="18" fill="url(#nodeIn)"/>
+    <rect x="140" y="222" width="34" height="40" rx="6" fill="#ffffff" opacity="0.92"/>
+    <path d="M 158 222 L 174 222 L 174 244 L 158 244 Z" fill="none" stroke="#10b981" stroke-width="3"/>
+    <path d="M 158 262 L 174 262" stroke="#10b981" stroke-width="3" stroke-linecap="round"/>
+    <path d="M 158 234 L 170 234" stroke="#10b981" stroke-width="2.4" stroke-linecap="round" opacity="0.6"/>
+    <circle cx="207" cy="252" r="9" fill="none" stroke="#ffffff" stroke-width="3"/>
+    <path d="M 200 258 L 214 244" stroke="#ffffff" stroke-width="3" stroke-linecap="round"/>
+  </g>
+
+  <!-- 转换节点（齿轮） -->
+  <g filter="url(#cardShadow)">
+    <rect x="470" y="206" width="150" height="84" rx="18" fill="url(#nodeMid)"/>
+    <g transform="translate(545 248)">
+      <circle r="16" fill="none" stroke="#ffffff" stroke-width="4"/>
+      <circle r="6" fill="#ffffff"/>
+      <path d="M -4 -22 L 4 -22 M -4 22 L 4 22 M -22 -4 L -22 4 M 22 -4 L 22 4" stroke="#ffffff" stroke-width="5" stroke-linecap="round"/>
+      <path d="M -15 -15 L -10 -10 M 15 15 L 10 10 M -15 15 L -10 10 M 15 -15 L 10 -10" stroke="#ffffff" stroke-width="4" stroke-linecap="round" opacity="0.7"/>
+    </g>
+  </g>
+
+  <!-- 输出节点（数据库） -->
+  <g filter="url(#cardShadow)">
+    <rect x="710" y="240" width="150" height="100" rx="18" fill="url(#nodeOut)"/>
+    <ellipse cx="785" cy="272" rx="34" ry="11" fill="#ffffff" opacity="0.95"/>
+    <path d="M 751 272 L 751 308 C 751 314 766 320 785 320 C 804 320 819 314 819 308 L 819 272" fill="none" stroke="#ffffff" stroke-width="4"/>
+    <path d="M 751 290 C 751 296 766 302 785 302 C 804 302 819 296 819 290" fill="none" stroke="#ffffff" stroke-width="4" opacity="0.8"/>
+  </g>
+
+  <!-- 顶部小标签 -->
+  <g font-family="'Segoe UI','Microsoft YaHei',sans-serif" font-size="15" font-weight="600" fill="#ffffff">
+    <text x="110" y="182">数据输入</text>
+    <text x="470" y="188">实时转换</text>
+    <text x="710" y="224">数据落库</text>
+  </g>
+
+  <!-- 浮动小图标 -->
+  <g fill="#ffffff" opacity="0.85">
+    <rect x="86" y="470" width="46" height="46" rx="12" fill="#ffffff" opacity="0.12" stroke="#ffffff" stroke-opacity="0.35"/>
+    <path d="M 104 486 l 4 6 4 -6 4 6 4 -6" stroke="#ffffff" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="168" y="452" width="46" height="46" rx="12" fill="#ffffff" opacity="0.12" stroke="#ffffff" stroke-opacity="0.35"/>
+    <path d="M 187 474 a 6 6 0 1 0 4 2" stroke="#ffffff" stroke-width="2.6" fill="none" stroke-linecap="round"/>
+    <rect x="842" y="430" width="46" height="46" rx="12" fill="#ffffff" opacity="0.12" stroke="#ffffff" stroke-opacity="0.35"/>
+    <circle cx="865" cy="450" r="6" fill="none" stroke="#ffffff" stroke-width="2.4"/>
+    <path d="M 861 460 q 4 5 8 0" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round"/>
+  </g>
+</svg>

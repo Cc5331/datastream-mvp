@@ -37,7 +37,10 @@ public class FlinkJobStatusChecker {
     private final JobLogRepository logRepo;
     private final ObjectMapper objectMapper;
     private final ExcelOutputConverter excelOutputConverter;
+    private final XmlOutputConverter xmlOutputConverter;
     private final DagTranslationService dagTranslationService;
+    private final AlertService alertService;
+    private final ParquetOutputConverter parquetOutputConverter;
 
     @Value("${flink.cluster.host:localhost}")
     private String flinkHost;
@@ -154,14 +157,19 @@ public class FlinkJobStatusChecker {
                             convertExcelOutputsIfNeeded(job);
                             mergeCsvOutputsIfNeeded(job);
                             mergeJsonOutputsIfNeeded(job);
+                            convertXmlOutputsIfNeeded(job);
+                            convertParquetOutputsIfNeeded(job);
                         }
                         if (localStatus == JobStatus.CANCELLED) {
                             convertExcelOutputsIfNeeded(job);
                             mergeCsvOutputsIfNeeded(job);
                             mergeJsonOutputsIfNeeded(job);
+                            convertXmlOutputsIfNeeded(job);
+                            convertParquetOutputsIfNeeded(job);
                         }
                         if (localStatus == JobStatus.FAILED) {
                             fetchFlinkJobError(job, flinkJobId);
+                            alertService.sendWebhook(job, "JOB_FAILED", "Flink 作业运行失败: " + flinkJobId);
                         }
                     }
                     break;
@@ -190,9 +198,12 @@ public class FlinkJobStatusChecker {
 convertExcelOutputsIfNeeded(job);
                         mergeCsvOutputsIfNeeded(job);
                         mergeJsonOutputsIfNeeded(job);
+                        convertXmlOutputsIfNeeded(job);
+                        convertParquetOutputsIfNeeded(job);
                     }
                 }
             }
+            finalizeRecentlyCompletedJobs();
         } catch (Exception e) {
             log.debug("Job status sync: {}", e.getMessage());
         }
@@ -206,9 +217,153 @@ convertExcelOutputsIfNeeded(job);
             JsonNode nodes = dagNode.get("nodes");
             if (nodes == null || !nodes.isArray()) return;
 
+            // 按输出文件分组：path -> LinkedHashMap<sheetName, 合并后CSV>；delimiter 取首个节点配置
+            java.util.Map<String, java.util.LinkedHashMap<String, String>> files = new java.util.LinkedHashMap<>();
+            java.util.Map<String, String> fileDelimiter = new java.util.HashMap<>();
+            java.util.Map<String, java.util.Set<String>> fileTempDirs = new java.util.HashMap<>();
             for (JsonNode node : nodes) {
                 String type = node.has("type") ? node.get("type").asText() : "";
                 if (!"excel_output".equals(type)) continue;
+                JsonNode params = node.get("params");
+                if (params == null) continue;
+                String actualPath = params.has("path") ? params.get("path").asText().trim() : "";
+                if (actualPath.isEmpty()) continue;
+                String sheetName = params.has("sheetName") && !params.get("sheetName").asText().trim().isEmpty()
+                        ? params.get("sheetName").asText().trim() : "Data";
+                String delimiter = params.has("delimiter") ? params.get("delimiter").asText().trim() : ",";
+                String tempCsvPath = ExcelOutputConverter.getTempCsvPath(actualPath, sheetName);
+                String header = findSourceHeader(dagNode, node.has("id") ? node.get("id").asText() : "", delimiter);
+                String mergedCsv = mergeCsvParts(tempCsvPath, header);
+                if (mergedCsv == null) {
+                    log.warn("Excel output conversion failed, temp CSV at: {}", tempCsvPath);
+                    continue;
+                }
+                files.computeIfAbsent(actualPath, k -> new java.util.LinkedHashMap<>()).put(sheetName, mergedCsv);
+                fileTempDirs.computeIfAbsent(actualPath, k -> new java.util.LinkedHashSet<>()).add(tempCsvPath);
+                fileDelimiter.putIfAbsent(actualPath, delimiter);
+                log.info("Excel output node {} -> file {} sheet {}", node.has("id") ? node.get("id").asText() : "?", actualPath, sheetName);
+            }
+
+            for (java.util.Map.Entry<String, java.util.LinkedHashMap<String, String>> entry : files.entrySet()) {
+                String actualPath = entry.getKey();
+                java.util.LinkedHashMap<String, String> sheets = entry.getValue();
+                String delimiter = fileDelimiter.getOrDefault(actualPath, ",");
+                boolean success;
+                if (sheets.size() == 1) {
+                    java.util.Map.Entry<String, String> only = sheets.entrySet().iterator().next();
+                    success = excelOutputConverter.convertCsvToExcel(only.getValue(), actualPath, delimiter, true, only.getKey());
+                } else {
+                    success = excelOutputConverter.convertCsvsToExcel(sheets, actualPath, delimiter, true);
+                }
+                if (success) {
+                    JobLog l = new JobLog();
+                    l.setJobId(job.getId()); l.setLevel("INFO");
+                    l.setMessage("Excel output converted: " + actualPath + " (" + sheets.size() + " sheets)");
+                    l.setTimestamp(LocalDateTime.now());
+                    logRepo.save(l);
+                } else {
+                    JobLog l = new JobLog();
+                    l.setJobId(job.getId()); l.setLevel("WARN");
+                    l.setMessage("Excel output conversion failed: " + actualPath);
+                    l.setTimestamp(LocalDateTime.now());
+                    logRepo.save(l);
+                }
+                if (success) {
+                    java.util.Set<String> dirs = fileTempDirs.get(actualPath);
+                    if (dirs != null) {
+                        for (String d : dirs) {
+                            deleteRecursively(new java.io.File(d));
+                            deleteRecursively(new java.io.File(d + "_merged.csv"));
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to convert excel outputs for job {}: {}", job.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * 合并 temp CSV 目录下所有 part 文件（可选带表头）为单个 CSV 文件
+     */
+    private String mergeCsvParts(String tempCsvPath, String header) {
+        try {
+            java.io.File tempDir = new java.io.File(tempCsvPath);
+            if (!tempDir.isDirectory()) return null;
+            java.io.File[] parts = tempDir.listFiles((d, n) -> n.startsWith("part-") || n.startsWith(".part-"));
+            if (parts == null || parts.length == 0) return null;
+            java.util.Arrays.sort(parts);
+            StringBuilder sb = new StringBuilder();
+            if (header != null && !header.trim().isEmpty()) sb.append(header).append("\n");
+            for (java.io.File pf : parts) {
+                sb.append(new String(java.nio.file.Files.readAllBytes(pf.toPath()), java.nio.charset.StandardCharsets.UTF_8));
+            }
+            java.io.File merged = new java.io.File(tempCsvPath + "_merged.csv");
+            java.nio.file.Files.write(merged.toPath(), sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return merged.getAbsolutePath();
+        } catch (Exception e) {
+            log.warn("Failed to merge CSV parts {}: {}", tempCsvPath, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Parquet 输出：作业完成后将临时 CSV 转换为 .parquet
+     */
+    private void convertParquetOutputsIfNeeded(JobDefinition job) {
+        try {
+            String dagJson = job.getDagJson();
+            if (dagJson == null || dagJson.isEmpty()) return;
+            JsonNode dagNode = objectMapper.readTree(dagJson);
+            JsonNode nodes = dagNode.get("nodes");
+            if (nodes == null || !nodes.isArray()) return;
+
+            for (JsonNode node : nodes) {
+                String type = node.has("type") ? node.get("type").asText() : "";
+                if (!"parquet_output".equals(type)) continue;
+                JsonNode params = node.get("params");
+                if (params == null) continue;
+                String actualPath = params.has("path") ? params.get("path").asText().trim() : "";
+                if (actualPath.isEmpty()) continue;
+                String delimiter = params.has("delimiter") ? params.get("delimiter").asText().trim() : ",";
+                String tempCsvPath = actualPath.replaceAll("(?i)\\.parquet$", "") + "_temp_csv";
+                String header = findSourceHeader(dagNode, node.has("id") ? node.get("id").asText() : "", delimiter);
+                String mergedCsv = mergeCsvParts(tempCsvPath, header);
+                if (mergedCsv == null) {
+                    JobLog w = new JobLog();
+                    w.setJobId(job.getId()); w.setLevel("WARN");
+                    w.setMessage("Parquet output conversion failed, temp CSV at: " + tempCsvPath);
+                    w.setTimestamp(LocalDateTime.now());
+                    logRepo.save(w);
+                    continue;
+                }
+                boolean success = parquetOutputConverter.convertCsvToParquet(mergedCsv, actualPath, delimiter);
+                if (success) {
+                    deleteRecursively(new java.io.File(tempCsvPath));
+                    deleteRecursively(new java.io.File(tempCsvPath + "_merged.csv"));
+                }
+                JobLog l = new JobLog();
+                l.setJobId(job.getId()); l.setLevel(success ? "INFO" : "WARN");
+                l.setMessage(success ? ("Parquet output converted: " + actualPath) : ("Parquet output conversion failed: " + actualPath));
+                l.setTimestamp(LocalDateTime.now());
+                logRepo.save(l);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to convert parquet outputs for job {}: {}", job.getId(), e.getMessage());
+        }
+    }
+
+    private void convertXmlOutputsIfNeeded(JobDefinition job) {
+        try {
+            String dagJson = job.getDagJson();
+            if (dagJson == null || dagJson.isEmpty()) return;
+            JsonNode dagNode = objectMapper.readTree(dagJson);
+            JsonNode nodes = dagNode.get("nodes");
+            if (nodes == null || !nodes.isArray()) return;
+
+            for (JsonNode node : nodes) {
+                String type = node.has("type") ? node.get("type").asText() : "";
+                if (!"xml_output".equals(type)) continue;
 
                 JsonNode params = node.get("params");
                 if (params == null) continue;
@@ -216,9 +371,12 @@ convertExcelOutputsIfNeeded(job);
                 if (actualPath.isEmpty()) continue;
 
                 String delimiter = params.has("delimiter") ? params.get("delimiter").asText().trim() : ",";
-                String tempCsvPath = ExcelOutputConverter.getTempCsvPath(actualPath);
+                String rootTag = params.has("rootTag") ? params.get("rootTag").asText().trim() : "root";
+                String rowTag = params.has("rowTag") ? params.get("rowTag").asText().trim() : "record";
+                String encoding = params.has("encoding") ? params.get("encoding").asText().trim() : "UTF-8";
+                String tempCsvPath = XmlOutputConverter.getTempCsvPath(actualPath);
 
-                log.info("Converting CSV to Excel for job {}: {} -> {}", job.getId(), tempCsvPath, actualPath);
+                log.info("Converting CSV to XML for job {}: {} -> {}", job.getId(), tempCsvPath, actualPath);
                 String header = findSourceHeader(dagNode, node.has("id") ? node.get("id").asText() : "", delimiter);
                 boolean success;
                 java.io.File tempDir = new java.io.File(tempCsvPath);
@@ -232,31 +390,32 @@ convertExcelOutputsIfNeeded(job);
                         }
                         java.io.File hdrFile = new java.io.File(actualPath + "_hdr.csv");
                         java.nio.file.Files.write(hdrFile.toPath(), hdrSb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                        success = excelOutputConverter.convertCsvToExcel(hdrFile.getAbsolutePath(), actualPath, delimiter, true);
+                        success = xmlOutputConverter.convertCsvToXml(hdrFile.getAbsolutePath(), actualPath, delimiter, rootTag, rowTag, encoding);
                         hdrFile.delete();
                     } else {
-                        success = excelOutputConverter.convertCsvToExcel(tempCsvPath, actualPath, delimiter, true);
+                        success = xmlOutputConverter.convertCsvToXml(tempCsvPath, actualPath, delimiter, rootTag, rowTag, encoding);
                     }
                 } else {
-                    success = excelOutputConverter.convertCsvToExcel(tempCsvPath, actualPath, delimiter, true);
+                    success = xmlOutputConverter.convertCsvToXml(tempCsvPath, actualPath, delimiter, rootTag, rowTag, encoding);
                 }
 
                 if (success) {
+                deleteRecursively(new java.io.File(tempCsvPath));
                     JobLog l = new JobLog();
                     l.setJobId(job.getId()); l.setLevel("INFO");
-                    l.setMessage("Excel output converted: " + actualPath);
+                    l.setMessage("XML output converted: " + actualPath);
                     l.setTimestamp(LocalDateTime.now());
                     logRepo.save(l);
                 } else {
                     JobLog l = new JobLog();
                     l.setJobId(job.getId()); l.setLevel("WARN");
-                    l.setMessage("Excel output conversion failed, temp CSV at: " + tempCsvPath);
+                    l.setMessage("XML output conversion failed, temp CSV at: " + tempCsvPath);
                     l.setTimestamp(LocalDateTime.now());
                     logRepo.save(l);
                 }
             }
         } catch (Exception e) {
-            log.warn("Failed to convert excel outputs for job {}: {}", job.getId(), e.getMessage());
+            log.warn("Failed to convert xml outputs for job {}: {}", job.getId(), e.getMessage());
         }
     }
 
@@ -266,7 +425,8 @@ convertExcelOutputsIfNeeded(job);
             JsonNode nodes = dagNode.get("nodes");
             if (edges == null || nodes == null || targetNodeId == null) return null;
             Set<String> transformTypes = Set.of(
-                    "field_filter", "field_rename", "row_filter", "json_parse", "xml_json", "field_concat");
+                    "field_filter", "field_rename", "row_filter", "json_parse", "xml_json", "field_concat",
+                    "dedupe", "validate", "route");
             // 沿边从输出节点向上收集节点链：输入节点在链尾，transform 依次在前
             List<String> chain = new ArrayList<>();
             String cur = targetNodeId;
@@ -320,13 +480,26 @@ convertExcelOutputsIfNeeded(job);
                 String type = n.has("type") ? n.get("type").asText() : "";
                 JsonNode params = n.get("params");
                 if (params == null) return null;
-                if ("csv_input".equals(type) || "excel_input".equals(type)) {
+                if ("csv_input".equals(type) || "excel_input".equals(type) || "xml_input".equals(type) || "json_input".equals(type)) {
+                    if ("json_input".equals(type)) {
+                        String mode = params.has("mode") ? params.get("mode").asText() : "auto";
+                        boolean arrayMode = "array".equalsIgnoreCase(mode)
+                                || ("auto".equalsIgnoreCase(mode) && JsonPreprocessor.isJsonArrayFile(params.has("path") ? params.get("path").asText().trim() : ""));
+                        if (!arrayMode) {
+                            String fc = params.has("fieldsConfig") ? params.get("fieldsConfig").asText() : "[]";
+                            return fieldsConfigNameList(fc);
+                        }
+                    }
                     String hasHeader = params.has("hasHeader") ? params.get("hasHeader").asText() : "true";
                     if (!"true".equalsIgnoreCase(hasHeader)) return null;
                     String p = params.has("path") ? params.get("path").asText().trim() : "";
                     String filePath = p;
                     if ("excel_input".equals(type)) {
                         filePath = p.replaceAll("(?i)\\.(xlsx|xls)$", "") + "_converted.csv";
+                    } else if ("xml_input".equals(type)) {
+                        filePath = p.replaceAll("(?i)\\.xml$", "") + "_converted.csv";
+                    } else if ("json_input".equals(type)) {
+                        filePath = p.replaceAll("(?i)\\.json$", "") + "_converted.csv";
                     }
                     String delim = params.has("delimiter") ? params.get("delimiter").asText().trim() : ",";
                     java.io.File f = new java.io.File(filePath);
@@ -336,6 +509,17 @@ convertExcelOutputsIfNeeded(job);
                         if (line == null) return null;
                         return parseHeaderList(line, delim);
                     }
+                } else if ("parquet_input".equals(type)) {
+                    String pqPath = params.has("path") ? params.get("path").asText().trim() : "";
+                    String pqCsv = pqPath.replaceAll("(?i)\\.parquet$", "") + "_converted.csv";
+                    String pqDelim = params.has("delimiter") ? params.get("delimiter").asText().trim() : ",";
+                    java.io.File pqFile = new java.io.File(pqCsv);
+                    if (!pqFile.isFile()) return null;
+                    try (java.io.BufferedReader pqReader = java.nio.file.Files.newBufferedReader(pqFile.toPath(), java.nio.charset.StandardCharsets.UTF_8)) {
+                        String pqLine = pqReader.readLine();
+                        if (pqLine == null) return null;
+                        return parseHeaderList(pqLine, pqDelim);
+                    }
                 } else if ("mysql_input".equals(type)) {
                     String url = params.has("url") ? params.get("url").asText().trim() : "";
                     String table = params.has("table") ? params.get("table").asText().trim() : "";
@@ -343,7 +527,7 @@ convertExcelOutputsIfNeeded(job);
                     String password = params.has("password") ? params.get("password").asText() : "";
                     if (url.isEmpty() || table.isEmpty()) return null;
                     return mysqlColumnNameList(url, table, username, password);
-                } else if ("json_input".equals(type) || "datagen_input".equals(type) || "kafka_input".equals(type)) {
+                } else if ("datagen_input".equals(type) || "kafka_input".equals(type)) {
                     String fc = params.has("fieldsConfig") ? params.get("fieldsConfig").asText() : "[]";
                     return fieldsConfigNameList(fc);
                 }
@@ -468,6 +652,74 @@ convertExcelOutputsIfNeeded(job);
     /**
      * Merge Flink filesystem sink part-* files into the user-specified single CSV file.
      */
+    private void deleteRecursively(java.io.File f) {
+        if (f == null || !f.exists()) return;
+        if (f.isDirectory()) {
+            java.io.File[] children = f.listFiles();
+            if (children != null) {
+                for (java.io.File c : children) deleteRecursively(c);
+            }
+        }
+        f.delete();
+    }
+
+    /**
+     * 最近 3 分钟内完成的作业再跑一轮输出合并：处理多输出链路中个别 part 文件延迟落盘的竞态
+     */
+    /**
+     * 判断作业是否仍有待合并的输出临时目录（避免对已完成合并的作业重复扫描）
+     */
+    private boolean hasPendingOutputs(JobDefinition job) {
+        try {
+            if (job.getDagJson() == null || job.getDagJson().isEmpty()) return false;
+            JsonNode dagNode = objectMapper.readTree(job.getDagJson());
+            JsonNode nodes = dagNode.get("nodes");
+            if (nodes == null || !nodes.isArray()) return false;
+            for (JsonNode node : nodes) {
+                String type = node.has("type") ? node.get("type").asText() : "";
+                if (!type.endsWith("_output")) continue;
+                if (node.get("params") == null || !node.get("params").has("path")) continue;
+                String path = node.get("params").get("path").asText().trim();
+                if (path.isEmpty()) continue;
+                if ("csv_output".equals(type) || "json_output".equals(type)) {
+                    if (new java.io.File(path + ".tmp").isDirectory()) return true;
+                    continue;
+                }
+                if ("excel_output".equals(type) || "xml_output".equals(type) || "parquet_output".equals(type)) {
+                    String base = path.replaceAll("(?i)\\.(xlsx|xls|xml|parquet)$", "");
+                    java.io.File baseTemp = new java.io.File(base + "_temp_csv");
+                    if (baseTemp.isDirectory()) return true;
+                    java.io.File parent = baseTemp.getParentFile();
+                    if (parent != null && parent.isDirectory()) {
+                        String prefix = baseTemp.getName();
+                        java.io.File[] sib = parent.listFiles((d, n) -> n.equals(prefix) || n.startsWith(prefix + "_"));
+                        if (sib != null && sib.length > 0) return true;
+                    }
+                }
+            }
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private void finalizeRecentlyCompletedJobs() {
+        try {
+            List<JobDefinition> recent = jobRepo.findByStatusAndCompletedAtAfter(JobStatus.COMPLETED, LocalDateTime.now().minusSeconds(180));
+            if (recent.isEmpty()) return;
+            for (JobDefinition job : recent) {
+                if (!hasPendingOutputs(job)) continue;
+                convertExcelOutputsIfNeeded(job);
+                mergeCsvOutputsIfNeeded(job);
+                mergeJsonOutputsIfNeeded(job);
+                convertXmlOutputsIfNeeded(job);
+                convertParquetOutputsIfNeeded(job);
+            }
+        } catch (Exception e) {
+            log.debug("Finalize recently completed jobs: {}", e.getMessage());
+        }
+    }
+
     private void mergeCsvOutputsIfNeeded(JobDefinition job) {
         try {
             String dagJson = job.getDagJson();
@@ -506,6 +758,7 @@ convertExcelOutputsIfNeeded(job);
                 java.nio.file.Files.write(out.toPath(), sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 String delimiter = params.has("delimiter") ? params.get("delimiter").asText().trim() : ",";
                 prependSourceHeaderIfNeeded(dagNode, node.has("id") ? node.get("id").asText() : "", delimiter, out);
+                deleteRecursively(dir);
 
                 JobLog l = new JobLog();
                 l.setJobId(job.getId()); l.setLevel("INFO");
@@ -516,6 +769,22 @@ convertExcelOutputsIfNeeded(job);
             }
         } catch (Exception e) {
             log.warn("Failed to merge csv outputs for job {}: {}", job.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * Finalize outputs for a cancelled job: merge CSV/JSON part files and
+     * convert Excel/XML/Parquet, so streaming jobs still produce files on cancel.
+     */
+    public void finalizeJobOutputs(JobDefinition job) {
+        try {
+            convertExcelOutputsIfNeeded(job);
+            mergeCsvOutputsIfNeeded(job);
+            mergeJsonOutputsIfNeeded(job);
+            convertXmlOutputsIfNeeded(job);
+            convertParquetOutputsIfNeeded(job);
+        } catch (Exception e) {
+            log.warn("finalizeJobOutputs error for job {}: {}", job.getId(), e.getMessage());
         }
     }
 
@@ -566,6 +835,8 @@ convertExcelOutputsIfNeeded(job);
             convertExcelOutputsIfNeeded(job);
             mergeCsvOutputsIfNeeded(job);
             mergeJsonOutputsIfNeeded(job);
+            convertXmlOutputsIfNeeded(job);
+            convertParquetOutputsIfNeeded(job);
             return true;
         } catch (Exception e) {
             log.warn("autoStopKafkaJobIfNeeded error for job {}: {}", job.getId(), e.getMessage());
@@ -662,10 +933,23 @@ convertExcelOutputsIfNeeded(job);
                 for (java.io.File pf : parts) {
                     sb.append(new String(java.nio.file.Files.readAllBytes(pf.toPath()), java.nio.charset.StandardCharsets.UTF_8));
                 }
+                String mode = params.has("mode") ? params.get("mode").asText().trim() : "lines";
+                String content;
+                if ("array".equalsIgnoreCase(mode)) {
+                    // JSON Lines -> JSON 数组：[line1, line2, ...]
+                    java.util.List<String> jsonLines = new java.util.ArrayList<>();
+                    for (String ln : sb.toString().split("\n")) {
+                        String t = ln.trim();
+                        if (!t.isEmpty()) jsonLines.add(t);
+                    }
+                    content = "[\n  " + String.join(",\n  ", jsonLines) + "\n]\n";
+                } else {
+                    content = sb.toString();
+                }
                 java.io.File out = new java.io.File(actualPath);
                 if (out.exists()) out.delete();
-                java.nio.file.Files.write(out.toPath(), sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
-
+                java.nio.file.Files.write(out.toPath(), content.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                deleteRecursively(dir);
                 JobLog l = new JobLog();
                 l.setJobId(job.getId()); l.setLevel("INFO");
                 l.setMessage("JSON output merged: " + actualPath + " (" + parts.length + " part file(s))");

@@ -10,4 +10,5 @@ import java.util.List;
 public interface JobLogRepository extends JpaRepository<JobLog, Long> {
     List<JobLog> findByJobIdOrderByTimestampDesc(Long jobId);
     List<JobLog> findByJobIdAndLevelOrderByTimestampDesc(Long jobId, String level);
+    List<JobLog> findTop20ByJobIdOrderByTimestampDesc(Long jobId);
 }

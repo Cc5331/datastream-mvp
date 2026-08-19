@@ -12,4 +12,7 @@ public interface JobDefinitionRepository extends JpaRepository<JobDefinition, Lo
     List<JobDefinition> findAllByOrderByUpdatedAtDesc();
     List<JobDefinition> findByStatusIn(List<JobDefinition.JobStatus> statuses);
     List<JobDefinition> findByScheduleEnabledTrue();
+    List<JobDefinition> findByStatusAndCompletedAtAfter(JobDefinition.JobStatus status, java.time.LocalDateTime completedAt);
+    List<JobDefinition> findByOwnerIdOrderByUpdatedAtDesc(Long ownerId);
+    List<JobDefinition> findByOnlineTrue();
 }

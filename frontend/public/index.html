@@ -6,13 +6,51 @@
     <title>数据流任务管理系统 - DataStream MVP</title>
 
     <!-- 样式 -->
-    <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css">
+    <link rel="stylesheet" href="vendor/element-plus.css">
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
     <div id="app">
+        <!-- 登录页（独立全屏界面） -->
+        <div v-if="!user" class="login-page">
+            <div class="login-hero">
+                <img src="images/login-hero.svg" alt="数据流任务管理系统插画" class="login-hero-img" />
+                <div class="login-hero-caption">
+                    <div class="login-hero-title">可视化数据流编排平台</div>
+                    <div class="login-hero-sub">拖拽画布 · 一键提交 Flink · 作业依赖 · 全链路血缘</div>
+                </div>
+            </div>
+            <div class="login-panel">
+                <div class="login-panel-inner">
+                    <div class="login-brand">
+                        <div class="login-logo">📊</div>
+                        <h2>数据流任务管理系统</h2>
+                        <p>DataStream Task Management · MVP</p>
+                    </div>
+                    <el-form label-position="top" @submit.prevent="login" class="login-form">
+                        <el-form-item label="用户名">
+                            <el-input v-model="loginUsername" placeholder="请输入用户名" size="large" @keyup.enter="login" :prefix-icon="'User'"></el-input>
+                        </el-form-item>
+                        <el-form-item label="密码">
+                            <el-input v-model="loginPassword" type="password" placeholder="请输入密码" size="large" show-password @keyup.enter="login" :prefix-icon="'Lock'"></el-input>
+                        </el-form-item>
+                        <div v-if="loginError" class="login-error">{{ loginError }}</div>
+                        <el-button type="primary" size="large" class="login-btn" :loading="loginLoading" @click="login">登 录</el-button>
+                    </el-form>
+                    <div class="login-demo">
+                        <span class="login-demo-label">演示账号</span>
+                        <div class="login-demo-accounts">
+                            <code>admin / admin123</code>
+                            <code>operator / operator123</code>
+                            <code>viewer / viewer123</code>
+                        </div>
+                    </div>
+                    <div class="login-foot">© 2026 数据流任务管理系统 · Spring Boot + Flink + Vue3</div>
+                </div>
+            </div>
+        </div>
         <!-- 顶部导航栏 -->
-        <el-container style="height: 100vh">
+        <el-container v-if="user" style="height: 100vh">
             <el-header class="app-header" style="height: 56px; padding: 0 20px;">
                 <div class="header-left">
                     <h1 style="margin: 0; font-size: 18px; color: #409eff;">📊 数据流任务管理系统</h1>
@@ -28,9 +66,42 @@
                     <el-button size="small" :type="currentView === 'controls' ? 'primary' : ''" @click="currentView = 'controls'">
                         <el-icon><Grid /></el-icon> 控件管理
                     </el-button>
-                    <el-button size="small" type="info" @click="showHelp = true">
-                        <el-icon><QuestionFilled /></el-icon> 帮助
+                    <el-button size="small" :type="currentView === 'monitor' ? 'primary' : ''" @click="currentView = 'monitor'">
+                        <el-icon><Odometer /></el-icon> 实时监控
                     </el-button>
+                    <el-button size="small" :type="currentView === 'workflow' ? 'primary' : ''" @click="currentView = 'workflow'">
+                        <el-icon><Share /></el-icon> 工作流
+                    </el-button>
+                    <el-button v-if="canViewAudit" size="small" :type="currentView === 'audit' ? 'primary' : ''" @click="currentView = 'audit'">
+                        <el-icon><Memo /></el-icon> 操作审计
+                    </el-button>
+                    <el-button v-if="canEdit" size="small" :type="currentView === 'ai' ? 'primary' : ''" @click="currentView = 'ai'">
+                        <el-icon><MagicStick /></el-icon> AI 助手
+                    </el-button>
+                    <el-button size="small" :type="currentView === 'alerts' ? 'primary' : ''" @click="currentView = 'alerts'; loadAlerts()">
+                        <el-icon><Bell /></el-icon> 告警中心
+                        <el-badge v-if="alertUnread > 0" :value="alertUnread" :max="99" style="margin-left:4px;" />
+                    </el-button>
+                    <el-dropdown trigger="click" @command="openHelp">
+                        <el-button size="small" type="info">
+                            <el-icon><QuestionFilled /></el-icon> 帮助
+                            <el-icon style="margin-left:2px;"><ArrowDown /></el-icon>
+                        </el-button>
+                        <template #dropdown>
+                            <el-dropdown-menu>
+                                <el-dropdown-item command="quick"><el-icon><Guide /></el-icon> 快速上手</el-dropdown-item>
+                                <el-dropdown-item command="controls"><el-icon><Grid /></el-icon> 控件说明</el-dropdown-item>
+                                <el-dropdown-item command="shortcuts"><el-icon><Keyboard /></el-icon> 快捷键</el-dropdown-item>
+                                <el-dropdown-item command="tips"><el-icon><MagicStick /></el-icon> 技巧与 FAQ</el-dropdown-item>
+                                <el-dropdown-item command="about" divided><el-icon><InfoFilled /></el-icon> 关于</el-dropdown-item>
+                            </el-dropdown-menu>
+                        </template>
+                    </el-dropdown>
+                    <div class="user-menu" v-if="user">
+                        <el-tag :type="user.role === 'ADMIN' ? 'danger' : user.role === 'OPERATOR' ? 'warning' : 'info'" size="small" effect="dark">{{ user.role }}</el-tag>
+                        <span class="user-name">{{ user.displayName || user.username }}</span>
+                        <el-button size="small" type="danger" plain @click="logout">退出</el-button>
+                    </div>
                 </div>
             </el-header>
 
@@ -42,23 +113,35 @@
                         <div class="toolbar-actions">
                             <el-input v-model="jobName" placeholder="作业名称" size="small" style="width: 200px; margin-right: 8px;"></el-input>
                             <el-input-number v-model="parallelism" :min="1" :max="8" size="small" style="width: 100px; margin-right: 8px;"></el-input-number>
-                            <el-button size="small" type="primary" @click="saveDag" :loading="saving">
+                            <el-button size="small" v-if="canEdit" type="primary" @click="saveDag" :loading="saving">
                                 <el-icon><Check /></el-icon> 保存
                             </el-button>
-                            <el-button size="small" type="success" @click="submitJob" :loading="submitting">
+                            <el-button size="small" v-if="canEdit" type="success" @click="submitJob" :loading="submitting">
                                 <el-icon><Upload /></el-icon> 提交运行
                             </el-button>
-                            <el-button size="small" @click="exportDag">
+                            <el-button size="small" v-if="canEdit" @click="exportDag">
                                 <el-icon><Download /></el-icon> 导出JSON
                             </el-button>
-                            <el-button size="small" @click="importDagTrigger">
+                            <el-button size="small" v-if="canEdit" @click="importDagTrigger">
                                 <el-icon><Upload /></el-icon> 导入JSON
                             </el-button>
                             <input type="file" id="importFileInput" accept=".json" style="display:none" @change="importDag">
-                            <el-button size="small" type="primary" plain @click="newCanvas">
+                            <el-button size="small" @click="undoDag" :disabled="!canUndo">↩ 撤销</el-button>
+                            <el-button size="small" @click="redoDag" :disabled="!canRedo">↪ 重做</el-button>
+                            <el-button size="small" v-if="canEdit" type="primary" plain @click="newCanvas">
                                 <el-icon><Plus /></el-icon> 新建画布
                             </el-button>
-                            <el-button size="small" type="danger" @click="clearCanvas">
+                            <el-dropdown trigger="click" @command="loadSampleDag">
+                                <el-button size="small" type="success" plain>
+                                    <el-icon><DocumentAdd /></el-icon> 示例作业
+                                </el-button>
+                                <template #dropdown>
+                                    <el-dropdown-menu>
+                                        <el-dropdown-item v-for="(dag, key) in SAMPLE_DAGS" :key="key" :command="key">{{ dag.jobName }}</el-dropdown-item>
+                                    </el-dropdown-menu>
+                                </template>
+                            </el-dropdown>
+                            <el-button size="small" v-if="canEdit" type="danger" @click="clearCanvas">
                                 <el-icon><Delete /></el-icon> 清空
                             </el-button>
                         </div>
@@ -128,27 +211,76 @@
                                               v-model="nodeParams[key]" placeholder="逗号分隔多个值"></el-input>
                                 </el-form-item>
                             </el-form>
-                            <el-button size="small" type="primary" @click="applyParams" style="width:100%">应用参数</el-button>
+                            
+                            <div style="display:flex;gap:6px;">
+                                <el-button size="small" type="success" plain @click="previewNode" style="flex:1;" :loading="previewLoading">📊 预览数据</el-button>
+                                <el-button size="small" type="primary" @click="applyParams" style="flex:1;">应用参数</el-button>
+                            </div>
                         </div>
                     </div>
                 </div>
 
+
+                <!-- 数据预览弹窗 -->
+                <el-dialog v-model="previewVisible" title="📊 数据预览" width="78%" :close-on-click-modal="true" top="6vh">
+                    <div v-if="previewLoading" style="text-align:center;padding:32px;color:#909399;">正在读取数据...</div>
+                    <template v-else-if="previewData">
+                        <p style="margin:0 0 10px;color:#606266;word-break:break-all;font-size:12px;">
+                            路径：{{ previewData.path }}
+                            <el-tag v-if="previewData.note" size="small" type="info" style="margin-left:8px;">{{ previewData.note }}</el-tag>
+                        </p>
+                        <el-alert v-if="previewData.message" :title="previewData.message" type="warning" :closable="false" show-icon style="margin-bottom:10px;"></el-alert>
+                        <el-table v-if="previewData.columns && previewData.columns.length && previewRows.length" :data="previewRows" size="small" border max-height="460" style="width:100%">
+                            <el-table-column v-for="(col, ci) in previewData.columns" :key="'col_' + ci" :prop="'c_' + ci" :label="col" min-width="110" show-overflow-tooltip></el-table-column>
+                        </el-table>
+                        <p v-else-if="!previewData.message" style="color:#909399;font-size:12px;">没有可展示的数据行</p>
+                        <p v-if="previewData.truncated" style="color:#909399;font-size:12px;margin-top:8px;">数据较多，仅显示前 {{ previewData.rows?.length }} 行</p>
+                    </template>
+                </el-dialog>
+
                 <!-- 作业管理视图 -->
                 <div v-show="currentView === 'jobs'" class="jobs-view">
-                    <el-table :data="jobs" style="width: 100%; height: 100%;" stripe @row-dblclick="openJob">
+                    <div style="display:flex; gap:10px; align-items:center; margin-bottom:12px;">
+                        <el-input v-model="jobSearch" placeholder="搜索作业名称 / ID / Flink Job ID" clearable size="small" style="width:280px">
+                            <template #prefix><el-icon><Search /></el-icon></template>
+                        </el-input>
+                        <el-select v-model="jobStatusFilter" placeholder="全部状态" clearable size="small" style="width:150px">
+                            <el-option v-for="s in ['DRAFT','SUBMITTED','RUNNING','COMPLETED','FAILED','CANCELLED','WAITING','BLOCKED']" :key="s" :label="s" :value="s"></el-option>
+                        </el-select>
+                        <span style="color:#909399; font-size:12px;">共 {{ filteredJobs.length }} / {{ jobs.length }} 个作业</span>
+                        <div style="margin-left:auto; display:flex; gap:10px; align-items:center;">
+                            <el-popover placement="bottom" :width="170" trigger="click">
+                                <template #reference>
+                                    <el-button size="small"><el-icon><Setting /></el-icon> 列设置</el-button>
+                                </template>
+                                <div style="display:flex; flex-direction:column; gap:8px; padding:4px 2px;">
+                                    <el-checkbox v-model="jobCols.description">描述</el-checkbox>
+                                    <el-checkbox v-model="jobCols.parallelism">并行度</el-checkbox>
+                                    <el-checkbox v-model="jobCols.flinkJobId">Flink Job ID</el-checkbox>
+                                    <el-checkbox v-model="jobCols.updatedAt">更新时间</el-checkbox>
+                                </div>
+                            </el-popover>
+                            <el-checkbox v-model="onlyMine" size="small">只看我的</el-checkbox>
+                        </div>
+                    </div>
+                    <el-table :data="filteredJobs" style="width: 100%; height: calc(100% - 42px);" stripe @row-dblclick="openJobDetail">
                         <el-table-column prop="id" label="ID" width="60"></el-table-column>
                         <el-table-column prop="name" label="作业名称" min-width="150"></el-table-column>
-                        <el-table-column prop="description" label="描述" min-width="200">
+                        <el-table-column prop="ownerName" label="创建人" width="100">
+                            <template #default="scope"><span>{{ scope.row.ownerName || '-' }}</span></template>
+                        </el-table-column>
+                        <el-table-column v-if="jobCols.description" prop="description" label="描述" min-width="200">
                             <template #default="scope">
                                 <span>{{ scope.row.description || '-' }}</span>
                             </template>
                         </el-table-column>
-                        <el-table-column prop="status" label="状态" width="120">
+                        <el-table-column prop="status" label="状态" width="140">
                             <template #default="scope">
                                 <el-tag :type="statusTag(scope.row.status)" size="small">{{ scope.row.status }}</el-tag>
+                                <el-tag v-if="scope.row.online" type="success" size="small" effect="dark" style="margin-left:4px;">在线</el-tag>
                             </template>
                         </el-table-column>
-                        <el-table-column prop="parallelism" label="并行度" width="80"></el-table-column>
+                        <el-table-column v-if="jobCols.parallelism" prop="parallelism" label="并行度" width="80"></el-table-column>
                         <el-table-column label="错误详情" min-width="200">
                             <template #default="scope">
                                 <el-tooltip v-if="jobErrors[scope.row.id]" :content="jobErrors[scope.row.id]" placement="top" effect="dark">
@@ -159,27 +291,199 @@
                                 <span v-else style="color:#909399; font-size:12px;">-</span>
                             </template>
                         </el-table-column>
-                        <el-table-column prop="flinkJobId" label="Flink Job ID" min-width="180">
+                        <el-table-column v-if="jobCols.flinkJobId" prop="flinkJobId" label="Flink Job ID" min-width="180">
                             <template #default="scope">
                                 <span style="font-size:12px; color:#999;">{{ scope.row.flinkJobId || '-' }}</span>
                             </template>
                         </el-table-column>
-                        <el-table-column prop="updatedAt" label="更新时间" width="170"></el-table-column>
-                        <el-table-column label="调度" width="130">
+                        <el-table-column v-if="jobCols.updatedAt" prop="updatedAt" label="更新时间" width="170"></el-table-column>
+                        <el-table-column label="调度" width="170">
                             <template #default="scope">
-                                <el-tag v-if="scope.row.scheduleEnabled" type="warning" size="small">{{ scope.row.cronExpression || '已启用' }}</el-tag>
+                                <el-tag v-if="scope.row.scheduleEnabled" type="warning" size="small">{{ scope.row.cronExpression ? cronToHuman(scope.row.cronExpression) : '已启用' }}</el-tag>
                                 <span v-else style="color:#909399; font-size:12px;">-</span>
                             </template>
                         </el-table-column>
-                        <el-table-column label="操作" width="330">
+                        <el-table-column label="操作" width="360" fixed="right">
                             <template #default="scope">
-                                <el-button size="small" type="primary" @click="openJob(scope.row)">编辑</el-button>
-                                <el-button size="small" type="success" @click="submitJobById(scope.row.id)"
+                                <el-button v-if="canEdit" size="small" type="primary" @click="openJob(scope.row)">编辑</el-button>
+                                <el-button v-if="canEdit" size="small" type="success" @click="submitJobById(scope.row.id)"
                                     :disabled="scope.row.status==='RUNNING'||scope.row.status==='SUBMITTED'">运行</el-button>
-                                <el-button size="small" @click="copyJobById(scope.row.id)">复制</el-button>
-                                <el-button size="small" type="warning" @click="openScheduleDialog(scope.row)">调度</el-button>
-                                <el-button size="small" @click="viewLogs(scope.row)">日志</el-button>
-                                <el-button size="small" type="danger" @click="deleteJob(scope.row.id)">删除</el-button>
+                                <el-button v-if="canEdit && !scope.row.online" size="small" type="success" plain @click="onlineJobById(scope.row)">上线</el-button>
+                                <el-button v-if="canEdit && scope.row.online" size="small" type="danger" plain @click="offlineJobById(scope.row)">下线</el-button>
+                                <el-button size="small" type="primary" plain @click="openJobDetail(scope.row)">详情</el-button>
+                                <el-button v-if="canEdit" size="small" type="danger" @click="deleteJob(scope.row.id)">删除</el-button>
+                                <el-dropdown trigger="click" @command="(cmd) => onJobMore(cmd, scope.row)">
+                                    <el-button size="small">⋮ 更多</el-button>
+                                    <template #dropdown>
+                                        <el-dropdown-menu>
+                                            <el-dropdown-item v-if="canEdit" command="copy">复制</el-dropdown-item>
+                                            <el-dropdown-item v-if="canEdit" command="schedule">调度</el-dropdown-item>
+                                            <el-dropdown-item v-if="canEdit" command="deps">⛓ 依赖</el-dropdown-item>
+                                            <el-dropdown-item command="diagnose">🤖 诊断</el-dropdown-item>
+                                            <el-dropdown-item command="logs">日志</el-dropdown-item>
+                                            <el-dropdown-item command="history">历史</el-dropdown-item>
+                                            <el-dropdown-item command="lineage">🧬 血缘</el-dropdown-item>
+                                        </el-dropdown-menu>
+                                    </template>
+                                </el-dropdown>
+                            </template>
+                        </el-table-column>
+                    </el-table>
+
+                    <el-drawer v-model="jobDetailVisible" :title="jobDetailRow ? '作业详情：' + jobDetailRow.name : '作业详情'" size="480px">
+                        <template v-if="jobDetailRow">
+                            <div class="job-detail-actions">
+                                <el-button v-if="canEdit" size="small" type="primary" @click="openJob(jobDetailRow)">编辑</el-button>
+                                <el-button v-if="canEdit" size="small" type="success" @click="submitJobById(jobDetailRow.id)" :disabled="jobDetailRow.status==='RUNNING'||jobDetailRow.status==='SUBMITTED'">运行</el-button>
+                                <el-button v-if="canEdit && !jobDetailRow.online" size="small" type="success" plain @click="onlineJobById(jobDetailRow)">上线</el-button>
+                                <el-button v-if="canEdit && jobDetailRow.online" size="small" type="danger" plain @click="offlineJobById(jobDetailRow)">下线</el-button>
+                                <el-button v-if="canEdit" size="small" @click="copyJobById(jobDetailRow.id)">复制</el-button>
+                                <el-button v-if="canEdit" size="small" type="warning" @click="openScheduleDialog(jobDetailRow)">调度</el-button>
+                                <el-button v-if="canEdit" size="small" type="primary" plain @click="openDepDialog(jobDetailRow)">⛓ 依赖</el-button>
+                                <el-button size="small" type="warning" plain @click="openDiagnose(jobDetailRow)">🤖 诊断</el-button>
+                                <el-button size="small" @click="viewLogs(jobDetailRow)">日志</el-button>
+                                <el-button size="small" type="info" @click="openVersions(jobDetailRow)">历史</el-button>
+                                <el-button size="small" type="info" plain @click="openLineageDialog(jobDetailRow)">🧬 血缘</el-button>
+                                <el-button v-if="canEdit" size="small" type="danger" @click="deleteJobFromDetail(jobDetailRow.id)">删除</el-button>
+                            </div>
+                            <el-descriptions :column="1" border size="small">
+                                <el-descriptions-item label="ID">{{ jobDetailRow.id }}</el-descriptions-item>
+                                <el-descriptions-item label="状态">
+                                    <el-tag :type="statusTag(jobDetailRow.status)" size="small">{{ jobDetailRow.status }}</el-tag>
+                                    <el-tag v-if="jobDetailRow.online" type="success" size="small" effect="dark" style="margin-left:4px;">在线</el-tag>
+                                </el-descriptions-item>
+                                <el-descriptions-item label="创建人">{{ jobDetailRow.ownerName || '-' }}</el-descriptions-item>
+                                <el-descriptions-item label="并行度">{{ jobDetailRow.parallelism ?? '-' }}</el-descriptions-item>
+                                <el-descriptions-item label="描述">{{ jobDetailRow.description || '-' }}</el-descriptions-item>
+                                <el-descriptions-item label="Flink Job ID">{{ jobDetailRow.flinkJobId || '-' }}</el-descriptions-item>
+                                <el-descriptions-item label="调度">
+                                    <el-tag v-if="jobDetailRow.scheduleEnabled" type="warning" size="small">{{ jobDetailRow.cronExpression ? cronToHuman(jobDetailRow.cronExpression) : '已启用' }}</el-tag>
+                                    <span v-else style="color:#909399;">未启用</span>
+                                </el-descriptions-item>
+                                <el-descriptions-item label="创建时间">{{ jobDetailRow.createdAt || '-' }}</el-descriptions-item>
+                                <el-descriptions-item label="更新时间">{{ jobDetailRow.updatedAt || '-' }}</el-descriptions-item>
+                                <el-descriptions-item label="错误详情">
+                                    <span v-if="jobErrors[jobDetailRow.id]" style="color:#f56c6c; word-break:break-all;">{{ jobErrors[jobDetailRow.id] }}</span>
+                                    <span v-else style="color:#909399;">-</span>
+                                </el-descriptions-item>
+                            </el-descriptions>
+                        </template>
+                    </el-drawer>
+                </div>
+
+                <!-- 工作流视图 -->
+                <div v-show="currentView === 'workflow'" class="workflow-view">
+                    <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+                        <span style="font-weight:600; font-size:14px;">🧬 作业工作流（依赖编排视图）</span>
+                        <el-button size="small" type="primary" :loading="workflowLoading" @click="loadWorkflow">刷新</el-button>
+                        <span style="color:#909399; font-size:12px;">{{ workflowUpdated ? '更新于 ' + workflowUpdated : '' }}</span>
+                        <div style="margin-left:auto; display:flex; gap:10px; align-items:center; font-size:12px; color:#64748b;">
+                            <span><i style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#10b981;margin-right:3px;"></i>COMPLETED</span>
+                            <span><i style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#3b82f6;margin-right:3px;"></i>RUNNING</span>
+                            <span><i style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#eab308;margin-right:3px;"></i>WAITING</span>
+                            <span><i style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ef4444;margin-right:3px;"></i>FAILED / BLOCKED</span>
+                            <span><i style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#94a3b8;margin-right:3px;"></i>DRAFT</span>
+                        </div>
+                    </div>
+                    <div v-if="workflowError" style="color:#f56c6c; margin-bottom:10px;">{{ workflowError }}</div>
+                    <div id="workflowChart" style="width:100%; height: calc(100% - 46px); background:#fff; border-radius:10px; border:1px solid #e5e7eb;"></div>
+                </div>
+
+                <!-- 操作审计视图 -->
+                <div v-show="currentView === 'audit'" class="audit-view">
+                    <div style="display:flex; gap:10px; align-items:center; margin-bottom:12px;">
+                        <el-input v-model="auditKeyword" placeholder="搜索操作 / 用户 / 对象ID" clearable size="small" style="width:280px" @keyup.enter="loadAudit()">
+                            <template #prefix><el-icon><Search /></el-icon></template>
+                        </el-input>
+                        <el-button size="small" type="primary" @click="loadAudit()">查询</el-button>
+                        <el-button size="small" @click="loadAudit()">刷新</el-button>
+                        <span style="color:#909399; font-size:12px;">共 {{ auditTotal }} 条</span>
+                    </div>
+                    <el-table :data="auditRows" v-loading="auditLoading" style="width:100%; flex:1;" stripe size="small">
+                        <el-table-column prop="createdAt" label="时间" width="165"></el-table-column>
+                        <el-table-column prop="username" label="用户" width="110"></el-table-column>
+                        <el-table-column prop="action" label="操作" width="150">
+                            <template #default="scope"><el-tag size="small" type="info">{{ scope.row.action }}</el-tag></template>
+                        </el-table-column>
+                        <el-table-column prop="targetType" label="对象类型" width="95"></el-table-column>
+                        <el-table-column prop="targetId" label="对象ID" width="90"></el-table-column>
+                        <el-table-column prop="detail" label="详情" min-width="200" show-overflow-tooltip></el-table-column>
+                        <el-table-column prop="ip" label="IP" width="130"></el-table-column>
+                    </el-table>
+                    <el-pagination v-if="auditTotal > auditSize" background layout="prev, pager, next, total" :total="auditTotal"
+                        :page-size="auditSize" :current-page="auditPage + 1" @current-change="onAuditPage" style="margin-top:10px; justify-content:flex-end;"></el-pagination>
+                </div>
+
+                <!-- AI 助手视图 -->
+                <div v-show="currentView === 'ai'" class="ai-view">
+                    <div class="ai-hero">
+                        <div class="ai-hero-title">🤖 AI 助手 · 自然语言生成数据流</div>
+                        <div class="ai-hero-sub">输入需求 → DeepSeek 生成可执行 DAG → 人工确认后提交。AI 只使用注册表内的控件类型与合法参数。</div>
+                    </div>
+                    <div class="ai-panel">
+                        <el-input v-model="aiPrompt" type="textarea" :rows="5" resize="vertical"
+                            placeholder="例如：读取 D:\code\比赛\2026省服务外包\test-resources\data\sales.csv，把 product_category 和 channel 拼接成新列 category_channel，写出到 MySQL 表 ai_demo"></el-input>
+                        <div class="ai-examples">
+                            <span class="ai-examples-label">示例：</span>
+                            <el-tag v-for="(ex, i) in aiExamples" :key="i" size="small" class="ai-example-tag" @click="aiPrompt = ex">{{ ex.length > 34 ? ex.substring(0, 34) + '…' : ex }}</el-tag>
+                        </div>
+                        <div style="display:flex; gap:10px;">
+                            <el-button type="primary" :loading="aiLoading" @click="generatePipeline">✨ 生成作业 DAG</el-button>
+                            <el-button @click="aiPrompt = ''; aiError = ''; aiResult = null; aiResultDag = null;">清空</el-button>
+                        </div>
+                        <el-alert v-if="aiError" :title="aiError" type="error" :closable="false" show-icon style="margin-top:12px;"></el-alert>
+                        <div v-if="aiResult" class="ai-result">
+                            <div class="ai-result-header">
+                                <span>✅ 已生成 DRAFT 作业：<b>{{ aiResult.job.name }}</b>（ID #{{ aiResult.job.id }}）</span>
+                                <span class="ai-source-tag">来源 DeepSeek · 已校验控件合法性</span>
+                            </div>
+                            <div class="ai-result-body">
+                                <template v-if="aiResultDag && aiResultDag.nodes">
+                                    <div v-for="node in aiResultDag.nodes" :key="node.id" class="ai-node-chip">
+                                        <span class="ai-node-chip-type">{{ node.type }}</span>
+                                        <span>{{ node.label }}</span>
+                                    </div>
+                                    <div v-if="aiResultDag.edges && aiResultDag.edges.length" class="ai-node-chip ai-edge-chip">🔗 {{ aiResultDag.edges.length }} 条连线</div>
+                                </template>
+                            </div>
+                            <div style="display:flex; gap:10px; margin-top:12px;">
+                                <el-button type="success" @click="openAiResultInCanvas">🖼 打开画布编辑</el-button>
+                                <el-button @click="currentView = 'jobs'; loadJobs()">去作业列表</el-button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 告警中心视图 -->
+                <div v-show="currentView === 'alerts'" class="alerts-view">
+                    <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+                        <span style="font-weight:600; font-size:14px;">🔔 告警中心</span>
+                        <el-tag v-if="alertUnread > 0" type="danger" size="small">未读 {{ alertUnread }}</el-tag>
+                        <el-button size="small" type="primary" :loading="alertsLoading" @click="loadAlerts">刷新</el-button>
+                        <el-button size="small" @click="markAllRead">全部已读</el-button>
+                        <span class="alerts-tip">告警来源：作业失败 / 重启超限 / 吞吐归零 / 背压 / checkpoint / 调度失败（每 30s 自动扫描，可配置邮件通知）</span>
+                    </div>
+                    <el-table :data="alerts" style="width:100%; height:calc(100% - 44px);" stripe empty-text="暂无告警">
+                        <el-table-column prop="createdAt" label="时间" width="170"></el-table-column>
+                        <el-table-column label="级别" width="90">
+                            <template #default="scope">
+                                <el-tag :type="scope.row.level==='CRITICAL'?'danger':scope.row.level==='WARN'?'warning':'info'" size="small">{{ scope.row.level }}</el-tag>
+                            </template>
+                        </el-table-column>
+                        <el-table-column prop="event" label="事件" width="180"></el-table-column>
+                        <el-table-column label="作业" width="170">
+                            <template #default="scope"><span>{{ scope.row.jobName || '-' }} <span v-if="scope.row.jobId" style="color:#999;">(#{{ scope.row.jobId }})</span></span></template>
+                        </el-table-column>
+                        <el-table-column prop="message" label="告警内容" min-width="300" show-overflow-tooltip></el-table-column>
+                        <el-table-column label="状态" width="90">
+                            <template #default="scope">
+                                <el-tag :type="scope.row.readFlag ? 'info' : 'danger'" size="small">{{ scope.row.readFlag ? '已读' : '未读' }}</el-tag>
+                            </template>
+                        </el-table-column>
+                        <el-table-column label="操作" width="200">
+                            <template #default="scope">
+                                <el-button v-if="!scope.row.readFlag" size="small" type="primary" plain @click="markAlertRead(scope.row.id)">标记已读</el-button>
+                                <el-button size="small" type="danger" plain @click="deleteAlert(scope.row.id)">删除</el-button>
                             </template>
                         </el-table-column>
                     </el-table>
@@ -207,25 +511,233 @@
                         </el-table-column>
                     </el-table>
                 </div>
+
+                <!-- 实时监控视图 -->
+                <div v-show="currentView === 'monitor'" class="monitor-view">
+                    <div class="monitor-header">
+                        <div class="monitor-title-wrap">
+                            <h3>📈 实时监控</h3>
+                            <span class="monitor-subtitle">运行中作业实时指标 · 已结束作业吞吐统计</span>
+                        </div>
+                        <div class="monitor-toolbar">
+                            <span v-if="monitorLastUpdated" class="monitor-refresh-tip">更新于 {{ monitorLastUpdated }}</span>
+                            <el-switch v-model="monitorAutoRefresh" active-text="自动刷新" size="small"></el-switch>
+                            <el-button size="small" :loading="monitorLoading" @click="refreshMonitor">刷新</el-button>
+                        </div>
+                    </div>
+
+                    <div class="monitor-stats">
+                        <div class="stat-card">
+                            <div class="stat-value">{{ monitorStats.total }}</div>
+                            <div class="stat-label">作业总数</div>
+                        </div>
+                        <div class="stat-card stat-running">
+                            <div class="stat-value">{{ monitorStats.running }}</div>
+                            <div class="stat-label">运行中</div>
+                        </div>
+                        <div class="stat-card stat-completed">
+                            <div class="stat-value">{{ monitorStats.completed }}</div>
+                            <div class="stat-label">已完成</div>
+                        </div>
+                        <div class="stat-card stat-failed">
+                            <div class="stat-value">{{ monitorStats.failed }}</div>
+                            <div class="stat-label">失败 / 取消</div>
+                        </div>
+                    </div>
+
+                    <div class="monitor-trend-panel">
+                        <div class="monitor-trend-header">
+                            <span class="monitor-trend-title">📊 吞吐趋势（运行中与最近结束作业 · 行/s）</span>
+                            <span v-if="monitorTrendUpdated" class="monitor-refresh-tip">更新于 {{ monitorTrendUpdated }}</span>
+                        </div>
+                        <div id="monitorTrendChart" class="monitor-trend-chart"></div>
+                    </div>
+
+                    <div v-if="monitorError" class="monitor-error">
+                        <span>⚠️ 监控数据加载失败：{{ monitorError }}</span>
+                        <el-button size="small" type="primary" @click="refreshMonitor">重试</el-button>
+                    </div>
+                    <div v-else-if="monitorJobs.length === 0" class="empty-tip">
+                        暂无监控数据。运行中的作业显示实时吞吐/背压/checkpoint，结束后显示总处理行数；可先在「作业管理」提交作业。
+                    </div>
+                    <div v-else class="monitor-cards">
+                        <div v-for="job in monitorJobs" :key="job.id" class="monitor-card">
+                            <div class="monitor-card-head">
+                                <div class="monitor-card-title">
+                                    <span class="job-status-dot" :class="'dot-' + String(job.status || 'draft').toLowerCase()"></span>
+                                    <strong>{{ job.name }}</strong>
+                                </div>
+                                <el-tag size="small" :type="statusTagType(job.status)">{{ job.status }}</el-tag>
+                                <el-button size="small" type="danger" text circle title="删除此作业" @click="deleteMonitorJob(job.id)" style="margin-left:6px;">
+                                    <el-icon><Delete /></el-icon>
+                                </el-button>
+                            </div>
+                            <div v-if="job.metrics && job.metrics.available" class="monitor-metrics">
+                                <template v-if="job.metrics.mode === 'live'">
+                                    <div class="metric">
+                                        <div class="metric-label">吞吐（行/s）</div>
+                                        <div class="metric-value">↓{{ fmtNum(job.metrics.throughput.numRecordsInPerSecond) }} / ↑{{ fmtNum(job.metrics.throughput.numRecordsOutPerSecond) }}</div>
+                                    </div>
+                                    <div class="metric">
+                                        <div class="metric-label">背压</div>
+                                        <div class="metric-value" :class="bpClass(job.metrics.backpressure.level)">{{ job.metrics.backpressure.level || 'unknown' }}</div>
+                                    </div>
+                                    <div class="metric">
+                                        <div class="metric-label">Checkpoint</div>
+                                        <div class="metric-value">{{ cpText(job.metrics.checkpoint) }}</div>
+                                    </div>
+                                    <div class="metric">
+                                        <div class="metric-label">运行时长</div>
+                                        <div class="metric-value">{{ fmtDuration(job.metrics.duration) }}</div>
+                                    </div>
+                                </template>
+                                <template v-else>
+                                    <div class="metric">
+                                        <div class="metric-label">总处理（行）</div>
+                                        <div class="metric-value">{{ job.metrics.total.numRecordsIn + job.metrics.total.numRecordsOut === 0 ? '—' : '↓' + fmtNum(job.metrics.total.numRecordsIn) + ' / ↑' + fmtNum(job.metrics.total.numRecordsOut) }}</div>
+                                    </div>
+                                    <div class="metric">
+                                        <div class="metric-label">平均吞吐（行/s）</div>
+                                        <div class="metric-value">{{ job.metrics.avgRowsPerSecond > 0 ? fmtNum(job.metrics.avgRowsPerSecond) + ' 行/s' : '—' }}</div>
+                                    </div>
+                                    <div class="metric">
+                                        <div class="metric-label">运行时间</div>
+                                        <div class="metric-value">{{ fmtDuration(job.metrics.duration) }}</div>
+                                    </div>
+                                    <template v-if="job.metrics.retained">
+                                        <div class="metric">
+                                            <div class="metric-label">结束前吞吐（行/s）</div>
+                                            <div class="metric-value">↓{{ fmtNum(job.metrics.retained.throughput.numRecordsInPerSecond) }} / ↑{{ fmtNum(job.metrics.retained.throughput.numRecordsOutPerSecond) }}</div>
+                                        </div>
+                                        <div class="metric">
+                                            <div class="metric-label">结束前背压</div>
+                                            <div class="metric-value" :class="bpClass(job.metrics.retained.backpressure.level)">{{ job.metrics.retained.backpressure.level || 'unknown' }}</div>
+                                        </div>
+                                    </template>
+                                </template>
+                            </div>
+                            <div v-else class="monitor-metrics">
+                                <div style="color:#909399;font-size:12px;">{{ job.metrics && job.metrics.reason ? job.metrics.reason : '暂无指标数据' }}</div>
+                            </div>
+                            <div class="monitor-card-foot">
+                                <span class="mono">{{ job.flinkJobId || '-' }}</span>
+                                <span>提交于 {{ job.submittedAt }}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </el-main>
         </el-container>
 
-        <!-- 帮助对话框 -->
-        <el-dialog v-model="showHelp" title="帮助" width="600px">
-            <h4>🎯 数据流任务管理系统 MVP 使用说明</h4>
-            <ul>
-                <li><strong>画布设计</strong>：从左侧控件库拖拽控件到画布，连线构建数据流 DAG</li>
-                <li><strong>控件分类</strong>：输入（绿色）、转换（蓝色）、输出（橙色）</li>
-                <li><strong>参数配置</strong>：选中画布上的节点，在右侧面板配置参数</li>
-                <li><strong>保存/提交</strong>：保存 DAG 到数据库，或直接提交到 Flink 集群运行</li>
-                <li><strong>热加载</strong>：将控件 JAR 放入 backend/plugins/ 目录，前端自动显示新控件</li>
-            </ul>
-            <h4>⌨️ 快捷键</h4>
-            <ul>
-                <li><code>Delete</code> 删除选中节点</li>
-                <li><code>Ctrl+S</code> 保存</li>
-                <li><code>滚轮</code> 缩放画布</li>
-            </ul>
+        <!-- 帮助中心对话框 -->
+        <el-dialog v-model="showHelp" title="帮助中心" width="820px" class="help-dialog">
+            <el-tabs v-model="helpTab" class="help-tabs">
+                <!-- 快速上手 -->
+                <el-tab-pane name="quick">
+                    <template #label><el-icon><Guide /></el-icon>&nbsp;快速上手</template>
+                    <div class="help-steps">
+                        <div class="help-step">
+                            <span class="help-step-no">1</span>
+                            <div class="help-step-body"><b>登录系统</b><p>使用演示账号 admin / operator / viewer 登录；ADMIN 与 OPERATOR 可编辑，VIEWER 只读。</p></div>
+                        </div>
+                        <div class="help-step">
+                            <span class="help-step-no">2</span>
+                            <div class="help-step-body"><b>拖拽控件</b><p>从左侧控件库把「输入」控件拖到画布，再拖入「转换 / 输出」控件。</p></div>
+                        </div>
+                        <div class="help-step">
+                            <span class="help-step-no">3</span>
+                            <div class="help-step-body"><b>连线</b><p>按住节点右侧圆点拖到下一节点左侧圆点，形成数据流。</p></div>
+                        </div>
+                        <div class="help-step">
+                            <span class="help-step-no">4</span>
+                            <div class="help-step-body"><b>配置参数</b><p>点击节点，在右侧参数面板填写文件路径 / 表名 / topic 等，点「应用参数」。</p></div>
+                        </div>
+                        <div class="help-step">
+                            <span class="help-step-no">5</span>
+                            <div class="help-step-body"><b>保存并提交</b><p>点「保存」落库，再点「提交运行」交给 Flink 执行；「作业管理」中查看状态、日志与输出。</p></div>
+                        </div>
+                        <div class="help-step">
+                            <span class="help-step-no">6</span>
+                            <div class="help-step-body"><b>进阶玩法</b><p>「示例作业」一键载入；作业「⛓ 依赖」自动串联上下游；「工作流」与「🧬 血缘」视图查看全貌。</p></div>
+                        </div>
+                    </div>
+                </el-tab-pane>
+
+                <!-- 控件说明 -->
+                <el-tab-pane name="controls">
+                    <template #label><el-icon><Grid /></el-icon>&nbsp;控件说明</template>
+                    <div class="help-controls">
+                        <div class="help-ctrl-group">
+                            <div class="help-ctrl-title input">📥 输入控件 <span>{{ controlsByCategory('input').length }}</span></div>
+                            <div class="help-ctrl-list">
+                                <span v-for="c in controlsByCategory('input')" :key="c.type" class="help-ctrl-chip input" :title="c.description">{{ c.name }}</span>
+                            </div>
+                        </div>
+                        <div class="help-ctrl-group">
+                            <div class="help-ctrl-title transform">🔧 转换控件 <span>{{ controlsByCategory('transform').length }}</span></div>
+                            <div class="help-ctrl-list">
+                                <span v-for="c in controlsByCategory('transform')" :key="c.type" class="help-ctrl-chip transform" :title="c.description">{{ c.name }}</span>
+                            </div>
+                        </div>
+                        <div class="help-ctrl-group">
+                            <div class="help-ctrl-title output">📤 输出控件 <span>{{ controlsByCategory('output').length }}</span></div>
+                            <div class="help-ctrl-list">
+                                <span v-for="c in controlsByCategory('output')" :key="c.type" class="help-ctrl-chip output" :title="c.description">{{ c.name }}</span>
+                            </div>
+                        </div>
+                        <p class="help-tip-note">💡 控件来自后端控件注册表，悬停可查看功能说明；新增控件需同时更新后端 DataInitializer 与前端 getBuiltinControls。</p>
+                    </div>
+                </el-tab-pane>
+
+                <!-- 快捷键 -->
+                <el-tab-pane name="shortcuts">
+                    <template #label><el-icon><Keyboard /></el-icon>&nbsp;快捷键</template>
+                    <table class="help-kbd">
+                        <tbody>
+                            <tr><td><kbd>Delete</kbd></td><td>删除选中节点（或双击节点）</td></tr>
+                            <tr><td><kbd>Ctrl</kbd> + <kbd>S</kbd></td><td>保存 DAG</td></tr>
+                            <tr><td><kbd>Ctrl</kbd> + <kbd>Z</kbd></td><td>撤销</td></tr>
+                            <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd></td><td>重做</td></tr>
+                            <tr><td><kbd>滚轮</kbd></td><td>缩放画布（以鼠标位置为中心）</td></tr>
+                            <tr><td><kbd>按住左键拖动空白</kbd></td><td>平移画布</td></tr>
+                        </tbody>
+                    </table>
+                </el-tab-pane>
+
+                <!-- 技巧与 FAQ -->
+                <el-tab-pane name="tips">
+                    <template #label><el-icon><MagicStick /></el-icon>&nbsp;技巧与 FAQ</template>
+                    <div class="help-faq">
+                        <div class="help-faq-item"><b>Q：作业一直 RUNNING 不结束？</b><p>流式作业（Datagen / Kafka）不会自动结束。可在「作业管理」点「取消」，取消后会自动合并输出文件。</p></div>
+                        <div class="help-faq-item"><b>Q：提交失败如何排查？</b><p>打开该作业「日志」，或看作业列表「错误详情」。常见原因：文件路径不存在、MySQL 连接失败、Excel 格式不支持。</p></div>
+                        <div class="help-faq-item"><b>Q：输出文件在哪？</b><p>默认输出目录 D:\code\比赛\2026省服务外包\output，可在输出控件参数中修改路径。</p></div>
+                        <div class="help-faq-item"><b>Q：如何让上游完成自动跑下游？</b><p>在「作业管理」给下游作业配「⛓ 依赖」选择上游；上游全部 COMPLETED 后下游自动提交，上游失败则下游进入 BLOCKED。</p></div>
+                        <div class="help-faq-item"><b>Q：怎么看数据血缘？</b><p>作业行「🧬 血缘」弹窗展示输入/输出资产；「工作流」视图可看全量作业依赖关系。</p></div>
+                        <div class="help-faq-item"><b>Q：支持定时调度吗？</b><p>支持。作业「调度」按钮可直接选常用频率或用大白话描述（如：每5分钟 / 每天凌晨2点 / 每周一早上9点 / 每月1号0点），也可手动填 6 段 cron 表达式；可设置失败重试次数与 webhook 告警。</p></div>
+                        <div class="help-faq-item"><b>Q：上线/下线是什么？</b><p>上线后作业进入受监管持续处理：流式作业（Datagen/Kafka）后台持续运行、异常自动重启；批量作业按已配置的 cron 周期重跑。下线即取消 Flink 作业并停用调度；Flink 集群不可用时不允许上线。</p></div>
+                    </div>
+                </el-tab-pane>
+
+                <!-- 关于 -->
+                <el-tab-pane name="about">
+                    <template #label><el-icon><InfoFilled /></el-icon>&nbsp;关于</template>
+                    <div class="help-about">
+                        <div class="help-about-logo">📊</div>
+                        <div class="help-about-name">数据流任务管理系统 · DataStream MVP</div>
+                        <div class="help-about-ver">v1.0 · Spring Boot + Flink + Vue3 + AntV X6</div>
+                        <div class="help-about-rows">
+                            <div><span>前端</span><code>localhost:3000</code></div>
+                            <div><span>后端 API</span><code>localhost:8080</code></div>
+                            <div><span>Flink Web UI</span><code>localhost:8081</code></div>
+                            <div><span>SQL Gateway</span><code>localhost:8083</code></div>
+                            <div><span>元数据库</span><code>H2 file (backend/data/mvpdb)</code></div>
+                            <div><span>业务 MySQL</span><code>localhost:3306</code></div>
+                            <div><span>演示账号</span><code>admin/admin123 · operator/operator123 · viewer/viewer123</code></div>
+                        </div>
+                        <p class="help-tip-note">架构与变更记录详见仓库 DEVELOPMENT.md / README.md。</p>
+                    </div>
+                </el-tab-pane>
+            </el-tabs>
         </el-dialog>
 
         <!-- 运行日志对话框 -->
@@ -243,33 +755,162 @@
         </el-dialog>
 
         <!-- 定时调度对话框 -->
-        <el-dialog v-model="scheduleDialogVisible" title="定时调度" width="480px">
-            <el-form label-width="100px">
+        <el-dialog v-model="scheduleDialogVisible" title="定时调度" width="560px">
+            <el-form label-width="110px">
                 <el-form-item label="目标作业">
                     <span>{{ scheduleJob ? scheduleJob.name : '' }}</span>
                 </el-form-item>
                 <el-form-item label="启用调度">
                     <el-switch v-model="scheduleEnabled"></el-switch>
                 </el-form-item>
-                <el-form-item label="Cron 表达式">
-                    <el-input v-model="cronExpression" placeholder="例如 0 */5 * * * ?（每 5 分钟一次）"></el-input>
+                                <el-form-item label="调度频率">
+                    <div style="width:100%;">
+                        <div style="display:flex; gap:8px; margin-bottom:8px;">
+                            <el-input v-model="scheduleNlText" placeholder="用大白话描述，例如：每5分钟 / 每天凌晨2点 / 每周一早上9点 / 每月1号0点" clearable @keyup.enter="parseNlSchedule"></el-input>
+                            <el-button type="primary" plain @click="parseNlSchedule">识别</el-button>
+                        </div>
+                        <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;">
+                            <el-tag v-for="p in schedulePresets" :key="p.cron" :type="cronExpression === p.cron ? 'success' : 'info'" size="small" style="cursor:pointer; margin:0;" @click="applySchedulePreset(p)">{{ p.label }}</el-tag>
+                        </div>
+                        <el-input v-model="cronExpression" placeholder="高级：6 段 cron 表达式，例如 0 */5 * * * *" clearable style="margin-bottom:6px;"></el-input>
+                        <div style="font-size:12px; color:#909399;">
+                            <template v-if="scheduleCronHuman">将按：<b style="color:#409EFF;">{{ scheduleCronHuman }}</b> 执行一次</template>
+                            <template v-else>选择上方频率或输入大白话描述，自动生成调度</template>
+                        </div>
+                    </div>
+                </el-form-item>
+                <el-form-item label="失败重试次数">
+                    <el-input-number v-model="scheduleMaxRetries" :min="0" :max="10"></el-input-number>
+                    <span style="margin-left:8px;color:#909399;font-size:12px;">提交失败自动重试</span>
+                </el-form-item>
+                <el-form-item label="Webhook 地址">
+                    <el-input v-model="webhookUrl" placeholder="可选：调度/作业失败时推送 JSON 告警"></el-input>
                 </el-form-item>
                 <el-form-item>
                     <el-button type="primary" @click="saveSchedule">保存</el-button>
                     <el-button @click="scheduleDialogVisible = false">取消</el-button>
                 </el-form-item>
             </el-form>
+            <el-divider></el-divider>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                <span style="font-weight:600;">📜 调度历史</span>
+                <el-button size="small" :loading="scheduleHistoryLoading" @click="loadScheduleHistory">刷新</el-button>
+            </div>
+            <el-table :data="scheduleHistory" size="small" max-height="220" empty-text="暂无调度记录">
+                <el-table-column prop="triggerTime" label="触发时间" width="165"></el-table-column>
+                <el-table-column label="状态" width="90">
+                    <template #default="scope">
+                        <el-tag :type="scope.row.status==='SUCCESS'?'success':scope.row.status==='RETRY'?'warning':'danger'" size="small">{{ scope.row.status }}</el-tag>
+                    </template>
+                </el-table-column>
+                <el-table-column prop="message" label="结果" min-width="180" show-overflow-tooltip></el-table-column>
+            </el-table>
+        </el-dialog>
+
+        <!-- 作业依赖对话框 -->
+        <el-dialog v-model="depDialogVisible" title="⛓ 作业依赖（上游完成后自动触发下游）" width="560px">
+            <el-alert type="info" :closable="false" show-icon style="margin-bottom:12px;">
+                <template #title>上游全部 COMPLETED 后自动提交本作业；上游 FAILED/CANCELLED 则本作业进入 BLOCKED。</template>
+            </el-alert>
+            <el-form label-width="90px">
+                <el-form-item label="目标作业">
+                    <span>{{ depJob ? depJob.name + ' (#' + depJob.id + ')' : '' }}</span>
+                </el-form-item>
+                <el-form-item label="上游作业">
+                    <el-select v-model="depSelected" multiple filterable placeholder="选择前置作业（可多选，可搜索）" style="width:100%" :loading="depLoading">
+                        <el-option v-for="j in depCandidates" :key="j.id" :label="j.name + ' (#' + j.id + ')'" :value="j.id">
+                            <span style="float:left;">{{ j.name }} (#{{ j.id }})</span>
+                            <el-tag size="small" :type="statusTag(j.status)" style="float:right;">{{ j.status }}</el-tag>
+                        </el-option>
+                    </el-select>
+                </el-form-item>
+            </el-form>
+            <template #footer>
+                <el-button @click="depDialogVisible = false">取消</el-button>
+                <el-button type="primary" :loading="depSaving" @click="saveDeps">保存依赖</el-button>
+            </template>
+        </el-dialog>
+
+        <!-- 数据血缘对话框 -->
+        <el-dialog v-model="lineageDialogVisible" title="🧬 数据血缘（输入 / 输出资产）" width="760px" @opened="initLineageChart">
+            <div v-loading="lineageLoading" style="min-height: 340px;">
+                <div v-if="lineageJob" style="margin-bottom:10px; font-size:13px; color:#475569;">
+                    作业：<b>{{ lineageJob.name }}</b> ({{ lineageJob.status }})
+                </div>
+                <div id="lineageChart" style="width:100%; height: 380px;"></div>
+                <div v-if="!lineageLoading && lineageAssets.length === 0" style="text-align:center; color:#94a3b8; padding:40px 0;">
+                    该作业没有可识别的输入/输出资产（未配置路径/表/topic）
+                </div>
+            </div>
+            <template #footer>
+                <el-button @click="lineageDialogVisible = false">关闭</el-button>
+            </template>
+        </el-dialog>
+
+        <!-- AI 智能诊断对话框 -->
+        <el-dialog v-model="diagnoseVisible" title="🤖 AI 智能诊断" width="700px">
+            <div v-loading="diagnoseLoading" style="min-height:120px;">
+                <template v-if="diagnoseResult">
+                    <div class="diag-block">
+                        <div class="diag-label">根因</div>
+                        <div class="diag-root-cause">{{ diagnoseResult.rootCause }}</div>
+                    </div>
+                    <div class="diag-block" v-if="diagnoseResult.evidence">
+                        <div class="diag-label">关键证据</div>
+                        <pre class="diag-evidence">{{ diagnoseResult.evidence }}</pre>
+                    </div>
+                    <div class="diag-block">
+                        <div class="diag-label">修复建议</div>
+                        <ul class="diag-suggestions">
+                            <li v-for="(s, i) in diagnoseResult.suggestions" :key="i">{{ s }}</li>
+                            <li v-if="!diagnoseResult.suggestions || diagnoseResult.suggestions.length === 0">请人工检查作业日志与参数</li>
+                        </ul>
+                    </div>
+                    <div class="diag-block" v-if="hasParamFixes">
+                        <div class="diag-label">可一键预填的参数修正</div>
+                        <div v-for="(fixes, nodeId) in diagnoseResult.paramFixes" :key="nodeId" class="diag-fix-item">
+                            <b>{{ nodeId }}</b>：
+                            <el-tag v-for="(val, key) in fixes" :key="key" size="small" style="margin-right:4px;">{{ key }} = {{ val }}</el-tag>
+                        </div>
+                        <el-button type="success" size="small" style="margin-top:8px;" @click="applyDiagnoseFixes">💾 一键写入画布并保存</el-button>
+                    </div>
+                    <div style="color:#909399; font-size:12px; margin-top:10px;">诊断来源：{{ diagnoseResult.source === 'rule' ? '本地规则引擎（快，覆盖高频问题）' : 'DeepSeek 大模型（深度归因）' }}</div>
+                </template>
+            </div>
+            <template #footer>
+                <el-button v-if="!diagnoseResult" type="primary" :loading="diagnoseLoading" @click="runDiagnose">开始诊断</el-button>
+                <el-button @click="diagnoseVisible = false">关闭</el-button>
+            </template>
+        </el-dialog>
+
+        <!-- 版本历史对话框 -->
+        <el-dialog v-model="versionDialogVisible" title="版本历史" width="640px">
+            <el-table :data="jobVersions" v-loading="versionLoading" size="small" border stripe max-height="420">
+                <el-table-column prop="versionNo" label="版本" width="70"></el-table-column>
+                <el-table-column prop="name" label="名称" min-width="140" show-overflow-tooltip></el-table-column>
+                <el-table-column prop="parallelism" label="并行度" width="80"></el-table-column>
+                <el-table-column prop="createdAt" label="保存时间" width="170"></el-table-column>
+                <el-table-column label="操作" width="110">
+                    <template #default="scope">
+                        <el-button size="small" type="warning" @click="rollbackVersion(scope.row.id)">回滚</el-button>
+                    </template>
+                </el-table-column>
+            </el-table>
+            <template #footer>
+                <el-button @click="versionDialogVisible = false">关闭</el-button>
+            </template>
         </el-dialog>
     </div>
 
     <!-- Vue 3 + Element Plus -->
-    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-    <script src="https://unpkg.com/element-plus@2.9.1"></script>
-    <script src="https://unpkg.com/@element-plus/icons-vue@2"></script>
+    <script src="vendor/vue.global.prod.js"></script>
+    <script src="vendor/element-plus.full.js"></script>
+    <script src="vendor/icons-vue.iife.min.js"></script>
+<script src="vendor/echarts.min.js"></script>
 
     <!-- AntV X6 -->
-    <script src="https://unpkg.com/@antv/x6/dist/x6.min.js"></script>
-    <script src="https://unpkg.com/axios@1.6.8/dist/axios.min.js"></script>
+    <script src="vendor/x6.min.js"></script>
+    <script src="vendor/axios.min.js"></script>
 
 
     <!-- 主应用 -->

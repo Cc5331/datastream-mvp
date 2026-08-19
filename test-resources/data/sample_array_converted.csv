@@ -1,0 +1,4 @@
+id,name,age,tags
+1,Alice,30,"[""a"",""b""]"
+2,Bob,18,"[""c""]"
+3,Charlie,25,[]

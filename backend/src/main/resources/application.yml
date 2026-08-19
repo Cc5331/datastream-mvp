@@ -1,6 +1,17 @@
 spring:
   application:
     name: mvp-backend
+  mail:
+    host: ${SMTP_HOST:}
+    port: ${SMTP_PORT:465}
+    username: ${SMTP_USER:}
+    password: ${SMTP_PASSWORD:}
+    default-encoding: UTF-8
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.ssl.enable: true
+      mail.smtp.timeout: 10000
+
   datasource:
     url: jdbc:h2:file:./data/mvpdb
     driver-class-name: org.h2.Driver
@@ -43,6 +54,22 @@ server:
   port: 8080
 
 app:
+  jwt:
+    secret: ${JWT_SECRET:dataflow-mvp-dev-jwt-secret-key-2026-change-me-0123456789}
+    expiration-ms: ${JWT_EXPIRATION_MS:86400000}
+  hadoop-home: ${HADOOP_HOME:D:\\code\\hadoop}
+  ai:
+    deepseek:
+      api-key: ${DEEPSEEK_API_KEY:}
+      base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+      model: ${DEEPSEEK_MODEL:deepseek-chat}
+      timeout-ms: 60000
+  alert:
+    email:
+      host: ${SMTP_HOST:}
+      username: ${SMTP_USER:}
+      to: ${SMTP_TO:}
+
   mysql:
     # mysql_input/mysql_output 控件默认用户名与密码（预填 + 预览用），通过环境变量注入，不入库
     default-username: ${MYSQL_USERNAME:root}

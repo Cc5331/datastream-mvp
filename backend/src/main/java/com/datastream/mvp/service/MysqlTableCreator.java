@@ -1,6 +1,7 @@
 package com.datastream.mvp.service;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.sql.Connection;
@@ -27,6 +28,12 @@ public class MysqlTableCreator {
     private static final Pattern COLUMN_PATTERN =
             Pattern.compile("^`?([^`\\s]+)`?\\s+([A-Za-z0-9_() ]+)$");
 
+    @Value("${app.mysql.default-username:root}")
+    private String defaultMysqlUsername;
+
+    @Value("${app.mysql.default-password:}")
+    private String defaultMysqlPassword;
+
     private static final Set<String> RESERVED = new HashSet<>(Arrays.asList(
             "order", "group", "select", "from", "where", "insert", "update", "delete", "drop",
             "create", "table", "index", "key", "primary", "foreign", "constraint", "unique",
@@ -50,8 +57,8 @@ public class MysqlTableCreator {
         }
         String url = str(params.get("url")).trim();
         String table = str(params.get("table")).trim();
-        String username = str(params.get("username")).trim();
-        String password = str(params.get("password"));
+        String username = resolveCredential(str(params.get("username")), defaultMysqlUsername);
+        String password = resolveCredential(str(params.get("password")), defaultMysqlPassword);
 
         if (url.isEmpty()) {
             throw new RuntimeException("MySQL 输出缺少 JDBC URL");
@@ -82,6 +89,18 @@ public class MysqlTableCreator {
         } catch (Exception e) {
             throw new RuntimeException("MySQL 自动建表失败: " + e.getMessage() + " | SQL: " + ddl, e);
         }
+    }
+
+    /**
+     * 用户名/密码解析：空值或 ${MYSQL_USERNAME} / ${MYSQL_PASSWORD} 占位符回退到环境变量默认值
+     */
+    private String resolveCredential(String value, String envDefault) {
+        if (value == null || value.trim().isEmpty()) return envDefault == null ? "" : envDefault;
+        String v = value.trim();
+        if ("${MYSQL_USERNAME}".equals(v) || "${MYSQL_PASSWORD}".equals(v)) {
+            return envDefault == null ? "" : envDefault;
+        }
+        return v;
     }
 
     private String parseDatabase(String url) {

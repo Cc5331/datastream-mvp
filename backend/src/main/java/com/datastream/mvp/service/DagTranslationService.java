@@ -32,6 +32,9 @@ public class DagTranslationService {
     private final ObjectMapper objectMapper;
     private final ExcelPreprocessor excelPreprocessor;
     private final MysqlTableCreator mysqlTableCreator;
+    private final XmlPreprocessor xmlPreprocessor;
+    private final JsonPreprocessor jsonPreprocessor;
+    private final ParquetPreprocessor parquetPreprocessor;
 
     @Value("${flink.home:D:\\code\\flink-1.18.1}")
     private String flinkHome;
@@ -48,10 +51,21 @@ public class DagTranslationService {
     @Value("${flink.sql-gateway.port:8083}")
     private int sqlGatewayPort;
 
+    @Value("${app.mysql.default-username:root}")
+    private String defaultMysqlUsername;
+
+    @Value("${app.mysql.default-password:}")
+    private String defaultMysqlPassword;
+
     public String translate(DagDefinition dag) {
+        cleanOutputTempDirs(dag);
         StringBuilder flinkSql = new StringBuilder();
         flinkSql.append("-- DAG Job: ").append(dag.getJobName()).append("\n");
         flinkSql.append("SET 'parallelism.default' = '").append(dag.getParallelism()).append("';\n\n");
+        boolean hasDedupe = dag.getNodes().stream().anyMatch(n -> "dedupe".equals(n.getType()));
+        if (hasDedupe) {
+            flinkSql.append("SET 'execution.runtime-mode' = 'BATCH';\n\n");
+        }
         boolean hasXmlJson = dag.getNodes().stream().anyMatch(n -> "xml_json".equals(n.getType()));
         if (hasXmlJson) {
             flinkSql.append("CREATE FUNCTION IF NOT EXISTS xml2json AS 'com.datastream.udf.XmlToJson' LANGUAGE JAVA;\n");
@@ -113,13 +127,14 @@ public class DagTranslationService {
                 String path = node.getParams() != null ? node.getParams().getOrDefault("path", "").toString().trim() : "";
                 String delimiter = node.getParams() != null ? node.getParams().getOrDefault("delimiter", ",").toString().trim() : ",";
                 String hasHeader = node.getParams() != null ? node.getParams().getOrDefault("hasHeader", "true").toString().trim() : "true";
+                String sheetName = node.getParams() != null && node.getParams().get("sheetName") != null ? node.getParams().get("sheetName").toString().trim() : "";
                 if (path.isEmpty()) {
                     throw new RuntimeException("Excel 输入缺少 path 参数");
                 }
                 if (!new java.io.File(path).isFile()) {
                     throw new RuntimeException("Excel 输入文件不存在: " + path);
                 }
-                String csvPath = excelPreprocessor.convertToCsv(path, delimiter, true);
+                String csvPath = excelPreprocessor.convertToCsv(path, delimiter, true, sheetName);
                 if (csvPath == null) {
                     throw new RuntimeException("Excel 输入转换失败（文件不是有效的 Excel 格式，请使用 .xlsx/.xls 文件）: " + path);
                 }
@@ -136,12 +151,67 @@ public class DagTranslationService {
                 continue;
             }
 
+            // Parquet Input -> 先用 ParquetPreprocessor 转成临时 CSV，再按 CSV 输入处理
+            if ("parquet_input".equals(node.getType())) {
+                String path = node.getParams() != null ? node.getParams().getOrDefault("path", "").toString().trim() : "";
+                String delimiter = node.getParams() != null ? node.getParams().getOrDefault("delimiter", ",").toString().trim() : ",";
+                if (path.isEmpty()) {
+                    throw new RuntimeException("Parquet 输入缺少 path 参数");
+                }
+                if (!new java.io.File(path).isFile()) {
+                    throw new RuntimeException("Parquet 输入文件不存在: " + path);
+                }
+                String csvPath = parquetPreprocessor.convertToCsv(path, delimiter);
+                if (csvPath == null) {
+                    throw new RuntimeException("Parquet 输入转换失败（请确认为有效的 .parquet 文件）: " + path);
+                }
+                String effectiveDelimiter = autoDetectDelimiter(csvPath, delimiter);
+                List<String> autoCols = detectCsvColumns(csvPath, effectiveDelimiter, "true");
+                String effectivePath = stripCsvHeaderIfNeeded(csvPath, "true");
+                String rendered = generateCsvInputDDL(sanitize(node.getId()), effectivePath, effectiveDelimiter, "true", "[]", autoCols);
+                String schema = extractFieldsFromDdlTemplate(rendered);
+                if (schema != null) nodeSchemas.put(node.getId(), schema);
+                log.info("Parquet input {}: {} -> {} (schema: {})", node.getId(), path, csvPath, schema);
+                flinkSql.append("-- Node: ").append(node.getLabel()).append(" (").append(node.getId()).append(") [Parquet Input -> Temp CSV]\n");
+                flinkSql.append(rendered).append("\n\n");
+                tableAlias.put(node.getId(), sanitize(node.getId()));
+                continue;
+            }
+
+            // XML Input -> 先解析成临时 CSV（rowTag 行元素，嵌套保留为 JSON 列），再按 CSV 输入处理
+            if ("xml_input".equals(node.getType())) {
+                String path = node.getParams() != null ? node.getParams().getOrDefault("path", "").toString().trim() : "";
+                String rowTag = node.getParams() != null ? node.getParams().getOrDefault("rowTag", "").toString().trim() : "";
+                String delimiter = node.getParams() != null ? node.getParams().getOrDefault("delimiter", ",").toString().trim() : ",";
+                String encoding = node.getParams() != null ? node.getParams().getOrDefault("encoding", "UTF-8").toString().trim() : "UTF-8";
+                if (path.isEmpty()) {
+                    throw new RuntimeException("XML 输入缺少 path 参数");
+                }
+                if (!new java.io.File(path).isFile()) {
+                    throw new RuntimeException("XML 输入文件不存在: " + path);
+                }
+                String csvPath = xmlPreprocessor.convertToCsv(path, rowTag, delimiter, encoding);
+                if (csvPath == null) {
+                    throw new RuntimeException("XML 输入转换失败（请确认为记录列表结构的 XML）: " + path);
+                }
+                String effectiveDelimiter = autoDetectDelimiter(csvPath, delimiter);
+                List<String> autoCols = detectCsvColumns(csvPath, effectiveDelimiter, "true");
+                String effectivePath = stripCsvHeaderIfNeeded(csvPath, "true");
+                String rendered = generateCsvInputDDL(sanitize(node.getId()), effectivePath, effectiveDelimiter, "true", "[]", autoCols);
+                String schema = extractFieldsFromDdlTemplate(rendered);
+                if (schema != null) nodeSchemas.put(node.getId(), schema);
+                log.info("XML input {}: {} -> {} (schema: {})", node.getId(), path, csvPath, schema);
+                flinkSql.append("-- Node: ").append(node.getLabel()).append(" (").append(node.getId()).append(") [XML Input -> Temp CSV]\n");
+                flinkSql.append(rendered).append("\n\n");
+                tableAlias.put(node.getId(), sanitize(node.getId()));
+                continue;
+            }
             // MySQL Input -> JDBC 读表，字段从表结构自动推导
             if ("mysql_input".equals(node.getType())) {
                 String url = node.getParams() != null && node.getParams().get("url") != null ? node.getParams().get("url").toString().trim() : "";
                 String table = node.getParams() != null && node.getParams().get("table") != null ? node.getParams().get("table").toString().trim() : "";
-                String username = node.getParams() != null && node.getParams().get("username") != null ? node.getParams().get("username").toString().trim() : "root";
-                String password = node.getParams() != null && node.getParams().get("password") != null ? node.getParams().get("password").toString() : "";
+                String username = resolveCredential(node.getParams() != null ? node.getParams().get("username") : null, defaultMysqlUsername);
+                String password = resolveCredential(node.getParams() != null ? node.getParams().get("password") : null, defaultMysqlPassword);
                 if (url.isEmpty() || table.isEmpty()) {
                     throw new RuntimeException("MySQL 输入缺少 url / table 参数");
                 }
@@ -155,13 +225,36 @@ public class DagTranslationService {
                 continue;
             }
 
-            // JSON Input -> filesystem + json format，schema 由 fieldsConfig 指定
+                        // JSON Input -> 支持 array 数组（转临时 CSV 自动 schema）与 lines（JSON Lines，fieldsConfig 指定 schema）
             if ("json_input".equals(node.getType())) {
                 String path = node.getParams() != null && node.getParams().get("path") != null ? node.getParams().get("path").toString().trim() : "";
-                String fc = node.getParams() != null && node.getParams().get("fieldsConfig") != null ? node.getParams().get("fieldsConfig").toString() : "[]";
                 if (path.isEmpty() || !new java.io.File(path).isFile()) {
                     throw new RuntimeException("JSON 输入文件不存在: " + path);
                 }
+                String mode = node.getParams() != null && node.getParams().get("mode") != null ? node.getParams().get("mode").toString().trim() : "auto";
+                boolean arrayMode = "array".equalsIgnoreCase(mode)
+                        || ("auto".equalsIgnoreCase(mode) && JsonPreprocessor.isJsonArrayFile(path));
+                if (arrayMode) {
+                    String delimiter = node.getParams() != null && node.getParams().get("delimiter") != null ? node.getParams().get("delimiter").toString().trim() : ",";
+                    String encoding = node.getParams() != null && node.getParams().get("encoding") != null ? node.getParams().get("encoding").toString().trim() : "UTF-8";
+                    String csvPath = jsonPreprocessor.convertArrayToCsv(path, delimiter, encoding);
+                    if (csvPath == null) {
+                        throw new RuntimeException("JSON 数组输入转换失败（请确认为 JSON 数组文件）: " + path);
+                    }
+                    String effectiveDelimiter = autoDetectDelimiter(csvPath, delimiter);
+                    List<String> autoCols = detectCsvColumns(csvPath, effectiveDelimiter, "true");
+                    String effectivePath = stripCsvHeaderIfNeeded(csvPath, "true");
+                    String rendered = generateCsvInputDDL(sanitize(node.getId()), effectivePath, effectiveDelimiter, "true", "[]", autoCols);
+                    String schema = extractFieldsFromDdlTemplate(rendered);
+                    if (schema != null) nodeSchemas.put(node.getId(), schema);
+                    log.info("JSON array input {}: {} -> {} (schema: {})", node.getId(), path, csvPath, schema);
+                    flinkSql.append("-- Node: ").append(node.getLabel()).append(" (").append(node.getId()).append(") [JSON Array Input -> Temp CSV]\n");
+                    flinkSql.append(rendered).append("\n\n");
+                    tableAlias.put(node.getId(), sanitize(node.getId()));
+                    continue;
+                }
+                // lines 模式：保持原有 JSON Lines 逻辑
+                String fc = node.getParams() != null && node.getParams().get("fieldsConfig") != null ? node.getParams().get("fieldsConfig").toString() : "[]";
                 String rendered = generateJsonInputDDL(sanitize(node.getId()), path, fc);
                 String schema = extractFieldsFromDatagenConfig(fc);
                 if (schema != null) nodeSchemas.put(node.getId(), schema);
@@ -176,7 +269,8 @@ public class DagTranslationService {
                 String actualPath = node.getParams() != null ? node.getParams().getOrDefault("path", "D:\\code\\比赛\\2026省服务外包\\output\\output.xlsx").toString().trim() : "/data/output.xlsx";
                 String delimiter = node.getParams() != null ? node.getParams().getOrDefault("delimiter", ",").toString().trim() : ",";
                 String sourceFields = findIncomingSourceSchema(node.getId(), dag.getEdges(), nodeSchemas);
-                String tempCsvPath = ExcelOutputConverter.getTempCsvPath(actualPath);
+                String sheetName = node.getParams() != null && node.getParams().get("sheetName") != null ? node.getParams().get("sheetName").toString().trim() : "Data";
+                String tempCsvPath = ExcelOutputConverter.getTempCsvPath(actualPath, sheetName);
 
                 log.info("Excel output '{}': actual path={}, temp CSV path={}", node.getId(), actualPath, tempCsvPath);
 
@@ -197,6 +291,67 @@ public class DagTranslationService {
                 String rendered = excelDdl.toString();
 
                 flinkSql.append("-- Node: ").append(node.getLabel()).append(" (").append(node.getId()).append(") [Excel Output -> Temp CSV]\n");
+                flinkSql.append(rendered).append("\n\n");
+                tableAlias.put(node.getId(), sanitize(node.getId()));
+                continue;
+            }
+            // Parquet Output -> 生成临时 CSV 输出，作业完成后自动转换为 .parquet
+            if ("parquet_output".equals(node.getType())) {
+                String actualPath = node.getParams() != null ? node.getParams().getOrDefault("path", "D:\\code\\比赛\\2026省服务外包\\output\\output.parquet").toString().trim() : "/data/output.parquet";
+                String delimiter = node.getParams() != null ? node.getParams().getOrDefault("delimiter", ",").toString().trim() : ",";
+                String sourceFields = findIncomingSourceSchema(node.getId(), dag.getEdges(), nodeSchemas);
+                String tempCsvPath = actualPath.replaceAll("(?i)\\.parquet$", "") + "_temp_csv";
+
+                log.info("Parquet output '{}': actual path={}, temp CSV path={}", node.getId(), actualPath, tempCsvPath);
+
+                StringBuilder parquetDdl = new StringBuilder();
+                parquetDdl.append("CREATE TABLE ").append(sanitize(node.getId())).append(" (\n");
+                if (sourceFields != null) {
+                    parquetDdl.append(sourceFields).append("\n");
+                } else {
+                    parquetDdl.append("  data STRING\n");
+                }
+                parquetDdl.append(") WITH (\n");
+                parquetDdl.append("  'connector' = 'filesystem',\n");
+                parquetDdl.append("  'path' = '").append(tempCsvPath).append("',\n");
+                parquetDdl.append("  'format' = 'csv',\n");
+                parquetDdl.append("  'csv.delimiter' = '").append(delimiter).append("',\n");
+                parquetDdl.append("  'sink.parallelism' = '1'\n");
+                parquetDdl.append(");\n");
+                String rendered = parquetDdl.toString();
+
+                flinkSql.append("-- Node: ").append(node.getLabel()).append(" (").append(node.getId()).append(") [Parquet Output -> Temp CSV]\n");
+                flinkSql.append(rendered).append("\n\n");
+                tableAlias.put(node.getId(), sanitize(node.getId()));
+                continue;
+            }
+
+            // XML Output -> 生成临时 CSV 输出，作业完成后自动转换为 XML
+            if ("xml_output".equals(node.getType())) {
+                String actualPath = node.getParams() != null ? node.getParams().getOrDefault("path", "D:\\code\\比赛\\2026省服务外包\\output\\output.xml").toString().trim() : "/data/output.xml";
+                String delimiter = node.getParams() != null ? node.getParams().getOrDefault("delimiter", ",").toString().trim() : ",";
+                String sourceFields = findIncomingSourceSchema(node.getId(), dag.getEdges(), nodeSchemas);
+                String tempCsvPath = XmlOutputConverter.getTempCsvPath(actualPath);
+
+                log.info("XML output '{}': actual path={}, temp CSV path={}", node.getId(), actualPath, tempCsvPath);
+
+                StringBuilder xmlDdl = new StringBuilder();
+                xmlDdl.append("CREATE TABLE ").append(sanitize(node.getId())).append(" (\n");
+                if (sourceFields != null) {
+                    xmlDdl.append(sourceFields).append("\n");
+                } else {
+                    xmlDdl.append("  data STRING\n");
+                }
+                xmlDdl.append(") WITH (\n");
+                xmlDdl.append("  'connector' = 'filesystem',\n");
+                xmlDdl.append("  'path' = '").append(tempCsvPath).append("',\n");
+                xmlDdl.append("  'format' = 'csv',\n");
+                xmlDdl.append("  'csv.delimiter' = '").append(delimiter).append("',\n");
+                xmlDdl.append("  'sink.parallelism' = '1'\n");
+                xmlDdl.append(");\n");
+                String rendered = xmlDdl.toString();
+
+                flinkSql.append("-- Node: ").append(node.getLabel()).append(" (").append(node.getId()).append(") [XML Output -> Temp CSV]\n");
                 flinkSql.append(rendered).append("\n\n");
                 tableAlias.put(node.getId(), sanitize(node.getId()));
                 continue;
@@ -254,8 +409,16 @@ public class DagTranslationService {
                     tmpParams.put("path", origPath + ".tmp");
                     renderParams = tmpParams;
                 }
-                if ("mysql_output".equals(node.getType()) && sourceFields != null) {
-                    mysqlTableCreator.ensureTable(node.getParams(), sourceFields);
+                if ("mysql_output".equals(node.getType())) {
+                    // 凭据支持占位符/空值：提交时解析为环境变量 MYSQL_USERNAME / MYSQL_PASSWORD，避免明文入库
+                    Map<String, Object> resolvedParams = new HashMap<>();
+                    if (node.getParams() != null) resolvedParams.putAll(node.getParams());
+                    resolvedParams.put("username", resolveCredential(node.getParams() != null ? node.getParams().get("username") : null, defaultMysqlUsername));
+                    resolvedParams.put("password", resolveCredential(node.getParams() != null ? node.getParams().get("password") : null, defaultMysqlPassword));
+                    renderParams = resolvedParams;
+                    if (sourceFields != null) {
+                        mysqlTableCreator.ensureTable(resolvedParams, sourceFields);
+                    }
                 }
                 if (sourceFields != null) {
                     log.info("Schema propagation: replacing 'data STRING' with custom fields from source for node {}", node.getId());
@@ -281,6 +444,12 @@ public class DagTranslationService {
                     } else if ("field_rename".equals(node.getType())) {
                         nodeSchemas.put(node.getId(), renameSchemaFields(incomingSchema, parseRenameMappings(node.getParams())));
                     } else if ("row_filter".equals(node.getType())) {
+                        nodeSchemas.put(node.getId(), incomingSchema);
+                    } else if ("dedupe".equals(node.getType())) {
+                        nodeSchemas.put(node.getId(), incomingSchema);
+                    } else if ("validate".equals(node.getType())) {
+                        nodeSchemas.put(node.getId(), incomingSchema);
+                    } else if ("route".equals(node.getType())) {
                         nodeSchemas.put(node.getId(), incomingSchema);
                     } else if ("json_parse".equals(node.getType())) {
                         String jfc = node.getParams() != null && node.getParams().get("fieldsConfig") != null ? node.getParams().get("fieldsConfig").toString() : "[]";
@@ -336,6 +505,26 @@ public class DagTranslationService {
                     ts = "SELECT " + buildFieldRenameSelect(tp, findIncomingSourceSchema(edge.getSource(), dag.getEdges(), nodeSchemas)) + " FROM " + upstreamTable;
                 } else if ("json_parse".equals(transformType)) {
                     ts = "SELECT " + buildJsonParseSelect(tp, findIncomingSourceSchema(edge.getSource(), dag.getEdges(), nodeSchemas)) + " FROM " + upstreamTable;
+                } else if ("dedupe".equals(transformType)) {
+                    List<String> dedupeFields = parseCsvFields(tp != null ? tp.get("dedupeFields") : null);
+                    if (dedupeFields.isEmpty()) {
+                        ts = "SELECT DISTINCT * FROM " + upstreamTable;
+                    } else {
+                        String incomingSchema = findIncomingSourceSchema(edge.getSource(), dag.getEdges(), nodeSchemas);
+                        List<String> allCols = parseSchemaFieldNames(incomingSchema);
+                        if (allCols.isEmpty()) {
+                            ts = "SELECT DISTINCT " + quoteFieldsList(dedupeFields) + " FROM " + upstreamTable;
+                        } else {
+                            String partition = String.join(", ", dedupeFields.stream().map(this::quoteFlinkField).toList());
+                            String orderKey = quoteFlinkField(dedupeFields.get(0));
+                            String colList = String.join(", ", allCols.stream().map(this::quoteFlinkField).toList());
+                            ts = "SELECT " + colList + " FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY " + partition + " ORDER BY " + orderKey + ") AS __rn FROM " + upstreamTable + ") WHERE __rn = 1";
+                        }
+                    }
+                } else if ("validate".equals(transformType)) {
+                    ts = buildValidateSql(tp, upstreamTable);
+                } else if ("route".equals(transformType)) {
+                    ts = buildRouteSql(edge, dag.getEdges(), tp, upstreamTable);
                 } else {
                     ControlRegistry sc = controlService.findByType(transformType);
                     ts = renderTemplate(sc.getFlinkTemplate(), tp, edge.getSource());
@@ -351,6 +540,52 @@ public class DagTranslationService {
 
         log.info("Generated Flink SQL:\n{}", flinkSql.toString());
         return flinkSql.toString();
+    }
+
+    /**
+     * 提交前清理输出控件的临时目录，避免上一次运行遗留的 part-* 文件被合并导致数据重复
+     */
+    private void cleanOutputTempDirs(DagDefinition dag) {
+        try {
+            for (DagDefinition.DagNode node : dag.getNodes()) {
+                String type = node.getType();
+                if (type == null || !type.endsWith("_output")) continue;
+                if (node.getParams() == null || node.getParams().get("path") == null) continue;
+                String path = node.getParams().get("path").toString().trim();
+                if (path.isEmpty()) continue;
+                if ("csv_output".equals(type) || "json_output".equals(type)) {
+                    deleteRecursively(new java.io.File(path + ".tmp"));
+                    continue;
+                }
+                if ("excel_output".equals(type) || "xml_output".equals(type) || "parquet_output".equals(type)) {
+                    String base = path.replaceAll("(?i)\\.(xlsx|xls|xml|parquet)$", "");
+                    java.io.File baseTemp = new java.io.File(base + "_temp_csv");
+                    java.io.File parent = baseTemp.getParentFile();
+                    if (parent != null && parent.isDirectory()) {
+                        String prefix = baseTemp.getName();
+                        java.io.File[] siblings = parent.listFiles((d, n) -> n.equals(prefix) || n.startsWith(prefix + "_"));
+                        if (siblings != null) {
+                            for (java.io.File f : siblings) deleteRecursively(f);
+                        }
+                    } else {
+                        deleteRecursively(baseTemp);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to clean output temp dirs: {}", e.getMessage());
+        }
+    }
+
+    private void deleteRecursively(java.io.File f) {
+        if (f == null || !f.exists()) return;
+        if (f.isDirectory()) {
+            java.io.File[] children = f.listFiles();
+            if (children != null) {
+                for (java.io.File c : children) deleteRecursively(c);
+            }
+        }
+        f.delete();
     }
 
     public String submitToFlink(String flinkSql, int parallelism) {
@@ -424,6 +659,11 @@ public class DagTranslationService {
     private boolean checkFlinkCluster() {
         try { java.net.Socket s = new java.net.Socket(flinkHost, flinkPort); s.close(); return true; }
         catch (Exception e) { return false; }
+    }
+
+    /** 上线等场景探测 Flink 集群是否可用（探测失败即不允许真实提交） */
+    public boolean isFlinkClusterAvailable() {
+        return checkFlinkCluster();
     }
 
 
@@ -940,7 +1180,89 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
         return result;
     }
 
+    /**
+     * 用户名/密码解析：空值或 ${MYSQL_USERNAME} / ${MYSQL_PASSWORD} 占位符回退到环境变量默认值
+     */
+    private String resolveCredential(Object value, String envDefault) {
+        if (value == null || value.toString().trim().isEmpty()) return envDefault == null ? "" : envDefault;
+        String v = value.toString().trim();
+        if ("${MYSQL_USERNAME}".equals(v) || "${MYSQL_PASSWORD}".equals(v)) {
+            return envDefault == null ? "" : envDefault;
+        }
+        return v;
+    }
+
     private String sanitize(String id) { return id.replaceAll("[^a-zA-Z0-9_]", "_"); }
+
+    private List<String> parseCsvFields(Object rawObj) {
+        String raw = rawObj != null ? rawObj.toString() : "";
+        raw = raw.trim();
+        if (raw.startsWith("[") && raw.endsWith("]")) raw = raw.substring(1, raw.length() - 1);
+        List<String> out = new ArrayList<>();
+        for (String p : raw.split(",")) {
+            String t = p.trim();
+            if (t.isEmpty()) continue;
+            out.add(t);
+        }
+        return out;
+    }
+
+    private String quoteFieldsList(List<String> names) {
+        List<String> quoted = new ArrayList<>();
+        for (String n : names) quoted.add(quoteFlinkField(n));
+        return String.join(", ", quoted);
+    }
+
+    private String buildValidateSql(Map<String, Object> params, String upstreamTable) {
+        String checkFields = params != null && params.get("checkFields") != null ? params.get("checkFields").toString().trim() : "";
+        boolean ignoreEmpty = params == null || params.get("ignoreEmpty") == null || Boolean.parseBoolean(params.get("ignoreEmpty").toString());
+        List<String> fields = parseCsvFields(checkFields);
+        if (fields.isEmpty()) throw new RuntimeException("空值校验: 请填写必填字段 checkFields（逗号分隔）");
+        List<String> conds = new ArrayList<>();
+        for (String f : fields) {
+            String q = quoteFlinkField(f);
+            conds.add(ignoreEmpty ? q + " IS NOT NULL AND " + q + " <> ''" : q + " IS NOT NULL");
+        }
+        return "SELECT * FROM " + upstreamTable + " WHERE " + String.join(" AND ", conds);
+    }
+
+    private String buildValueList(String raw) {
+        if (raw == null || raw.trim().isEmpty()) throw new RuntimeException("条件路由: 请填写匹配值 matchValues（逗号分隔）");
+        List<String> parts = new ArrayList<>();
+        for (String p : raw.split(",")) {
+            String t = p.trim();
+            if (t.isEmpty()) continue;
+            parts.add(t.matches("-?\\d+(\\.\\d+)?") ? t : "'" + t.replace("'", "''") + "'");
+        }
+        if (parts.isEmpty()) throw new RuntimeException("条件路由: 匹配值不能为空");
+        return String.join(", ", parts);
+    }
+
+    private String buildRouteSql(DagDefinition.DagEdge edge, List<DagDefinition.DagEdge> edges, Map<String, Object> params, String upstreamTable) {
+        String routeField = params != null && params.get("routeField") != null ? params.get("routeField").toString().trim() : "";
+        String matchValues = params != null && params.get("matchValues") != null ? params.get("matchValues").toString().trim() : "";
+        if (routeField.isEmpty()) throw new RuntimeException("条件路由: 请填写路由字段 routeField");
+        String inList = buildValueList(matchValues);
+        List<DagDefinition.DagEdge> outs = new ArrayList<>();
+        for (DagDefinition.DagEdge e : edges) {
+            if (e.getSource().equals(edge.getSource())) outs.add(e);
+        }
+        outs.sort(java.util.Comparator.comparing(e -> e.getId() == null ? "" : e.getId()));
+        int idx = -1;
+        for (int i = 0; i < outs.size(); i++) {
+            DagDefinition.DagEdge e = outs.get(i);
+            boolean same = (e == edge);
+            if (!same && e.getId() != null && edge.getId() != null && e.getId().equals(edge.getId()) && e.getTarget().equals(edge.getTarget())) same = true;
+            if (same) { idx = i; break; }
+        }
+        String cond;
+        if (idx <= 0) {
+            cond = quoteFlinkField(routeField) + " IN (" + inList + ")";
+        } else {
+            cond = quoteFlinkField(routeField) + " NOT IN (" + inList + ") OR " + quoteFlinkField(routeField) + " IS NULL";
+        }
+        return "SELECT * FROM " + upstreamTable + " WHERE " + cond;
+    }
 
     private List<String> parseFieldList(Map<String, Object> params) {
         String raw = params != null && params.get("fields") != null ? params.get("fields").toString() : "";
@@ -1053,10 +1375,7 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
     }
 
     private String buildFieldFilterSelect(Map<String, Object> params) {
-        List<String> names = parseFieldList(params);
-        List<String> quoted = new ArrayList<>();
-        for (String n : names) quoted.add(quoteFlinkField(n));
-        return String.join(", ", quoted);
+        return quoteFieldsList(parseFieldList(params));
     }
 
     private String buildFieldRenameSelect(Map<String, Object> params, String incomingSchema) {

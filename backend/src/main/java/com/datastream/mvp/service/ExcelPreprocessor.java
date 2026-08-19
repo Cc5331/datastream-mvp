@@ -32,6 +32,18 @@ public class ExcelPreprocessor {
      * @return 生成的 CSV 文件路径，如果失败返回 null
      */
     public String convertToCsv(String xlsxPath, String delimiter, boolean hasHeader) {
+        return convertToCsv(xlsxPath, delimiter, hasHeader, null);
+    }
+
+    /**
+     * 将 Excel 文件转换为 CSV 文件（支持指定 sheet）
+     * @param xlsxPath Excel 文件路径
+     * @param delimiter CSV 分隔符
+     * @param hasHeader 是否包含表头
+     * @param sheetName 指定工作表名（空则取第一个 sheet）
+     * @return 生成的 CSV 文件路径，如果失败返回 null
+     */
+    public String convertToCsv(String xlsxPath, String delimiter, boolean hasHeader, String sheetName) {
         File xlsxFile = new File(xlsxPath);
         if (!xlsxFile.exists() || !xlsxFile.isFile()) {
             log.warn("Excel file not found: {}", xlsxPath);
@@ -42,9 +54,9 @@ public class ExcelPreprocessor {
         File csvFile = new File(csvPath);
 
         try (Workbook workbook = WorkbookFactory.create(xlsxFile, null, true)) {
-            Sheet sheet = workbook.getSheetAt(0);
+            Sheet sheet = resolveSheet(workbook, sheetName);
             if (sheet == null) {
-                log.warn("No sheets found in Excel file: {}", xlsxPath);
+                log.warn("No sheets found in Excel file (sheetName={}): {}", sheetName, xlsxPath);
                 return null;
             }
 
@@ -137,6 +149,31 @@ public class ExcelPreprocessor {
             log.warn("Failed to extract fields from Excel: {}", e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * 按名称或索引解析 sheet，空 sheetName 时取第一个
+     */
+    private Sheet resolveSheet(Workbook workbook, String sheetName) {
+        if (sheetName != null && !sheetName.trim().isEmpty()) {
+            String name = sheetName.trim();
+            Sheet byName = workbook.getSheet(name);
+            if (byName != null) return byName;
+            // 兼容传入索引字符串
+            try {
+                int idx = Integer.parseInt(name);
+                if (idx >= 0 && idx < workbook.getNumberOfSheets()) return workbook.getSheetAt(idx);
+            } catch (NumberFormatException ignored) {}
+            log.warn("Sheet not found: {} (available: {})", name, String.join(",", getSheetNames(workbook)));
+            return null;
+        }
+        return workbook.getNumberOfSheets() > 0 ? workbook.getSheetAt(0) : null;
+    }
+
+    private String[] getSheetNames(Workbook workbook) {
+        String[] names = new String[workbook.getNumberOfSheets()];
+        for (int i = 0; i < names.length; i++) names[i] = workbook.getSheetName(i);
+        return names;
     }
 
     private String getCellValueAsString(Cell cell) {
