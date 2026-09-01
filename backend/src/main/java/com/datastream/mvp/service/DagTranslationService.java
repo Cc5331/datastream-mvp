@@ -1,5 +1,7 @@
 package com.datastream.mvp.service;
 
+import com.datastream.mvp.util.JdbcUrlUtil;
+
 import com.datastream.mvp.dag.DagDefinition;
 import com.datastream.mvp.model.ControlRegistry;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -94,6 +96,7 @@ public class DagTranslationService {
 
             if ("csv_input".equals(node.getType())) {
                 String path = node.getParams() != null ? node.getParams().getOrDefault("path", "/data/input.csv").toString().trim() : "/data/input.csv";
+                path = resolveRuntimePath(path, "/data");
                 String delimiter = node.getParams() != null ? node.getParams().getOrDefault("delimiter", ",").toString().trim() : ",";
                 String hasHeader = node.getParams() != null ? node.getParams().getOrDefault("hasHeader", "true").toString().trim() : "true";
                 String fc = node.getParams() != null ? node.getParams().getOrDefault("fieldsConfig", "[]").toString() : "[]";
@@ -208,7 +211,7 @@ public class DagTranslationService {
             }
             // MySQL Input -> JDBC 读表，字段从表结构自动推导
             if ("mysql_input".equals(node.getType())) {
-                String url = node.getParams() != null && node.getParams().get("url") != null ? node.getParams().get("url").toString().trim() : "";
+                String url = JdbcUrlUtil.normalize(node.getParams() != null && node.getParams().get("url") != null ? node.getParams().get("url").toString() : "");
                 String table = node.getParams() != null && node.getParams().get("table") != null ? node.getParams().get("table").toString().trim() : "";
                 String username = resolveCredential(node.getParams() != null ? node.getParams().get("username") : null, defaultMysqlUsername);
                 String password = resolveCredential(node.getParams() != null ? node.getParams().get("password") : null, defaultMysqlPassword);
@@ -266,7 +269,8 @@ public class DagTranslationService {
 
 // Excel Output -> 生成临时 CSV 输出，作业完成后自动转换为 .xlsx
             if ("excel_output".equals(node.getType())) {
-                String actualPath = node.getParams() != null ? node.getParams().getOrDefault("path", "D:\\code\\比赛\\2026省服务外包\\output\\output.xlsx").toString().trim() : "/data/output.xlsx";
+                String actualPath = node.getParams() != null ? node.getParams().getOrDefault("path", "D:\\code\\比赛\\2026省服务外包\\output\\output.xlsx").toString().trim() : "/output/output.xlsx";
+                actualPath = resolveRuntimePath(actualPath, "/output");
                 String delimiter = node.getParams() != null ? node.getParams().getOrDefault("delimiter", ",").toString().trim() : ",";
                 String sourceFields = findIncomingSourceSchema(node.getId(), dag.getEdges(), nodeSchemas);
                 String sheetName = node.getParams() != null && node.getParams().get("sheetName") != null ? node.getParams().get("sheetName").toString().trim() : "Data";
@@ -297,7 +301,8 @@ public class DagTranslationService {
             }
             // Parquet Output -> 生成临时 CSV 输出，作业完成后自动转换为 .parquet
             if ("parquet_output".equals(node.getType())) {
-                String actualPath = node.getParams() != null ? node.getParams().getOrDefault("path", "D:\\code\\比赛\\2026省服务外包\\output\\output.parquet").toString().trim() : "/data/output.parquet";
+                String actualPath = node.getParams() != null ? node.getParams().getOrDefault("path", "D:\\code\\比赛\\2026省服务外包\\output\\output.parquet").toString().trim() : "/output/output.parquet";
+                actualPath = resolveRuntimePath(actualPath, "/output");
                 String delimiter = node.getParams() != null ? node.getParams().getOrDefault("delimiter", ",").toString().trim() : ",";
                 String sourceFields = findIncomingSourceSchema(node.getId(), dag.getEdges(), nodeSchemas);
                 String tempCsvPath = actualPath.replaceAll("(?i)\\.parquet$", "") + "_temp_csv";
@@ -328,7 +333,8 @@ public class DagTranslationService {
 
             // XML Output -> 生成临时 CSV 输出，作业完成后自动转换为 XML
             if ("xml_output".equals(node.getType())) {
-                String actualPath = node.getParams() != null ? node.getParams().getOrDefault("path", "D:\\code\\比赛\\2026省服务外包\\output\\output.xml").toString().trim() : "/data/output.xml";
+                String actualPath = node.getParams() != null ? node.getParams().getOrDefault("path", "D:\\code\\比赛\\2026省服务外包\\output\\output.xml").toString().trim() : "/output/output.xml";
+                actualPath = resolveRuntimePath(actualPath, "/output");
                 String delimiter = node.getParams() != null ? node.getParams().getOrDefault("delimiter", ",").toString().trim() : ",";
                 String sourceFields = findIncomingSourceSchema(node.getId(), dag.getEdges(), nodeSchemas);
                 String tempCsvPath = XmlOutputConverter.getTempCsvPath(actualPath);
@@ -406,6 +412,7 @@ public class DagTranslationService {
                     Map<String, Object> tmpParams = new HashMap<>();
                     if (node.getParams() != null) tmpParams.putAll(node.getParams());
                     String origPath = tmpParams.getOrDefault("path", "D:\\code\\比赛\\2026省服务外包\\output\\output.csv").toString().trim();
+                    origPath = resolveRuntimePath(origPath, "/output");
                     tmpParams.put("path", origPath + ".tmp");
                     renderParams = tmpParams;
                 }
@@ -413,6 +420,9 @@ public class DagTranslationService {
                     // 凭据支持占位符/空值：提交时解析为环境变量 MYSQL_USERNAME / MYSQL_PASSWORD，避免明文入库
                     Map<String, Object> resolvedParams = new HashMap<>();
                     if (node.getParams() != null) resolvedParams.putAll(node.getParams());
+                    if (resolvedParams.containsKey("url")) {
+                        resolvedParams.put("url", JdbcUrlUtil.normalize(String.valueOf(resolvedParams.get("url"))));
+                    }
                     resolvedParams.put("username", resolveCredential(node.getParams() != null ? node.getParams().get("username") : null, defaultMysqlUsername));
                     resolvedParams.put("password", resolveCredential(node.getParams() != null ? node.getParams().get("password") : null, defaultMysqlPassword));
                     renderParams = resolvedParams;
@@ -529,6 +539,9 @@ public class DagTranslationService {
                     ControlRegistry sc = controlService.findByType(transformType);
                     ts = renderTemplate(sc.getFlinkTemplate(), tp, edge.getSource());
                     ts = ts.replace(sanitize(edge.getSource()), upstreamTable);
+                }
+                if (ts == null || ts.isBlank()) {
+                    throw new IllegalArgumentException("转换节点未生成可执行 SQL: " + edge.getSource());
                 }
                 flinkSql.append("INSERT INTO ").append(targetTable).append("\n").append(ts).append(";\n\n");
                 continue;
@@ -1061,6 +1074,28 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
             }
         }
         return null;
+    }
+
+    /**
+     * Docker 中兼容历史作业保存的 Windows 绝对路径。
+     * 输入文件映射到 /data，输出文件映射到 /output；本机存在的路径保持不变。
+     */
+    private String resolveRuntimePath(String path, String mountedDir) {
+        java.io.File original = new java.io.File(path);
+        if (original.exists() || java.io.File.separatorChar == '\\') {
+            return path;
+        }
+        if (!path.matches("^[A-Za-z]:[\\\\/].*")) {
+            return path;
+        }
+        String fileName = path.replace('\\', '/');
+        fileName = fileName.substring(fileName.lastIndexOf('/') + 1);
+        String mapped = mountedDir + "/" + fileName;
+        if ("/output".equals(mountedDir) || new java.io.File(mapped).exists()) {
+            log.info("Mapped host path for container runtime: {} -> {}", path, mapped);
+            return mapped;
+        }
+        return path;
     }
 
     private String findIncomingSourceTable(String nodeId, List<DagDefinition.DagEdge> edges, Map<String, String> tableAlias) {

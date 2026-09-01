@@ -264,7 +264,7 @@ public class DataInitializer implements CommandLineRunner {
      */
     private String mysqlParamSchema() {
         // 默认值使用占位符（不预填真实密码），提交时由后端解析为环境变量 MYSQL_USERNAME / MYSQL_PASSWORD
-        return "{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\",\"title\":\"JDBC URL\",\"default\":\"jdbc:mysql://localhost:3306/flink_demo\"},\"table\":{\"type\":\"string\",\"title\":\"Table\",\"default\":\"output_table\"},\"username\":{\"type\":\"string\",\"title\":\"User\",\"default\":\"${MYSQL_USERNAME}\"},\"password\":{\"type\":\"string\",\"title\":\"Password\",\"default\":\"${MYSQL_PASSWORD}\"}},\"required\":[\"url\",\"table\",\"username\"]}";
+        return "{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\",\"title\":\"JDBC URL\",\"default\":\"jdbc:mysql://localhost:3306/flink_demo?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai\"},\"table\":{\"type\":\"string\",\"title\":\"Table\",\"default\":\"output_table\"},\"username\":{\"type\":\"string\",\"title\":\"User\",\"default\":\"${MYSQL_USERNAME}\"},\"password\":{\"type\":\"string\",\"title\":\"Password\",\"default\":\"${MYSQL_PASSWORD}\"}},\"required\":[\"url\",\"table\",\"username\"]}";
     }
 
     private void createControl(String type, String name, String category, String description,

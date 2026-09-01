@@ -17,6 +17,8 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -91,6 +93,52 @@ public class JobController {
         jobService.findByIdForUser(id, currentUser());
         return jobService.offline(id);
     }
+
+    @PostMapping("/batch-online")
+    @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
+    @Audit(action = "JOB_BATCH_ONLINE", targetType = "JOB", detail = "'批量上线 ' + #request.ids().size() + ' 个作业'")
+    public Map<String, Object> batchOnline(@RequestBody BatchJobRequest request) {
+        return runBatch(request.ids(), true, request.scheduleEnabled(), request.cronExpression());
+    }
+
+    @PostMapping("/batch-offline")
+    @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
+    @Audit(action = "JOB_BATCH_OFFLINE", targetType = "JOB", detail = "'批量下线 ' + #request.ids().size() + ' 个作业'")
+    public Map<String, Object> batchOffline(@RequestBody BatchJobRequest request) {
+        return runBatch(request.ids(), false, null, null);
+    }
+
+    private Map<String, Object> runBatch(List<Long> ids, boolean online,
+                                         Boolean scheduleEnabled, String cronExpression) {
+        if (ids == null || ids.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请选择至少一个作业");
+        }
+        List<Long> succeeded = new ArrayList<>();
+        List<Map<String, Object>> failed = new ArrayList<>();
+        for (Long id : ids.stream().distinct().toList()) {
+            try {
+                jobService.findByIdForUser(id, currentUser());
+                if (online) {
+                    jobService.updateSchedule(id, scheduleEnabled, cronExpression, null, null);
+                    jobService.online(id);
+                } else {
+                    jobService.offline(id);
+                }
+                succeeded.add(id);
+            } catch (Exception e) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("id", id);
+                item.put("message", e.getMessage() == null ? "操作失败" : e.getMessage());
+                failed.add(item);
+            }
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("succeeded", succeeded);
+        result.put("failed", failed);
+        return result;
+    }
+
+    public record BatchJobRequest(List<Long> ids, Boolean scheduleEnabled, String cronExpression) {}
 
     @PostMapping("/{id}/copy")
     @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")

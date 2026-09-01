@@ -227,6 +227,7 @@ convertExcelOutputsIfNeeded(job);
                 JsonNode params = node.get("params");
                 if (params == null) continue;
                 String actualPath = params.has("path") ? params.get("path").asText().trim() : "";
+                actualPath = resolveOutputPath(actualPath);
                 if (actualPath.isEmpty()) continue;
                 String sheetName = params.has("sheetName") && !params.get("sheetName").asText().trim().isEmpty()
                         ? params.get("sheetName").asText().trim() : "Data";
@@ -293,13 +294,16 @@ convertExcelOutputsIfNeeded(job);
             java.io.File[] parts = tempDir.listFiles((d, n) -> n.startsWith("part-") || n.startsWith(".part-"));
             if (parts == null || parts.length == 0) return null;
             java.util.Arrays.sort(parts);
-            StringBuilder sb = new StringBuilder();
-            if (header != null && !header.trim().isEmpty()) sb.append(header).append("\n");
-            for (java.io.File pf : parts) {
-                sb.append(new String(java.nio.file.Files.readAllBytes(pf.toPath()), java.nio.charset.StandardCharsets.UTF_8));
-            }
             java.io.File merged = new java.io.File(tempCsvPath + "_merged.csv");
-            java.nio.file.Files.write(merged.toPath(), sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            try (java.io.BufferedOutputStream output = new java.io.BufferedOutputStream(
+                    java.nio.file.Files.newOutputStream(merged.toPath()))) {
+                if (header != null && !header.trim().isEmpty()) {
+                    output.write((header + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                }
+                for (java.io.File part : parts) {
+                    java.nio.file.Files.copy(part.toPath(), output);
+                }
+            }
             return merged.getAbsolutePath();
         } catch (Exception e) {
             log.warn("Failed to merge CSV parts {}: {}", tempCsvPath, e.getMessage());
@@ -324,6 +328,7 @@ convertExcelOutputsIfNeeded(job);
                 JsonNode params = node.get("params");
                 if (params == null) continue;
                 String actualPath = params.has("path") ? params.get("path").asText().trim() : "";
+                actualPath = resolveOutputPath(actualPath);
                 if (actualPath.isEmpty()) continue;
                 String delimiter = params.has("delimiter") ? params.get("delimiter").asText().trim() : ",";
                 String tempCsvPath = actualPath.replaceAll("(?i)\\.parquet$", "") + "_temp_csv";
@@ -368,6 +373,7 @@ convertExcelOutputsIfNeeded(job);
                 JsonNode params = node.get("params");
                 if (params == null) continue;
                 String actualPath = params.has("path") ? params.get("path").asText().trim() : "";
+                actualPath = resolveOutputPath(actualPath);
                 if (actualPath.isEmpty()) continue;
 
                 String delimiter = params.has("delimiter") ? params.get("delimiter").asText().trim() : ",";
@@ -649,6 +655,18 @@ convertExcelOutputsIfNeeded(job);
         }
     }
 
+    /** Docker 中兼容历史作业保存的 Windows 输出绝对路径。 */
+    private String resolveOutputPath(String path) {
+        if (path == null || path.isBlank() || java.io.File.separatorChar == '\\'
+                || !path.matches("^[A-Za-z]:[\\\\/].*")) {
+            return path;
+        }
+        String normalized = path.replace('\\', '/');
+        String mapped = "/output/" + normalized.substring(normalized.lastIndexOf('/') + 1);
+        log.info("Mapped output path for container runtime: {} -> {}", path, mapped);
+        return mapped;
+    }
+
     /**
      * Merge Flink filesystem sink part-* files into the user-specified single CSV file.
      */
@@ -680,6 +698,7 @@ convertExcelOutputsIfNeeded(job);
                 if (!type.endsWith("_output")) continue;
                 if (node.get("params") == null || !node.get("params").has("path")) continue;
                 String path = node.get("params").get("path").asText().trim();
+                path = resolveOutputPath(path);
                 if (path.isEmpty()) continue;
                 if ("csv_output".equals(type) || "json_output".equals(type)) {
                     if (new java.io.File(path + ".tmp").isDirectory()) return true;
@@ -735,6 +754,7 @@ convertExcelOutputsIfNeeded(job);
                 JsonNode params = node.get("params");
                 if (params == null) continue;
                 String actualPath = params.has("path") ? params.get("path").asText().trim() : "";
+                actualPath = resolveOutputPath(actualPath);
                 if (actualPath.isEmpty()) continue;
 
                 String tempDir = actualPath + ".tmp";
@@ -915,6 +935,7 @@ convertExcelOutputsIfNeeded(job);
                 JsonNode params = node.get("params");
                 if (params == null) continue;
                 String actualPath = params.has("path") ? params.get("path").asText().trim() : "";
+                actualPath = resolveOutputPath(actualPath);
                 if (actualPath.isEmpty()) continue;
 
                 String tempDir = actualPath + ".tmp";

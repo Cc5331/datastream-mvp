@@ -1,5 +1,7 @@
 package com.datastream.mvp.service;
 
+import com.datastream.mvp.util.JdbcUrlUtil;
+
 import com.datastream.mvp.dag.DagDefinition;
 import com.datastream.mvp.model.ControlRegistry;
 import com.datastream.mvp.model.JobDefinition;
@@ -393,7 +395,7 @@ public class JobService {
 
                     // MySQL output preview - query MySQL directly
                     if ("mysql_output".equals(type) && params != null) {
-                        String url = params.has("url") ? params.get("url").asText() : "jdbc:mysql://localhost:3306/flink_demo";
+                        String url = JdbcUrlUtil.normalize(params.has("url") ? params.get("url").asText() : "jdbc:mysql://localhost:3306/flink_demo");
                         String table = params.has("table") ? params.get("table").asText() : "user_data";
                         String username = resolveCredential(params.has("username") ? params.get("username").asText() : null, defaultMysqlUsername == null ? "root" : defaultMysqlUsername);
                         String password = resolveCredential(params.has("password") ? params.get("password").asText() : null, defaultMysqlPassword);

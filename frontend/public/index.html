@@ -69,6 +69,9 @@
                     <el-button size="small" :type="currentView === 'monitor' ? 'primary' : ''" @click="currentView = 'monitor'">
                         <el-icon><Odometer /></el-icon> 实时监控
                     </el-button>
+                    <el-button size="small" :type="currentView === 'kafka' ? 'primary' : ''" @click="currentView = 'kafka'">
+                        <el-icon><Connection /></el-icon> Kafka 可视化
+                    </el-button>
                     <el-button size="small" :type="currentView === 'workflow' ? 'primary' : ''" @click="currentView = 'workflow'">
                         <el-icon><Share /></el-icon> 工作流
                     </el-button>
@@ -249,6 +252,11 @@
                         </el-select>
                         <span style="color:#909399; font-size:12px;">共 {{ filteredJobs.length }} / {{ jobs.length }} 个作业</span>
                         <div style="margin-left:auto; display:flex; gap:10px; align-items:center;">
+                            <template v-if="canEdit">
+                                <span style="color:#606266; font-size:12px;">已选 {{ selectedJobs.length }} 项</span>
+                                <el-button size="small" type="success" :disabled="!selectedJobs.length" :loading="batchOperating" @click="batchChangeOnline(true)">批量上线</el-button>
+                                <el-button size="small" type="danger" plain :disabled="!selectedJobs.length" :loading="batchOperating" @click="batchChangeOnline(false)">批量下线</el-button>
+                            </template>
                             <el-popover placement="bottom" :width="170" trigger="click">
                                 <template #reference>
                                     <el-button size="small"><el-icon><Setting /></el-icon> 列设置</el-button>
@@ -263,7 +271,8 @@
                             <el-checkbox v-model="onlyMine" size="small">只看我的</el-checkbox>
                         </div>
                     </div>
-                    <el-table :data="filteredJobs" style="width: 100%; height: calc(100% - 42px);" stripe @row-dblclick="openJobDetail">
+                    <el-table :data="filteredJobs" style="width: 100%; height: calc(100% - 42px);" stripe @row-dblclick="openJobDetail" @selection-change="onJobSelectionChange">
+                        <el-table-column v-if="canEdit" type="selection" width="48"></el-table-column>
                         <el-table-column prop="id" label="ID" width="60"></el-table-column>
                         <el-table-column prop="name" label="作业名称" min-width="150"></el-table-column>
                         <el-table-column prop="ownerName" label="创建人" width="100">
@@ -417,37 +426,165 @@
                 <!-- AI 助手视图 -->
                 <div v-show="currentView === 'ai'" class="ai-view">
                     <div class="ai-hero">
-                        <div class="ai-hero-title">🤖 AI 助手 · 自然语言生成数据流</div>
-                        <div class="ai-hero-sub">输入需求 → DeepSeek 生成可执行 DAG → 人工确认后提交。AI 只使用注册表内的控件类型与合法参数。</div>
+                        <div class="ai-hero-orb ai-hero-orb-1"></div>
+                        <div class="ai-hero-orb ai-hero-orb-2"></div>
+                        <div class="ai-hero-glow"></div>
+                        <div class="ai-hero-content">
+                            <div class="ai-hero-badge"><span class="ai-hero-badge-dot"></span>ChatGPT / OpenAI-compatible · NL2Pipeline · 人工确认后提交</div>
+                            <div class="ai-hero-title">
+                                <span class="ai-hero-icon">🤖</span>
+                                <span>AI 助手 · 自然语言生成数据流</span>
+                            </div>
+                            <div class="ai-hero-sub">描述你的数据处理需求，AI 自动生成可执行 DAG。全程只使用控件注册表内的类型与合法参数，安全可控。</div>
+                            <div class="ai-hero-steps">
+                                <span class="ai-hero-step"><i>1</i> 描述需求</span>
+                                <span class="ai-hero-arrow">→</span>
+                                <span class="ai-hero-step"><i>2</i> AI 生成 DAG</span>
+                                <span class="ai-hero-arrow">→</span>
+                                <span class="ai-hero-step"><i>3</i> 人工确认</span>
+                                <span class="ai-hero-arrow">→</span>
+                                <span class="ai-hero-step"><i>4</i> 提交运行</span>
+                            </div>
+                        </div>
                     </div>
                     <div class="ai-panel">
-                        <el-input v-model="aiPrompt" type="textarea" :rows="5" resize="vertical"
+                        <div class="ai-panel-header">
+                            <div class="ai-panel-title">🎯 描述你的数据流需求</div>
+                            <span class="ai-panel-tip">描述越具体，生成的作业越准确</span>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+                            <span style="font-size:13px; color:#606266;">AI 模型</span>
+                            <el-select v-model="aiSelectedModel" placeholder="选择模型" style="width:240px" @visible-change="visible => visible && loadAiModels()">
+                                <el-option v-for="model in aiModels" :key="model" :label="model" :value="model"></el-option>
+                            </el-select>
+                            <el-tag size="small" type="info">{{ aiProvider || 'openai' }}</el-tag>
+                            <el-tag size="small" :type="aiConfigured ? 'success' : 'warning'">{{ aiConfigured ? 'API Key 已配置' : 'API Key 未配置' }}</el-tag>
+                            <el-button v-if="user && user.role === 'ADMIN'" size="small" type="primary" plain @click="openAiProviders">服务商与模型</el-button>
+                        </div>
+                        <el-dialog v-model="aiProvidersVisible" title="AI 服务商" width="760px" append-to-body>
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                                <span style="color:#606266;">保存多个 API 服务商，一键切换模型，无需重复输入配置。</span>
+                                <el-button type="primary" @click="openAiConfig(null)">+ 添加服务商</el-button>
+                            </div>
+                            <div v-if="!aiProviders.length" style="padding:30px;text-align:center;color:#909399;">暂无服务商</div>
+                            <div v-for="profile in aiProviders" :key="profile.id" style="border:1px solid #e4e7ed;border-radius:14px;padding:16px 18px;margin-bottom:12px;" :style="profile.active ? 'border-color:#67c23a;background:#f0f9eb;' : ''">
+                                <div style="display:flex;align-items:center;gap:12px;">
+                                    <span :style="{width:'10px',height:'10px',borderRadius:'50%',background:profile.active ? '#67c23a' : '#909399'}"></span>
+                                    <div style="flex:1;min-width:0;">
+                                        <div style="display:flex;align-items:center;gap:8px;font-weight:600;">
+                                            {{ profile.name }}
+                                            <el-tag v-if="profile.active" size="small" type="success">当前</el-tag>
+                                            <el-tag size="small" type="info">{{ profile.provider }}</el-tag>
+                                        </div>
+                                        <div style="font-size:12px;color:#909399;margin-top:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ profile.baseUrl }} · {{ profile.defaultModel }} · {{ profile.apiKeyConfigured ? 'Key 已配置' : 'Key 未配置' }}</div>
+                                    </div>
+                                    <el-button size="small" :loading="aiProviderOperating===profile.id" @click="testSavedAiProvider(profile)">测试</el-button>
+                                    <el-button v-if="!profile.active" size="small" type="success" :loading="aiProviderOperating===profile.id" @click="activateAiProvider(profile)">切换</el-button>
+                                    <el-button size="small" @click="openAiConfig(profile)">编辑</el-button>
+                                    <el-button v-if="!profile.active" size="small" type="danger" plain @click="deleteAiProvider(profile)">删除</el-button>
+                                </div>
+                            </div>
+                        </el-dialog>
+                        <el-dialog v-model="aiConfigVisible" :title="aiConfigForm.id ? '编辑服务商' : '添加服务商'" width="620px" append-to-body>
+                            <el-alert title="API Key 不会回显或写入数据库；服务商配置保存在当前后端进程内存中，后端重启后恢复 .env 默认服务商。" type="info" :closable="false" show-icon style="margin-bottom:16px;"></el-alert>
+                            <el-form :model="aiConfigForm" label-width="110px">
+                                <el-form-item label="服务商名称">
+                                    <el-input v-model="aiConfigForm.name" placeholder="例如：OpenAI 官方、DeepSeek"></el-input>
+                                </el-form-item>
+                                <el-form-item label="Provider">
+                                    <el-input v-model="aiConfigForm.provider" placeholder="openai"></el-input>
+                                </el-form-item>
+                                <el-form-item label="Base URL">
+                                    <el-input v-model="aiConfigForm.baseUrl" placeholder="https://api.openai.com/v1"></el-input>
+                                </el-form-item>
+                                <el-form-item label="API Key">
+                                    <el-input v-model="aiConfigForm.apiKey" type="password" show-password autocomplete="new-password" placeholder="留空则保留当前已配置的 Key"></el-input>
+                                </el-form-item>
+                                <el-form-item label="可选模型">
+                                    <el-input v-model="aiConfigForm.modelsText" type="textarea" :rows="3" placeholder="gpt-4.1-mini,gpt-4.1,gpt-4o-mini"></el-input>
+                                    <div style="font-size:12px;color:#909399;">多个模型使用英文逗号分隔，用户只能选择这里列出的模型。</div>
+                                </el-form-item>
+                                <el-form-item label="默认模型">
+                                    <el-select v-model="aiConfigForm.defaultModel" filterable allow-create style="width:100%;">
+                                        <el-option v-for="model in aiConfigForm.modelsText.split(',').map(item => item.trim()).filter(Boolean)" :key="model" :label="model" :value="model"></el-option>
+                                    </el-select>
+                                </el-form-item>
+                                <el-form-item label="API 协议">
+                                    <el-radio-group v-model="aiConfigForm.wireApi">
+                                        <el-radio value="chat_completions">Chat Completions /chat/completions</el-radio>
+                                        <el-radio value="responses">Responses /responses</el-radio>
+                                    </el-radio-group>
+                                    <div style="font-size:12px;color:#909399;">中转站使用 Responses 协议时选择第二项。</div>
+                                </el-form-item>
+                                <el-form-item v-if="aiConfigForm.wireApi === 'responses'" label="推理强度" label-width="110px">
+                                    <el-select v-model="aiConfigForm.reasoningEffort" style="width:100%;">
+                                        <el-option label="low" value="low"></el-option>
+                                        <el-option label="medium" value="medium"></el-option>
+                                        <el-option label="high" value="high"></el-option>
+                                        <el-option label="xhigh" value="xhigh"></el-option>
+                                    </el-select>
+                                </el-form-item>
+                                <el-form-item v-if="aiConfigForm.wireApi === 'responses'" label="响应存储">
+                                    <el-switch v-model="aiConfigForm.storeResponses" active-text="存储"></el-switch>
+                                    <span style="margin-left:8px;font-size:12px;color:#909399;">关闭(disable_response_storage)时请勿开启。</span>
+                                </el-form-item>
+                            </el-form>
+                            <template #footer>
+                                <el-button @click="aiConfigVisible = false">关闭</el-button>
+                                <el-button :loading="aiTesting" @click="testAiConnection">保存并测试连接</el-button>
+                                <el-button type="primary" :loading="aiConfigSaving" @click="saveAiConfig">保存配置</el-button>
+                            </template>
+                        </el-dialog>
+                        <el-input v-model="aiPrompt" type="textarea" :rows="5" resize="vertical" class="ai-input"
                             placeholder="例如：读取 D:\code\比赛\2026省服务外包\test-resources\data\sales.csv，把 product_category 和 channel 拼接成新列 category_channel，写出到 MySQL 表 ai_demo"></el-input>
                         <div class="ai-examples">
-                            <span class="ai-examples-label">示例：</span>
+                            <span class="ai-examples-label">💡 试试：</span>
                             <el-tag v-for="(ex, i) in aiExamples" :key="i" size="small" class="ai-example-tag" @click="aiPrompt = ex">{{ ex.length > 34 ? ex.substring(0, 34) + '…' : ex }}</el-tag>
                         </div>
-                        <div style="display:flex; gap:10px;">
-                            <el-button type="primary" :loading="aiLoading" @click="generatePipeline">✨ 生成作业 DAG</el-button>
-                            <el-button @click="aiPrompt = ''; aiError = ''; aiResult = null; aiResultDag = null;">清空</el-button>
+                        <div class="ai-actions">
+                            <el-button type="primary" :loading="aiLoading" class="ai-generate-btn" @click="generatePipeline">
+                                <span v-if="!aiLoading">✨ 生成作业 DAG</span>
+                                <span v-else>AI 正在生成…</span>
+                            </el-button>
+                            <el-button class="ai-clear-btn" @click="aiPrompt = ''; aiError = ''; aiResult = null; aiResultDag = null;">清空</el-button>
                         </div>
-                        <el-alert v-if="aiError" :title="aiError" type="error" :closable="false" show-icon style="margin-top:12px;"></el-alert>
+                        <el-alert v-if="aiError" :title="aiError" type="error" :closable="false" show-icon class="ai-error-alert"></el-alert>
                         <div v-if="aiResult" class="ai-result">
                             <div class="ai-result-header">
-                                <span>✅ 已生成 DRAFT 作业：<b>{{ aiResult.job.name }}</b>（ID #{{ aiResult.job.id }}）</span>
-                                <span class="ai-source-tag">来源 DeepSeek · 已校验控件合法性</span>
+                                <div class="ai-result-title">
+                                    <span class="ai-result-check">✓</span>
+                                    <div>
+                                        <div class="ai-result-name">已生成 DRAFT 作业：<b>{{ aiResult.job.name }}</b></div>
+                                        <div class="ai-result-meta">
+                                            <span class="ai-job-id">作业 ID #{{ aiResult.job.id }}</span>
+                                            <span class="ai-source-tag">来源 {{ aiProvider || 'AI' }} · 已校验控件合法性</span>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                             <div class="ai-result-body">
                                 <template v-if="aiResultDag && aiResultDag.nodes">
-                                    <div v-for="node in aiResultDag.nodes" :key="node.id" class="ai-node-chip">
-                                        <span class="ai-node-chip-type">{{ node.type }}</span>
-                                        <span>{{ node.label }}</span>
+                                    <div class="ai-flow">
+                                        <template v-for="(node, ni) in aiResultDag.nodes" :key="node.id">
+                                            <div class="ai-flow-node" :class="node.type.includes('input') ? 'ai-flow-input' : (node.type.includes('output') ? 'ai-flow-output' : 'ai-flow-transform')">
+                                                <span class="ai-flow-icon">{{ node.type.includes('input') ? '📥' : (node.type.includes('output') ? '📤' : '⚙️') }}</span>
+                                                <div class="ai-flow-text">
+                                                    <div class="ai-flow-type">{{ node.type }}</div>
+                                                    <div class="ai-flow-label">{{ node.label }}</div>
+                                                </div>
+                                            </div>
+                                            <span v-if="ni < aiResultDag.nodes.length - 1" class="ai-flow-arrow">→</span>
+                                        </template>
                                     </div>
-                                    <div v-if="aiResultDag.edges && aiResultDag.edges.length" class="ai-node-chip ai-edge-chip">🔗 {{ aiResultDag.edges.length }} 条连线</div>
+                                    <div v-if="aiResultDag.edges && aiResultDag.edges.length" class="ai-flow-stats">
+                                        <span class="ai-flow-stat"><b>{{ aiResultDag.nodes.length }}</b> 个控件</span>
+                                        <span class="ai-flow-stat"><b>{{ aiResultDag.edges.length }}</b> 条连线</span>
+                                        <span class="ai-flow-stat"><b>{{ aiResult.job.parallelism || 1 }}</b> 并行度</span>
+                                    </div>
                                 </template>
                             </div>
-                            <div style="display:flex; gap:10px; margin-top:12px;">
-                                <el-button type="success" @click="openAiResultInCanvas">🖼 打开画布编辑</el-button>
+                            <div class="ai-result-actions">
+                                <el-button type="success" class="ai-open-btn" @click="openAiResultInCanvas">🖼 打开画布编辑</el-button>
                                 <el-button @click="currentView = 'jobs'; loadJobs()">去作业列表</el-button>
                             </div>
                         </div>
@@ -522,6 +659,11 @@
                         <div class="monitor-toolbar">
                             <span v-if="monitorLastUpdated" class="monitor-refresh-tip">更新于 {{ monitorLastUpdated }}</span>
                             <el-switch v-model="monitorAutoRefresh" active-text="自动刷新" size="small"></el-switch>
+                            <el-radio-group v-model="monitorTrendMode" size="small">
+                                <el-radio-button value="separate">独立刻度</el-radio-button>
+                                <el-radio-button value="compare">统一对比</el-radio-button>
+                            </el-radio-group>
+                            <el-switch v-model="monitorAutoScale" active-text="自动刻度" size="small" title="根据实际吞吐量动态调节 Y 轴刻度"></el-switch>
                             <el-button size="small" :loading="monitorLoading" @click="refreshMonitor">刷新</el-button>
                         </div>
                     </div>
@@ -622,6 +764,83 @@
                             <div class="monitor-card-foot">
                                 <span class="mono">{{ job.flinkJobId || '-' }}</span>
                                 <span>提交于 {{ job.submittedAt }}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Kafka 可视化视图 -->
+                <div v-show="currentView === 'kafka'" class="kafka-view">
+                    <div class="kafka-header">
+                        <div class="kafka-title-wrap">
+                            <h3>📡 Kafka 数据可视化</h3>
+                            <span class="kafka-subtitle">实时查看消息流入 / 吞吐曲线 / 消息内容</span>
+                        </div>
+                        <div class="kafka-controls">
+                            <el-select v-model="kafkaSelectedTopic" placeholder="选择 Topic" size="small" style="width:230px" @change="stopKafkaStream">
+                                <el-option v-for="t in kafkaTopics" :key="t.name" :label="t.name + '（可读 ' + t.messageCount + ' 条）'" :value="t.name"></el-option>
+                            </el-select>
+                            <el-select v-model="kafkaFromMode" size="small" style="width:110px">
+                                <el-option label="从最早" value="beginning"></el-option>
+                                <el-option label="实时" value="latest"></el-option>
+                            </el-select>
+                            <el-button size="small" type="primary" :loading="kafkaStreaming" :disabled="!kafkaSelectedTopic" @click="startKafkaStream">
+                                <span v-if="!kafkaStreaming">▶ 开始接收</span><span v-else>接收中…</span>
+                            </el-button>
+                            <el-button size="small" type="danger" plain :disabled="!kafkaStreaming" @click="stopKafkaStream">■ 停止</el-button>
+                            <el-button size="small" @click="loadKafkaTopics">刷新</el-button>
+                        </div>
+                    </div>
+                    <el-alert v-if="kafkaError" :title="kafkaError" type="error" :closable="false" show-icon class="kafka-error"></el-alert>
+                    <div class="kafka-cards">
+                        <div class="kafka-card">
+                            <div class="kafka-card-label">已接收消息</div>
+                            <div class="kafka-card-value">{{ kafkaMsgCount }}</div>
+                        </div>
+                        <div class="kafka-card">
+                            <div class="kafka-card-label">实时速率</div>
+                            <div class="kafka-card-value">{{ kafkaMsgRate }} <small>条/s</small></div>
+                        </div>
+                        <div class="kafka-card">
+                            <div class="kafka-card-label">Topic 可读总量</div>
+                            <div class="kafka-card-value">{{ kafkaTopicTotal }}</div>
+                        </div>
+                        <div class="kafka-card">
+                            <div class="kafka-card-label">连接状态</div>
+                            <div class="kafka-card-value" :class="kafkaStreaming ? 'kafka-status-on' : 'kafka-status-off'">{{ kafkaStreaming ? '● 接收中' : '○ 已停止' }}</div>
+                        </div>
+                    </div>
+                    <div class="kafka-main">
+                        <div class="kafka-panel kafka-flow-panel">
+                            <div class="kafka-panel-title">🔄 数据流转</div>
+                            <div class="kafka-flow">
+                                <div class="kafka-node kafka-node-producer"><span class="kafka-node-icon">📤</span><div class="kafka-node-name">Producer</div><small>Flink 作业</small></div>
+                                <div class="kafka-track">
+                                    <div class="kafka-track-line"></div>
+                                    <div class="kafka-dot" :class="{ running: kafkaStreaming }"></div>
+                                    <div class="kafka-dot kafka-dot-2" :class="{ running: kafkaStreaming }"></div>
+                                </div>
+                                <div class="kafka-node kafka-node-broker"><span class="kafka-node-icon">🗄️</span><div class="kafka-node-name">Kafka Broker</div><small>{{ kafkaSelectedTopic || '未选择 Topic' }}</small></div>
+                                <div class="kafka-track">
+                                    <div class="kafka-track-line"></div>
+                                    <div class="kafka-dot kafka-dot-3" :class="{ running: kafkaStreaming }"></div>
+                                </div>
+                                <div class="kafka-node kafka-node-consumer"><span class="kafka-node-icon">📥</span><div class="kafka-node-name">Consumer</div><small>本页实时订阅</small></div>
+                            </div>
+                            <div id="kafkaThroughputChart" class="kafka-chart"></div>
+                        </div>
+                        <div class="kafka-panel kafka-feed-panel">
+                            <div class="kafka-panel-title">📋 实时消息流<span class="kafka-feed-count">{{ kafkaMessages.length }} 条</span></div>
+                            <div ref="kafkaFeedRef" class="kafka-feed">
+                                <div v-if="kafkaMessages.length === 0" class="kafka-feed-empty">
+                                    {{ kafkaStreaming ? '正在连接 Kafka 并等待消息…' : '选择 Topic 后点击「▶ 开始接收」' }}
+                                </div>
+                                <div v-for="m in kafkaMessages" :key="m.seq" class="kafka-msg">
+                                    <div class="kafka-msg-head">
+                                        <span class="kafka-msg-tag">p{{ m.partition }} · offset {{ m.offset }}</span>
+                                        <span class="kafka-msg-time">{{ m.time }}</span>
+                                    </div>
+                                    <pre class="kafka-msg-body">{{ m.pretty }}</pre>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -754,6 +973,34 @@
             </div>
         </el-dialog>
 
+        <!-- 批量上线调度对话框 -->
+        <el-dialog v-model="batchOnlineDialogVisible" title="批量上线与调度" width="560px">
+            <el-form label-width="110px">
+                <el-form-item label="选中作业">
+                    <span>共 {{ selectedJobs.length }} 个</span>
+                </el-form-item>
+                <el-form-item label="启用调度">
+                    <el-switch v-model="batchScheduleEnabled"></el-switch>
+                    <span style="margin-left:10px;color:#909399;font-size:12px;">批量文件作业上线必须启用调度；流式作业上线后持续运行</span>
+                </el-form-item>
+                <el-form-item label="调度频率">
+                    <div style="width:100%;">
+                        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;">
+                            <el-tag v-for="p in schedulePresets" :key="p.cron" :type="batchCronExpression === p.cron ? 'success' : 'info'" size="small" style="cursor:pointer;margin:0;" @click="batchCronExpression = p.cron">{{ p.label }}</el-tag>
+                        </div>
+                        <el-input v-model="batchCronExpression" :disabled="!batchScheduleEnabled" placeholder="6 段 Cron，例如 0 */5 * * * *" clearable></el-input>
+                        <div v-if="batchScheduleEnabled && batchCronExpression" style="font-size:12px;color:#909399;margin-top:6px;">
+                            将按：<b style="color:#409EFF;">{{ cronToHuman(batchCronExpression) }}</b> 执行
+                        </div>
+                    </div>
+                </el-form-item>
+            </el-form>
+            <template #footer>
+                <el-button @click="batchOnlineDialogVisible = false">取消</el-button>
+                <el-button type="primary" :loading="batchOperating" @click="confirmBatchOnline">应用调度并上线</el-button>
+            </template>
+        </el-dialog>
+
         <!-- 定时调度对话框 -->
         <el-dialog v-model="scheduleDialogVisible" title="定时调度" width="560px">
             <el-form label-width="110px">
@@ -848,40 +1095,57 @@
         </el-dialog>
 
         <!-- AI 智能诊断对话框 -->
-        <el-dialog v-model="diagnoseVisible" title="🤖 AI 智能诊断" width="700px">
-            <div v-loading="diagnoseLoading" style="min-height:120px;">
+        <el-dialog v-model="diagnoseVisible" width="720px" class="diag-dialog">
+            <template #header>
+                <div class="diag-dialog-header">
+                    <span class="diag-dialog-icon">🩺</span>
+                    <div>
+                        <div class="diag-dialog-title">AI 智能诊断</div>
+                        <div class="diag-dialog-sub">作业 {{ diagnoseJob ? '#' + diagnoseJob.id : '' }} · 自动归因 + 修复建议</div>
+                    </div>
+                </div>
+            </template>
+            <div v-loading="diagnoseLoading" class="diag-body">
                 <template v-if="diagnoseResult">
                     <div class="diag-block">
-                        <div class="diag-label">根因</div>
+                        <div class="diag-label">🔍 根因</div>
                         <div class="diag-root-cause">{{ diagnoseResult.rootCause }}</div>
                     </div>
                     <div class="diag-block" v-if="diagnoseResult.evidence">
-                        <div class="diag-label">关键证据</div>
+                        <div class="diag-label">📋 关键证据</div>
                         <pre class="diag-evidence">{{ diagnoseResult.evidence }}</pre>
                     </div>
                     <div class="diag-block">
-                        <div class="diag-label">修复建议</div>
+                        <div class="diag-label">🛠 修复建议</div>
                         <ul class="diag-suggestions">
-                            <li v-for="(s, i) in diagnoseResult.suggestions" :key="i">{{ s }}</li>
+                            <li v-for="(s, i) in diagnoseResult.suggestions" :key="i"><span class="diag-sug-check">✓</span>{{ s }}</li>
                             <li v-if="!diagnoseResult.suggestions || diagnoseResult.suggestions.length === 0">请人工检查作业日志与参数</li>
                         </ul>
                     </div>
                     <div class="diag-block" v-if="hasParamFixes">
-                        <div class="diag-label">可一键预填的参数修正</div>
+                        <div class="diag-label">💾 可一键预填的参数修正</div>
                         <div v-for="(fixes, nodeId) in diagnoseResult.paramFixes" :key="nodeId" class="diag-fix-item">
-                            <b>{{ nodeId }}</b>：
-                            <el-tag v-for="(val, key) in fixes" :key="key" size="small" style="margin-right:4px;">{{ key }} = {{ val }}</el-tag>
+                            <span class="diag-fix-node">{{ nodeId }}</span>
+                            <el-tag v-for="(val, key) in fixes" :key="key" size="small" class="diag-fix-tag">{{ key }} = {{ val }}</el-tag>
                         </div>
-                        <el-button type="success" size="small" style="margin-top:8px;" @click="applyDiagnoseFixes">💾 一键写入画布并保存</el-button>
+                        <el-button type="success" size="small" class="diag-fix-btn" @click="applyDiagnoseFixes">💾 一键写入画布并保存</el-button>
                     </div>
-                    <div style="color:#909399; font-size:12px; margin-top:10px;">诊断来源：{{ diagnoseResult.source === 'rule' ? '本地规则引擎（快，覆盖高频问题）' : 'DeepSeek 大模型（深度归因）' }}</div>
+                    <div class="diag-source">
+                        <span class="diag-source-dot" :class="diagnoseResult.source === 'rule' ? 'dot-rule' : 'dot-llm'"></span>
+                        {{ diagnoseResult.source === 'rule' ? '本地规则引擎（快，覆盖高频问题）' : 'DeepSeek 大模型（深度归因）' }}
+                    </div>
                 </template>
+                <div v-else class="diag-empty">
+                    <div class="diag-empty-icon">🩺</div>
+                    <div class="diag-empty-text">点击下方按钮，AI 将自动分析该作业的失败原因并给出修复建议</div>
+                </div>
             </div>
             <template #footer>
-                <el-button v-if="!diagnoseResult" type="primary" :loading="diagnoseLoading" @click="runDiagnose">开始诊断</el-button>
+                <el-button v-if="!diagnoseResult" type="primary" :loading="diagnoseLoading" class="diag-run-btn" @click="runDiagnose">🚀 开始诊断</el-button>
                 <el-button @click="diagnoseVisible = false">关闭</el-button>
             </template>
         </el-dialog>
+
 
         <!-- 版本历史对话框 -->
         <el-dialog v-model="versionDialogVisible" title="版本历史" width="640px">

@@ -1,13 +1,17 @@
 package com.datastream.mvp.service;
 
 import com.datastream.mvp.model.JobDefinition;
+import com.datastream.mvp.model.TrendPoint;
 import com.datastream.mvp.repository.JobDefinitionRepository;
+import com.datastream.mvp.repository.TrendPointRepository;
+import jakarta.annotation.PostConstruct;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
@@ -37,6 +41,7 @@ import java.util.Set;
 public class MonitorService {
 
     private final JobDefinitionRepository jobRepo;
+    private final TrendPointRepository trendRepo;
     private final ObjectMapper objectMapper;
 
     @Value("${flink.cluster.host:localhost}")
@@ -51,7 +56,7 @@ public class MonitorService {
 
     /** 最近结束作业最多展示条数 */
     private static final int RECENT_LIMIT = 6;
-    private static final int MAX_TREND_POINTS = 120;
+    private static final int MAX_TREND_POINTS = 300;
     private final Map<Long, Deque<ObjectNode>> trendBuffer = new ConcurrentHashMap<>();
     /** 趋势缓冲对应的运行批次（jobId -> submittedAt），新一次运行重置趋势 */
     private final Map<Long, String> trendRunKeys = new ConcurrentHashMap<>();
@@ -70,7 +75,6 @@ public class MonitorService {
             if (item != null) {
                 result.add(item);
                 seen.add(job.getId());
-                recordTrendPoint(job, item);
                 JsonNode liveMetrics = item.get("metrics");
                 if (liveMetrics != null && liveMetrics.path("available").asBoolean(false)
                         && "live".equals(liveMetrics.path("mode").asText())) {
@@ -96,6 +100,42 @@ public class MonitorService {
             }
         }
         return result;
+    }
+
+    @Scheduled(fixedDelay = 2000)
+    public void collectTrendMetrics() {
+        List<JobDefinition> active = jobRepo.findByStatusIn(List.of(
+                JobDefinition.JobStatus.SUBMITTED, JobDefinition.JobStatus.RUNNING));
+        for (JobDefinition job : active) {
+            String fid = job.getFlinkJobId();
+            if (fid == null || isMockFlinkId(fid)) continue;
+            ObjectNode item = buildJobMetrics(job, fid, true);
+            if (item == null || !item.path("metrics").path("available").asBoolean(false)) continue;
+            recordTrendPoint(job, item);
+            lastLiveSnapshot.put(job.getId(), item.deepCopy());
+        }
+
+        List<JobDefinition> completed = jobRepo.findByStatusAndCompletedAtAfter(
+                JobDefinition.JobStatus.COMPLETED, java.time.LocalDateTime.now().minusMinutes(3));
+        for (JobDefinition job : completed) {
+            if (hasCompletedTrend(job)) continue;
+            String fid = job.getFlinkJobId();
+            if (fid == null || isMockFlinkId(fid)) continue;
+            ObjectNode history = buildJobMetrics(job, fid, false);
+            JsonNode metrics = history == null ? null : history.get("metrics");
+            double average = metrics == null ? 0 : metrics.path("avgRowsPerSecond").asDouble(0);
+            if (average <= 0) continue;
+            recordCompletedTrend(job, average);
+        }
+    }
+
+    private boolean hasCompletedTrend(JobDefinition job) {
+        String runKey = job.getSubmittedAt() == null ? "" : job.getSubmittedAt().toString();
+        Deque<ObjectNode> points = trendBuffer.get(job.getId());
+        if (points == null || !runKey.equals(trendRunKeys.get(job.getId()))) return false;
+        synchronized (points) {
+            return points.stream().anyMatch(point -> "COMPLETED".equals(point.path("status").asText()));
+        }
     }
 
     private boolean isMockFlinkId(String fid) {
@@ -381,10 +421,32 @@ public class MonitorService {
     }
 
     private Long countExcelRows(String path) {
-        try (org.apache.poi.ss.usermodel.Workbook wb =
-                     org.apache.poi.ss.usermodel.WorkbookFactory.create(new java.io.File(path))) {
-            org.apache.poi.ss.usermodel.Sheet sheet = wb.getSheetAt(0);
-            return (long) sheet.getLastRowNum();
+        java.io.File file = new java.io.File(path);
+        if (!file.isFile() || file.length() == 0) return null;
+        try (org.apache.poi.openxml4j.opc.OPCPackage pkg = org.apache.poi.openxml4j.opc.OPCPackage.open(
+                file, org.apache.poi.openxml4j.opc.PackageAccess.READ)) {
+            org.apache.poi.xssf.eventusermodel.XSSFReader reader =
+                    new org.apache.poi.xssf.eventusermodel.XSSFReader(pkg);
+            java.util.Iterator<java.io.InputStream> sheets = reader.getSheetsData();
+            if (!sheets.hasNext()) return 0L;
+            try (java.io.InputStream sheet = sheets.next()) {
+                javax.xml.stream.XMLInputFactory factory = javax.xml.stream.XMLInputFactory.newFactory();
+                factory.setProperty(javax.xml.stream.XMLInputFactory.SUPPORT_DTD, false);
+                factory.setProperty("javax.xml.stream.isSupportingExternalEntities", false);
+                javax.xml.stream.XMLStreamReader xml = factory.createXMLStreamReader(sheet);
+                long rows = 0;
+                try {
+                    while (xml.hasNext()) {
+                        if (xml.next() == javax.xml.stream.XMLStreamConstants.START_ELEMENT
+                                && "row".equals(xml.getLocalName())) {
+                            rows++;
+                        }
+                    }
+                } finally {
+                    xml.close();
+                }
+                return Math.max(0, rows - 1);
+            }
         } catch (Exception e) {
             log.debug("countExcelRows failed for {}: {}", path, e.getMessage());
             return null;
@@ -471,7 +533,7 @@ public class MonitorService {
                 ? points.get(points.size() - 1).get("t").asLong() : 0L;
     }
 
-    private void recordTrendPoint(JobDefinition job, ObjectNode item) {
+    void recordTrendPoint(JobDefinition job, ObjectNode item) {
         JsonNode metrics = item.get("metrics");
         if (metrics == null) return;
         JsonNode thr = metrics.get("throughput");
@@ -481,19 +543,136 @@ public class MonitorService {
         Deque<ObjectNode> q = trendBuffer.computeIfAbsent(jobId, k -> new ArrayDeque<>());
         ObjectNode point = objectMapper.createObjectNode();
         point.put("t", System.currentTimeMillis());
-        point.put("in", thr.has("numRecordsInPerSecond") ? thr.get("numRecordsInPerSecond").asDouble() : 0);
-        point.put("out", thr.has("numRecordsOutPerSecond") ? thr.get("numRecordsOutPerSecond").asDouble() : 0);
+        double inRate = thr.has("numRecordsInPerSecond") ? thr.get("numRecordsInPerSecond").asDouble() : 0;
+        double outRate = thr.has("numRecordsOutPerSecond") ? thr.get("numRecordsOutPerSecond").asDouble() : 0;
+        point.put("in", inRate);
+        point.put("out", outRate);
         JsonNode bp = metrics.get("backpressure");
-        point.put("bp", bp != null && bp.has("ratio") ? bp.get("ratio").asDouble() : 0);
+        double bpRatio = bp != null && bp.has("ratio") ? bp.get("ratio").asDouble() : 0;
+        point.put("bp", bpRatio);
+        String status = job.getStatus() == null ? "RUNNING" : job.getStatus().name();
+        point.put("status", status);
         synchronized (q) {
-            // 新一次运行（submittedAt 变化）时重置趋势，只保留当前运行的曲线
+            // 新一次运行（submittedAt 变化）时重置，只保留当前运行的曲线
             String prevKey = trendRunKeys.get(jobId);
             if (prevKey == null || !prevKey.equals(runKey)) {
                 q.clear();
                 trendRunKeys.put(jobId, runKey);
+                // 清掉该作业上一落盘的旧趋势点，只保留本次运行
+                deletePersisted(jobId);
             }
             q.addLast(point);
             while (q.size() > MAX_TREND_POINTS) q.removeFirst();
+        }
+        persistPoint(jobId, point.path("t").asLong(), inRate, outRate, bpRatio, runKey, status);
+    }
+
+    private void recordCompletedTrend(JobDefinition job, double average) {
+        Long jobId = job.getId();
+        String runKey = job.getSubmittedAt() == null ? "" : job.getSubmittedAt().toString();
+        Deque<ObjectNode> points = trendBuffer.computeIfAbsent(jobId, ignored -> new ArrayDeque<>());
+        long start = job.getSubmittedAt() == null
+                ? System.currentTimeMillis() - 2000
+                : job.getSubmittedAt().atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli();
+        long end = job.getCompletedAt() == null
+                ? System.currentTimeMillis()
+                : job.getCompletedAt().atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli();
+        if (end <= start + 1) end = start + 2;
+
+        synchronized (points) {
+            if (!runKey.equals(trendRunKeys.get(jobId))) {
+                points.clear();
+                trendRunKeys.put(jobId, runKey);
+                deletePersisted(jobId);
+            }
+            boolean hasVisibleSamples = points.size() >= 3
+                    && points.stream().anyMatch(point -> point.path("out").asDouble(0) > 0);
+            if (!hasVisibleSamples) {
+                points.clear();
+                trendRunKeys.put(jobId, runKey);
+                deletePersisted(jobId);
+                addTrendPoint(points, jobId, start, 0, runKey, "RUNNING");
+                addTrendPoint(points, jobId, start + (end - start) / 2, average, runKey, "RUNNING");
+            }
+            addTrendPoint(points, jobId, end, 0, runKey, "COMPLETED");
+        }
+    }
+
+    private void addTrendPoint(Deque<ObjectNode> points, Long jobId, long time, double rate,
+                               String runKey, String status) {
+        ObjectNode point = objectMapper.createObjectNode();
+        point.put("t", time);
+        point.put("in", rate);
+        point.put("out", rate);
+        point.put("bp", 0);
+        point.put("status", status);
+        points.addLast(point);
+        while (points.size() > MAX_TREND_POINTS) points.removeFirst();
+        persistPoint(jobId, time, rate, rate, 0, runKey, status);
+    }
+
+    /** 新一次运行开始时删除数据库旧趋势点（失败仅记录，不影响热路径） */
+    private void deletePersisted(Long jobId) {
+        try {
+            trendRepo.deleteByJobId(jobId);
+        } catch (Exception e) {
+            log.warn("Failed to drop stale trend points for job {}: {}", jobId, e.getMessage());
+        }
+    }
+
+    /** 单条持久化趋势点；写库失败不阻断内存热路径 */
+    private void persistPoint(Long jobId, long t, double inRate, double outRate, double bpRatio,
+                              String runKey, String status) {
+        try {
+            TrendPoint tp = new TrendPoint(null, jobId, t, inRate, outRate, bpRatio, runKey, status);
+            trendRepo.save(tp);
+        } catch (Exception e) {
+            log.warn("Failed to persist trend point for job {}: {}", jobId, e.getMessage());
+        }
+    }
+
+    /** 后端启动时从库恢复最近一次运行的趋势曲线，供前端继续展示 */
+    @PostConstruct
+    void restoreTrends() {
+        try {
+            List<JobDefinition> jobs = jobRepo.findAllByOrderByUpdatedAtDesc();
+            for (JobDefinition job : jobs) {
+                if (job.getStatus() == null) continue;
+                JobDefinition.JobStatus st = job.getStatus();
+                if (st != JobDefinition.JobStatus.SUBMITTED
+                        && st != JobDefinition.JobStatus.RUNNING
+                        && st != JobDefinition.JobStatus.COMPLETED
+                        && st != JobDefinition.JobStatus.FAILED
+                        && st != JobDefinition.JobStatus.CANCELLED) continue;
+                restoreTrendForJob(job);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to restore trend buffer from DB: {}", e.getMessage());
+        }
+    }
+
+    void restoreTrendForJob(JobDefinition job) {
+        Long jobId = job.getId();
+        String runKey = job.getSubmittedAt() == null ? "" : job.getSubmittedAt().toString();
+        try {
+            List<TrendPoint> rows = trendRepo.findByJobIdAndRunKeyOrderByTAsc(jobId, runKey);
+            if (rows.isEmpty()) return;
+            Deque<ObjectNode> q = new ArrayDeque<>();
+            for (TrendPoint row : rows) {
+                ObjectNode point = objectMapper.createObjectNode();
+                point.put("t", row.getT());
+                point.put("in", row.getIn());
+                point.put("out", row.getOut());
+                point.put("bp", row.getBp());
+                if (row.getStatus() != null) point.put("status", row.getStatus());
+                q.addLast(point);
+                if (q.size() >= MAX_TREND_POINTS) break;
+            }
+            trendBuffer.put(jobId, q);
+            trendRunKeys.put(jobId, runKey);
+            log.info("Restored {} trend point(s) for job {}", q.size(), jobId);
+        } catch (Exception e) {
+            log.warn("Failed to restore trend for job {}: {}", jobId, e.getMessage());
         }
     }
 }

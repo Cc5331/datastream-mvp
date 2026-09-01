@@ -1,5 +1,7 @@
 package com.datastream.mvp.service;
 
+import com.datastream.mvp.util.JdbcUrlUtil;
+
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -55,7 +57,7 @@ public class MysqlTableCreator {
         if (params == null) {
             throw new RuntimeException("MySQL 输出缺少连接参数");
         }
-        String url = str(params.get("url")).trim();
+        String url = JdbcUrlUtil.normalize(str(params.get("url")));
         String table = str(params.get("table")).trim();
         String username = resolveCredential(str(params.get("username")), defaultMysqlUsername);
         String password = resolveCredential(str(params.get("password")), defaultMysqlPassword);

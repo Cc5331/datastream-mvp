@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿// ===== API 配置 =====
+﻿﻿﻿﻿﻿﻿﻿﻿﻿// ===== API 配置 =====
 const API_BASE = '/api';
 
 const api = {
@@ -39,6 +39,14 @@ const api = {
     },
     async offlineJob(id) {
         const res = await axios.post(`${API_BASE}/jobs/${id}/offline`);
+        return res.data;
+    },
+    async batchOnlineJobs(ids, scheduleEnabled, cronExpression) {
+        const res = await axios.post(`${API_BASE}/jobs/batch-online`, { ids, scheduleEnabled, cronExpression });
+        return res.data;
+    },
+    async batchOfflineJobs(ids) {
+        const res = await axios.post(`${API_BASE}/jobs/batch-offline`, { ids });
         return res.data;
     },
     async copyJob(id) {
@@ -108,12 +116,48 @@ const api = {
         const res = await axios.get(`${API_BASE}/lineage/job/${jobId}`);
         return res.data;
     },
-    async aiNl2Pipeline(prompt) {
-        const res = await axios.post(API_BASE + '/ai/nl2pipeline', { prompt });
+    async getAiModels() {
+        const res = await axios.get(API_BASE + '/ai/models');
         return res.data;
     },
-    async aiDiagnose(jobId) {
-        const res = await axios.post(API_BASE + '/ai/diagnose/' + jobId);
+    async getAiConfig() {
+        const res = await axios.get(API_BASE + '/ai/config');
+        return res.data;
+    },
+    async updateAiConfig(config) {
+        const res = await axios.put(API_BASE + '/ai/config', config);
+        return res.data;
+    },
+    async testAiConnection(model) {
+        const res = await axios.post(API_BASE + '/ai/test', { model });
+        return res.data;
+    },
+    async getAiProviders() {
+        const res = await axios.get(API_BASE + '/ai/providers');
+        return res.data;
+    },
+    async saveAiProvider(provider) {
+        const res = await axios.post(API_BASE + '/ai/providers', provider);
+        return res.data;
+    },
+    async activateAiProvider(id) {
+        const res = await axios.post(`${API_BASE}/ai/providers/${encodeURIComponent(id)}/activate`);
+        return res.data;
+    },
+    async testAiProvider(id, model) {
+        const res = await axios.post(`${API_BASE}/ai/providers/${encodeURIComponent(id)}/test`, { model });
+        return res.data;
+    },
+    async deleteAiProvider(id) {
+        await axios.delete(`${API_BASE}/ai/providers/${encodeURIComponent(id)}`);
+    },
+    async aiNl2Pipeline(prompt, model) {
+        const res = await axios.post(API_BASE + '/ai/nl2pipeline', { prompt, model });
+        return res.data;
+    },
+    async aiDiagnose(jobId, model) {
+        const params = model ? { model } : {};
+        const res = await axios.post(API_BASE + '/ai/diagnose/' + jobId, null, { params });
         return res.data;
     },
     async getAlerts() {
@@ -132,6 +176,10 @@ const api = {
     },
     async deleteAlert(id) {
         await axios.delete(API_BASE + '/alerts/' + id);
+    },
+    async getKafkaTopics() {
+        const res = await axios.get(API_BASE + '/kafka/topics');
+        return res.data;
     }
 };
 
@@ -143,14 +191,14 @@ const CATEGORY_COLORS = {
 };
 
 // ===== 示例作业（一键导入画布）=====
-const DEFAULT_OUTPUT_DIR = 'D:\\code\\比赛\\2026省服务外包\\output';
+const DEFAULT_OUTPUT_DIR = '/output';
 const SAMPLE_DAGS = {
     'datagen2csv': {
         jobName: '示例：Datagen → CSV',
         parallelism: 1,
         nodes: [
             { id: 'dg_1', type: 'datagen_input', label: 'Datagen', params: { rowsPerSecond: '50', fieldsConfig: '[{"name":"id","type":"INT"},{"name":"name","type":"STRING"},{"name":"score","type":"DOUBLE"}]' }, x: 120, y: 140 },
-            { id: 'csv_out_1', type: 'csv_output', label: 'CSV 输出', params: { path: DEFAULT_OUTPUT_DIR + '\\sample_output.csv', hasHeader: 'true', delimiter: ',' }, x: 430, y: 140 }
+            { id: 'csv_out_1', type: 'csv_output', label: 'CSV 输出', params: { path: DEFAULT_OUTPUT_DIR + '/sample_output.csv', hasHeader: 'true', delimiter: ',' }, x: 430, y: 140 }
         ],
         edges: [ { id: 'e1', source: 'dg_1', target: 'csv_out_1' } ]
     },
@@ -159,7 +207,7 @@ const SAMPLE_DAGS = {
         parallelism: 1,
         nodes: [
             { id: 'dg_1', type: 'datagen_input', label: 'Datagen', params: { rowsPerSecond: '50', fieldsConfig: '[{"name":"id","type":"INT"},{"name":"name","type":"STRING"}]' }, x: 120, y: 140 },
-            { id: 'json_out_1', type: 'json_output', label: 'JSON 输出', params: { path: DEFAULT_OUTPUT_DIR + '\\sample_output.json', mode: 'lines' }, x: 430, y: 140 }
+            { id: 'json_out_1', type: 'json_output', label: 'JSON 输出', params: { path: DEFAULT_OUTPUT_DIR + '/sample_output.json', mode: 'lines' }, x: 430, y: 140 }
         ],
         edges: [ { id: 'e1', source: 'dg_1', target: 'json_out_1' } ]
     },
@@ -167,9 +215,9 @@ const SAMPLE_DAGS = {
         jobName: '示例：CSV → 字段过滤 → CSV',
         parallelism: 1,
         nodes: [
-            { id: 'csv_in_1', type: 'csv_input', label: 'CSV 输入', params: { path: 'D:\\code\\比赛\\2026省服务外包\\test-resources\\data\\sales.csv', hasHeader: 'true', delimiter: ',' }, x: 120, y: 140 },
+            { id: 'csv_in_1', type: 'csv_input', label: 'CSV 输入', params: { path: '/data/sales.csv', hasHeader: 'true', delimiter: ',' }, x: 120, y: 140 },
             { id: 'ff_1', type: 'field_filter', label: '字段过滤', params: { fields: 'sale_id,amount' }, x: 330, y: 140 },
-            { id: 'csv_out_1', type: 'csv_output', label: 'CSV 输出', params: { path: DEFAULT_OUTPUT_DIR + '\\sample_filtered.csv', hasHeader: 'true', delimiter: ',' }, x: 540, y: 140 }
+            { id: 'csv_out_1', type: 'csv_output', label: 'CSV 输出', params: { path: DEFAULT_OUTPUT_DIR + '/sample_filtered.csv', hasHeader: 'true', delimiter: ',' }, x: 540, y: 140 }
         ],
         edges: [ { id: 'e1', source: 'csv_in_1', target: 'ff_1' }, { id: 'e2', source: 'ff_1', target: 'csv_out_1' } ]
     }
@@ -185,6 +233,8 @@ const app = createApp({
         const currentView = ref('canvas');
         const controls = ref([]);
         const jobs = ref([]);
+        const selectedJobs = ref([]);
+        const batchOperating = ref(false);
         const jobSearch = ref('');
         const jobStatusFilter = ref('');
         const jobCols = reactive({ description: false, parallelism: false, flinkJobId: false, updatedAt: false });
@@ -205,6 +255,9 @@ const app = createApp({
         const jobLogs = ref([]);
         const jobErrors = ref({});
         const scheduleDialogVisible = ref(false);
+        const batchOnlineDialogVisible = ref(false);
+        const batchScheduleEnabled = ref(true);
+        const batchCronExpression = ref('0 */5 * * * *');
         const scheduleJob = ref(null);
         const scheduleEnabled = ref(false);
         const cronExpression = ref('');
@@ -236,6 +289,8 @@ const app = createApp({
         const monitorLoading = ref(false);
         const monitorError = ref('');
         const monitorAutoRefresh = ref(true);
+        const monitorAutoScale = ref(true);
+        const monitorTrendMode = ref('separate');
         const monitorLastUpdated = ref('');
         const monitorTrends = ref([]);
         const monitorTrendUpdated = ref('');
@@ -243,17 +298,29 @@ const app = createApp({
         const canUndo = ref(false);
         const canRedo = ref(false);
         let monitorTimer = null;
+        let trendTimer = null;
         let alertTimer = null;
 
         // ===== AI 助手 / 告警中心 =====
         const aiPrompt = ref('');
+        const aiModels = ref([]);
+        const aiSelectedModel = ref('');
+        const aiProvider = ref('');
+        const aiConfigured = ref(false);
+        const aiConfigVisible = ref(false);
+        const aiProvidersVisible = ref(false);
+        const aiProviders = ref([]);
+        const aiProviderOperating = ref('');
+        const aiConfigSaving = ref(false);
+        const aiTesting = ref(false);
+        const aiConfigForm = reactive({ id: '', name: '', provider: 'openai', baseUrl: 'https://api.openai.com/v1', apiKey: '', defaultModel: 'gpt-4.1-mini', modelsText: 'gpt-4.1-mini,gpt-4.1,gpt-4o-mini', wireApi: 'chat_completions', reasoningEffort: 'medium', storeResponses: false });
         const aiLoading = ref(false);
         const aiError = ref('');
         const aiResult = ref(null);
         const aiResultDag = ref(null);
         const aiExamples = [
-            '读取 D:\\code\\比赛\\2026省服务外包\\test-resources\\data\\sales.csv，把 product_category 和 channel 拼接成新列 category_channel，写出到 MySQL 表 ai_demo',
-            '读取 sales.csv，只保留 sale_id/region/amount 三列，写到 D:\\code\\比赛\\2026省服务外包\\output\\ai_filtered.csv',
+            '读取 D:\\code\\比赛\\2026省服务外包\\data\\sales.csv，把 product_category 和 channel 拼接成新列 category_channel，写出到 MySQL 表 ai_demo',
+            '读取 D:\\code\\比赛\\2026省服务外包\\data\\sales.csv，只保留 sale_id/region/amount 三列，写到 D:\\code\\比赛\\2026省服务外包\\output\\ai_filtered.csv',
             '从 MySQL 表 flink_demo.user_data 读取数据，过滤 id > 1，输出到 JSON 文件'
         ];
         const alerts = ref([]);
@@ -496,8 +563,8 @@ const app = createApp({
                 { type: 'csv_input', name: 'CSV 输入', category: 'input', description: '读取 CSV 文件作为数据源', version: '1.0.0', paramSchema: '{"type":"object","properties":{"path":{"type":"string","title":"文件路径","default":"/data/input.csv"},"delimiter":{"type":"string","title":"分隔符","default":","},"hasHeader":{"type":"boolean","title":"包含表头","default":true}},"required":["path"]}' },
                 { type: 'csv_output', name: 'CSV 输出', category: 'output', description: '将数据写入 CSV 文件', version: '1.0.0', paramSchema: '{"type":"object","properties":{"path":{"type":"string","title":"输出路径","default":"D:\\\\code\\\\比赛\\\\2026省服务外包\\\\output\\\\output.csv"},"delimiter":{"type":"string","title":"分隔符","default":","},"sheetName":{"type":"string","title":"工作表名（默认 Data，多输出写同一文件时可区分 sheet）","default":"Data"}},"required":["path"]}' },
                 { type: 'excel_input', name: 'Excel 输入', category: 'input', description: '读取 Excel (.xlsx) 文件', version: '1.0.0', paramSchema: '{"type":"object","properties":{"path":{"type":"string","title":"文件路径","default":"/data/input.xlsx"},"sheetName":{"type":"string","title":"工作表名（留空取第一个）","default":""}},"required":["path"]}' },
-                { type: 'mysql_input', name: 'MySQL 输入', category: 'input', description: '从 MySQL 表读取数据', version: '1.0.0', paramSchema: '{"type":"object","properties":{"url":{"type":"string","title":"JDBC URL","default":"jdbc:mysql://localhost:3306/flink_demo"},"table":{"type":"string","title":"表名","default":"source_table"},"username":{"type":"string","title":"用户名","default":"${MYSQL_USERNAME}"},"password":{"type":"string","title":"密码（留空或 \\${MYSQL_PASSWORD} 取环境变量）","default":"${MYSQL_PASSWORD}"}},"required":["url","table","username"]}' },
-                { type: 'mysql_output', name: 'MySQL 输出', category: 'output', description: '将数据写入 MySQL 表', version: '1.0.0', paramSchema: '{"type":"object","properties":{"url":{"type":"string","title":"JDBC URL","default":"jdbc:mysql://localhost:3306/flink_demo"},"table":{"type":"string","title":"表名","default":"target_table"},"username":{"type":"string","title":"用户名","default":"${MYSQL_USERNAME}"},"password":{"type":"string","title":"密码（留空或 \\${MYSQL_PASSWORD} 取环境变量）","default":"${MYSQL_PASSWORD}"}},"required":["url","table","username"]}' },
+                { type: 'mysql_input', name: 'MySQL 输入', category: 'input', description: '从 MySQL 表读取数据', version: '1.0.0', paramSchema: '{"type":"object","properties":{"url":{"type":"string","title":"JDBC URL","default":"jdbc:mysql://localhost:3306/flink_demo?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai"},"table":{"type":"string","title":"表名","default":"source_table"},"username":{"type":"string","title":"用户名","default":"${MYSQL_USERNAME}"},"password":{"type":"string","title":"密码（留空或 \\${MYSQL_PASSWORD} 取环境变量）","default":"${MYSQL_PASSWORD}"}},"required":["url","table","username"]}' },
+                { type: 'mysql_output', name: 'MySQL 输出', category: 'output', description: '将数据写入 MySQL 表', version: '1.0.0', paramSchema: '{"type":"object","properties":{"url":{"type":"string","title":"JDBC URL","default":"jdbc:mysql://localhost:3306/flink_demo?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai"},"table":{"type":"string","title":"表名","default":"target_table"},"username":{"type":"string","title":"用户名","default":"${MYSQL_USERNAME}"},"password":{"type":"string","title":"密码（留空或 \\${MYSQL_PASSWORD} 取环境变量）","default":"${MYSQL_PASSWORD}"}},"required":["url","table","username"]}' },
                                 { type: 'kafka_input', name: 'Kafka 输入', category: 'input', description: '从 Kafka 主题读取消息流', version: '1.0.0', paramSchema: '{"type":"object","properties":{"topic":{"type":"string","title":"主题","default":"input-topic"},"bootstrapServers":{"type":"string","title":"Bootstrap Servers","default":"localhost:9092"},"fieldsConfig":{"type":"string","title":"字段定义（JSON 数组）","default":"[{\"name\":\"key\",\"type\":\"STRING\"},{\"name\":\"value\",\"type\":\"STRING\"}]"},"autoStop":{"type":"boolean","title":"体验模式：消费完自动停止","default":false},"stopAfterSeconds":{"type":"number","title":"自动停止延迟（秒）","default":30}},"required":["topic","bootstrapServers"]}' },
                 { type: 'kafka_output', name: 'Kafka 输出', category: 'output', description: '将数据写入 Kafka 主题', version: '1.0.0', paramSchema: '{"type":"object","properties":{"topic":{"type":"string","title":"主题","default":"output-topic"},"bootstrapServers":{"type":"string","title":"Bootstrap Servers","default":"localhost:9092"}},"required":["topic","bootstrapServers"]}' },
                 { type: 'excel_output', name: 'Excel 输出', category: 'output', description: '将数据写出为 Excel (.xlsx) 文件（内部 CSV→Excel 转换）', version: '1.0.0', paramSchema: '{"type":"object","properties":{"path":{"type":"string","title":"输出路径","default":"D:\\\\code\\\\比赛\\\\2026省服务外包\\\\output\\\\output.xlsx"},"delimiter":{"type":"string","title":"分隔符","default":","},"sheetName":{"type":"string","title":"工作表名（默认 Data，多输出写同一文件时可区分 sheet）","default":"Data"}},"required":["path"]}' },                { type: 'parquet_input', name: 'Parquet 输入', category: 'input', description: '读取 Parquet (.parquet) 文件', version: '1.0.0', paramSchema: '{"type":"object","properties":{"path":{"type":"string","title":"文件路径","default":"D:\\code\\比赛\\2026省服务外包\\output\\input.parquet"},"delimiter":{"type":"string","title":"分隔符","default":","}},"required":["path"]}' },
@@ -645,8 +712,13 @@ const app = createApp({
             if (!monitorAutoRefresh.value) return;
             loadMonitor();
             monitorTimer = setInterval(loadMonitor, 5000);
+            // 趋势独立、更高频刷新（2s），不串行在 overview 之后
+            trendTimer = setInterval(loadTrends, 2000);
         }
-        function stopMonitorPolling() { if (monitorTimer) { clearInterval(monitorTimer); monitorTimer = null; } }
+        function stopMonitorPolling() {
+            if (monitorTimer) { clearInterval(monitorTimer); monitorTimer = null; }
+            if (trendTimer) { clearInterval(trendTimer); trendTimer = null; }
+        }
         function fmtNum(v) { const n = Number(v); if (isNaN(n)) return '-'; return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(Math.round(n)); }
         function bpClass(level) { if (!level) return ''; const l = String(level).toLowerCase(); return l === 'ok' ? 'bp-ok' : l === 'low' ? 'bp-low' : l === 'high' ? 'bp-high' : ''; }
         function cpText(cp) { if (!cp || cp.error) return 'N/A'; if (!cp.lastCompletedTs) return '尚未完成'; const d = new Date(cp.lastCompletedTs); return '完成 ' + d.toLocaleTimeString() + ' · ' + Math.round(cp.endToEndDuration || 0) + 'ms'; }
@@ -669,37 +741,383 @@ const app = createApp({
             }
             updateTrendChart();
         }
+        const TREND_WINDOW_POINTS = 40;
+        function trendYAxisScale(series) {
+            // 按最近可见窗口计算峰值，避免历史大峰值拉平低吞吐曲线
+            const values = series.flatMap(item => {
+                const pts = item.data || [];
+                const start = Math.max(0, pts.length - TREND_WINDOW_POINTS);
+                return pts.slice(start).map(point => Number(point[1]) || 0);
+            });
+            const peak = values.length ? Math.max(...values) : 0;
+            if (peak <= 0) return { max: 1, interval: 1 };
+            const headroom = peak * 0.2;
+            const targetMax = peak + headroom;
+            const roughInterval = targetMax / 5;
+            const magnitude = Math.pow(10, Math.floor(Math.log10(roughInterval)));
+            const normalized = roughInterval / magnitude;
+            const niceFactor = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+            const interval = niceFactor * magnitude;
+            return { max: Math.max(1, Math.ceil(targetMax / interval) * interval), interval };
+        }
         function updateTrendChart() {
-            if (!trendChart) return;
-            const series = monitorTrends.value.map((t, i) => ({
-                name: t.name,
-                type: 'line',
-                smooth: true,
-                showSymbol: false,
-                emphasis: { focus: 'series' },
-                lineStyle: { width: 2, color: TREND_COLORS[i % TREND_COLORS.length] },
-                itemStyle: { color: TREND_COLORS[i % TREND_COLORS.length] },
-                data: (t.points || []).map(pt => [pt.t, Math.round(pt.out || 0)])
-            }));
-            const hasData = series.some(s => s.data.length > 0);
+            if (!trendChart || trendChart.isDisposed?.() || currentView.value !== 'monitor') return;
+            const chartEl = document.getElementById('monitorTrendChart');
+            if (!chartEl || !chartEl.isConnected || chartEl.offsetParent === null
+                    || chartEl.clientWidth === 0 || chartEl.clientHeight === 0) return;
+            // 切换视图时 ECharts 可能仍保留 tooltip 的延时定位任务，resize 前先关闭。
+            trendChart.dispatchAction({ type: 'hideTip' });
+            const trends = monitorTrends.value.filter(t => (t.points || []).length > 0);
+            if (!trends.length) {
+                if (chartEl) chartEl.style.height = '260px';
+                trendChart.resize();
+                trendChart.setOption({
+                    title: { text: '暂无吞吐数据（运行中或最近结束的作业）', left: 'center', top: 'middle', textStyle: { color: '#94a3b8', fontSize: 13, fontWeight: 'normal' } },
+                    xAxis: { show: false }, yAxis: { show: false }, series: []
+                }, true);
+                return;
+            }
+
+            if (monitorTrendMode.value === 'separate') {
+                const rowHeight = 220;
+                if (chartEl) chartEl.style.height = Math.max(280, trends.length * rowHeight + 8) + 'px';
+                trendChart.resize();
+                const grids = [], xAxes = [], yAxes = [], titles = [], series = [];
+                trends.forEach((trend, index) => {
+                    const data = (trend.points || []).map(pt => [pt.t, Number(pt.out || 0)]);
+                    const values = data.map(point => point[1]);
+                    const peak = Math.max(0, ...values);
+                    const positive = values.filter(value => value > 0);
+                    const average = positive.length ? positive.reduce((sum, value) => sum + value, 0) / positive.length : 0;
+                    const scale = trendYAxisScale([{ data }]);
+                    const color = TREND_COLORS[index % TREND_COLORS.length];
+                    grids.push({
+                        left: 72, right: 42, top: index * rowHeight + 54, height: 126,
+                        show: true, backgroundColor: '#fbfdff', borderColor: '#eef2f7', borderWidth: 1
+                    });
+                    xAxes.push({ type: 'time', gridIndex: index, axisLabel: { color: '#64748b', margin: 12 }, axisLine: { lineStyle: { color: '#dbe4ef' } } });
+                    yAxes.push({
+                        type: 'value', gridIndex: index, min: 0,
+                        max: monitorAutoScale.value ? scale.max : undefined,
+                        interval: monitorAutoScale.value ? scale.interval : undefined,
+                        axisLabel: { color: '#64748b', margin: 12 },
+                        splitLine: { lineStyle: { color: '#edf2f7' } }
+                    });
+                    titles.push({
+                        text: `${trend.name}  峰值 ${fmtNum(peak)} · 平均 ${fmtNum(average)} 行/s`,
+                        subtext: '吞吐量（行/s）',
+                        left: 72, top: index * rowHeight + 8,
+                        textStyle: { color: '#334155', fontSize: 13, fontWeight: 600 },
+                        subtextStyle: { color: '#94a3b8', fontSize: 11, lineHeight: 18 }
+                    });
+                    series.push({
+                        name: trend.name, type: 'line', xAxisIndex: index, yAxisIndex: index,
+                        data, smooth: false, showSymbol: true, symbolSize: 6,
+                        lineStyle: { width: 2.5, color }, itemStyle: { color },
+                        areaStyle: { color, opacity: 0.1 }, emphasis: { focus: 'series' },
+                        markPoint: peak > 0 ? { symbolSize: 38, data: [{ type: 'max', name: '峰值' }], label: { formatter: p => fmtNum(p.value), fontSize: 10 } } : undefined,
+                        markLine: average > 0 ? { silent: true, symbol: 'none', lineStyle: { color, type: 'dashed', opacity: 0.55 }, data: [{ yAxis: average, name: '平均' }], label: { position: 'insideEndTop', distance: 6, formatter: `平均 ${fmtNum(average)}`, color: '#64748b', backgroundColor: 'rgba(255,255,255,.85)', padding: [2, 5] } } : undefined
+                    });
+                });
+                trendChart.setOption({ title: titles, tooltip: { trigger: 'axis' }, legend: { show: false }, grid: grids, xAxis: xAxes, yAxis: yAxes, series }, true);
+                return;
+            }
+
+            if (chartEl) chartEl.style.height = '300px';
+            trendChart.resize();
+            const series = trends.map((trend, index) => {
+                const color = TREND_COLORS[index % TREND_COLORS.length];
+                return {
+                    name: trend.name, type: 'line', smooth: false, showSymbol: true, symbolSize: 5,
+                    emphasis: { focus: 'series' }, lineStyle: { width: 2, color }, itemStyle: { color },
+                    areaStyle: { color, opacity: 0.06 },
+                    data: (trend.points || []).map(pt => [pt.t, Number(pt.out || 0)])
+                };
+            });
+            const yScale = trendYAxisScale(series);
             trendChart.setOption({
-                title: hasData ? undefined : { text: '暂无吞吐数据（运行中或最近结束的作业）', left: 'center', top: 'middle', textStyle: { color: '#94a3b8', fontSize: 13, fontWeight: 'normal' } },
-                tooltip: { trigger: 'axis' },
-                legend: hasData ? { top: 0, type: 'scroll', textStyle: { color: '#64748b' } } : undefined,
-                grid: { left: 56, right: 20, top: 32, bottom: 28 },
-                xAxis: { type: 'time', axisLabel: { color: '#64748b' }, axisLine: { lineStyle: { color: '#e2e8f0' } } },
-                yAxis: { type: 'value', name: '行/s', min: 0, max: 500, nameTextStyle: { color: '#94a3b8' }, axisLabel: { color: '#64748b' }, splitLine: { lineStyle: { color: '#f1f5f9' } } },
-                series: series.length ? series : [{ type: 'line', data: [] }]
+                title: [], tooltip: { trigger: 'axis' }, legend: { top: 0, type: 'scroll', textStyle: { color: '#64748b' } },
+                grid: { left: 66, right: 28, top: 38, bottom: 32 },
+                xAxis: { type: 'time', gridIndex: 0, axisLabel: { color: '#64748b' }, axisLine: { lineStyle: { color: '#e2e8f0' } } },
+                yAxis: { type: 'value', gridIndex: 0, name: '行/s', min: 0, max: monitorAutoScale.value ? yScale.max : undefined, interval: monitorAutoScale.value ? yScale.interval : undefined, axisLabel: { color: '#64748b' }, splitLine: { lineStyle: { color: '#f1f5f9' } } },
+                series
             }, true);
         }
         // ===== 实时监控 END =====
 
+        // ===== Kafka 可视化 =====
+        const kafkaTopics = ref([]);
+        const kafkaSelectedTopic = ref('');
+        const kafkaFromMode = ref('beginning');
+        const kafkaStreaming = ref(false);
+        const kafkaMessages = ref([]);
+        const kafkaMsgCount = ref(0);
+        const kafkaMsgRate = ref(0);
+        const kafkaError = ref('');
+        const kafkaStreamController = ref(null);
+        const kafkaRateTimer = ref(null);
+        const kafkaLastCount = ref(0);
+        const kafkaSeq = ref(0);
+        const kafkaFeedRef = ref(null);
+        const kafkaChart = ref(null);
+        const kafkaTopicTotal = computed(() => {
+            const t = kafkaTopics.value.find(x => x.name === kafkaSelectedTopic.value);
+            return t ? t.messageCount : 0;
+        });
+
+        function kafkaPretty(value) {
+            if (!value) return '(空消息)';
+            try { return JSON.stringify(JSON.parse(value), null, 2); } catch (_) { return value; }
+        }
+
+        async function loadKafkaTopics() {
+            kafkaError.value = '';
+            try {
+                const list = await api.getKafkaTopics();
+                kafkaTopics.value = list;
+                if (!kafkaSelectedTopic.value && list.length) kafkaSelectedTopic.value = list[0].name;
+            } catch (e) {
+                kafkaTopics.value = [];
+                kafkaError.value = 'Kafka 连接失败：' + (e.response && e.response.data && e.response.data.error ? e.response.data.error : (e.message || ''));
+            }
+        }
+
+        function initKafkaChart() {
+            const el = document.getElementById('kafkaThroughputChart');
+            if (!el || kafkaChart.value) return;
+            kafkaChart.value = echarts.init(el);
+            kafkaChart.value.setOption({
+                grid: { left: 40, right: 16, top: 26, bottom: 26 },
+                tooltip: { trigger: 'axis' },
+                xAxis: { type: 'category', boundaryGap: false, data: [], axisLabel: { fontSize: 10, color: '#64748b' } },
+                yAxis: { type: 'value', min: 0, max: 500, splitLine: { lineStyle: { color: '#eef2f7' } }, axisLabel: { fontSize: 10, color: '#64748b' } },
+                series: [{
+                    name: '条/s',
+                    type: 'line',
+                    smooth: true,
+                    showSymbol: false,
+                    data: [],
+                    lineStyle: { width: 2, color: '#3b82f6' },
+                    areaStyle: { color: 'rgba(59,130,246,0.12)' }
+                }]
+            });
+        }
+
+        function pushKafkaMessage(data) {
+            if (data && data.error) { kafkaError.value = 'Kafka 流错误：' + data.error; return; }
+            kafkaSeq.value++;
+            kafkaMsgCount.value++;
+            const now = new Date();
+            kafkaMessages.value.push({
+                seq: kafkaSeq.value,
+                partition: data.partition,
+                offset: data.offset,
+                time: now.toLocaleTimeString('zh-CN', { hour12: false }) + '.' + String(now.getMilliseconds()).padStart(3, '0'),
+                pretty: kafkaPretty(data.value)
+            });
+            if (kafkaMessages.value.length > 200) kafkaMessages.value.splice(0, kafkaMessages.value.length - 200);
+            nextTick(() => {
+                if (kafkaFeedRef.value) kafkaFeedRef.value.scrollTop = kafkaFeedRef.value.scrollHeight;
+            });
+        }
+
+        async function startKafkaStream() {
+            stopKafkaStream();
+            if (!kafkaSelectedTopic.value) { ElMessage.warning('请先选择 Topic'); return; }
+            kafkaMessages.value = [];
+            kafkaMsgCount.value = 0;
+            kafkaMsgRate.value = 0;
+            kafkaLastCount.value = 0;
+            kafkaError.value = '';
+            const ctrl = new AbortController();
+            kafkaStreamController.value = ctrl;
+            kafkaStreaming.value = true;
+            kafkaRateTimer.value = setInterval(() => {
+                const delta = kafkaMsgCount.value - kafkaLastCount.value;
+                kafkaLastCount.value = kafkaMsgCount.value;
+                kafkaMsgRate.value = delta;
+                if (kafkaChart.value) {
+                    const now = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+                    const opt = kafkaChart.value.getOption();
+                    const times = opt.xAxis[0].data;
+                    const rates = opt.series[0].data;
+                    times.push(now);
+                    rates.push(delta);
+                    if (times.length > 60) { times.shift(); rates.shift(); }
+                    kafkaChart.value.setOption({ xAxis: { data: times }, series: [{ data: rates }] });
+                }
+            }, 1000);
+            const url = API_BASE + '/kafka/stream?topic=' + encodeURIComponent(kafkaSelectedTopic.value) + '&from=' + kafkaFromMode.value + '&durationMs=0';
+            try {
+                const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token.value }, signal: ctrl.signal });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    let idx;
+                    while ((idx = buffer.indexOf('\n\n')) >= 0) {
+                        const block = buffer.slice(0, idx);
+                        buffer = buffer.slice(idx + 2);
+                        const line = block.split('\n').find(l => l.startsWith('data:'));
+                        if (line) {
+                            try { pushKafkaMessage(JSON.parse(line.slice(5).trim())); } catch (_) {}
+                        }
+                    }
+                }
+            } catch (e) {
+                if (e.name !== 'AbortError') kafkaError.value = 'Kafka 流断开：' + e.message;
+            } finally {
+                kafkaStreaming.value = false;
+                kafkaStreamController.value = null;
+                if (kafkaRateTimer.value) { clearInterval(kafkaRateTimer.value); kafkaRateTimer.value = null; }
+            }
+        }
+
+        function stopKafkaStream() {
+            if (kafkaStreamController.value) {
+                try { kafkaStreamController.value.abort(); } catch (_) {}
+                kafkaStreamController.value = null;
+            }
+            kafkaStreaming.value = false;
+            if (kafkaRateTimer.value) { clearInterval(kafkaRateTimer.value); kafkaRateTimer.value = null; }
+        }
+
         // ===== AI 助手（NL2Pipeline）=====
+        async function loadAiModels() {
+            try {
+                const data = await api.getAiModels();
+                aiModels.value = data.models || [];
+                aiProvider.value = data.provider || '';
+                aiConfigured.value = !!data.configured;
+                if (!aiSelectedModel.value || !aiModels.value.includes(aiSelectedModel.value)) {
+                    aiSelectedModel.value = data.defaultModel || aiModels.value[0] || '';
+                }
+            } catch (err) {
+                aiModels.value = [];
+                aiError.value = '模型列表加载失败: ' + (err.response?.data?.message || err.message);
+            }
+        }
+
+        async function loadAiProviders() {
+            try {
+                aiProviders.value = await api.getAiProviders();
+            } catch (err) {
+                ElMessage.error('加载服务商失败: ' + (err.response?.data?.error || err.message));
+            }
+        }
+
+        async function openAiProviders() {
+            await loadAiProviders();
+            aiProvidersVisible.value = true;
+        }
+
+        function openAiConfig(profile) {
+            aiConfigForm.id = profile?.id || '';
+            aiConfigForm.name = profile?.name || '';
+            aiConfigForm.provider = profile?.provider || 'openai';
+            aiConfigForm.baseUrl = profile?.baseUrl || 'https://api.openai.com/v1';
+            aiConfigForm.apiKey = '';
+            aiConfigForm.defaultModel = profile?.defaultModel || 'gpt-4.1-mini';
+            aiConfigForm.modelsText = (profile?.models || ['gpt-4.1-mini']).join(',');
+            aiConfigForm.wireApi = profile?.wireApi || 'chat_completions';
+            aiConfigForm.reasoningEffort = profile?.reasoningEffort || 'medium';
+            aiConfigForm.storeResponses = !!profile?.storeResponses;
+            aiConfigVisible.value = true;
+        }
+
+        function aiConfigPayload() {
+            return {
+                id: aiConfigForm.id || null,
+                name: aiConfigForm.name,
+                provider: aiConfigForm.provider,
+                baseUrl: aiConfigForm.baseUrl,
+                apiKey: aiConfigForm.apiKey,
+                defaultModel: aiConfigForm.defaultModel,
+                models: aiConfigForm.modelsText.split(',').map(item => item.trim()).filter(Boolean),
+                wireApi: aiConfigForm.wireApi,
+                reasoningEffort: aiConfigForm.reasoningEffort,
+                storeResponses: aiConfigForm.storeResponses
+            };
+        }
+
+        async function saveAiConfig() {
+            aiConfigSaving.value = true;
+            try {
+                const saved = await api.saveAiProvider(aiConfigPayload());
+                aiConfigForm.id = saved.id;
+                aiConfigForm.apiKey = '';
+                ElMessage.success('服务商已保存并切换为当前服务商');
+                await Promise.all([loadAiModels(), loadAiProviders()]);
+                aiConfigVisible.value = false;
+            } catch (err) {
+                ElMessage.error('保存失败: ' + (err.response?.data?.error || err.response?.data?.message || err.message));
+            } finally {
+                aiConfigSaving.value = false;
+            }
+        }
+
+        async function testAiConnection() {
+            aiTesting.value = true;
+            try {
+                const saved = await api.saveAiProvider(aiConfigPayload());
+                aiConfigForm.id = saved.id;
+                const result = await api.testAiProvider(saved.id, aiConfigForm.defaultModel);
+                ElMessage.success(result.message || 'API 连接成功');
+                aiConfigForm.apiKey = '';
+                await Promise.all([loadAiModels(), loadAiProviders()]);
+            } catch (err) {
+                ElMessage.error('连接测试失败: ' + (err.response?.data?.error || err.response?.data?.message || err.message));
+            } finally {
+                aiTesting.value = false;
+            }
+        }
+
+        async function activateAiProvider(profile) {
+            aiProviderOperating.value = profile.id;
+            try {
+                await api.activateAiProvider(profile.id);
+                await Promise.all([loadAiModels(), loadAiProviders()]);
+                ElMessage.success(`已切换到 ${profile.name}`);
+            } catch (err) {
+                ElMessage.error('切换失败: ' + (err.response?.data?.error || err.message));
+            } finally {
+                aiProviderOperating.value = '';
+            }
+        }
+
+        async function testSavedAiProvider(profile) {
+            aiProviderOperating.value = profile.id;
+            try {
+                const result = await api.testAiProvider(profile.id, profile.defaultModel);
+                await Promise.all([loadAiModels(), loadAiProviders()]);
+                ElMessage.success(`${profile.name}: ${result.message}`);
+            } catch (err) {
+                ElMessage.error(`${profile.name} 测试失败: ` + (err.response?.data?.error || err.message));
+            } finally {
+                aiProviderOperating.value = '';
+            }
+        }
+
+        async function deleteAiProvider(profile) {
+            try {
+                await ElMessageBox.confirm(`确定删除服务商“${profile.name}”？`, '删除服务商', { type: 'warning' });
+                await api.deleteAiProvider(profile.id);
+                await loadAiProviders();
+                ElMessage.success('服务商已删除');
+            } catch (err) {
+                if (err !== 'cancel') ElMessage.error('删除失败: ' + (err.response?.data?.error || err.message));
+            }
+        }
+
         async function generatePipeline() {
             if (!aiPrompt.value || !aiPrompt.value.trim()) { ElMessage.warning('请输入自然语言描述'); return; }
             aiLoading.value = true; aiError.value = ''; aiResult.value = null; aiResultDag.value = null;
             try {
-                const data = await api.aiNl2Pipeline(aiPrompt.value.trim());
+                const data = await api.aiNl2Pipeline(aiPrompt.value.trim(), aiSelectedModel.value);
                 aiResult.value = data;
                 try { aiResultDag.value = JSON.parse(data.dag); } catch (_) { aiResultDag.value = null; }
                 ElMessage.success('AI 已生成 DRAFT 作业 #' + data.job.id + '，请人工确认后提交');
@@ -765,7 +1183,7 @@ const app = createApp({
             if (!diagnoseJob.value) return;
             diagnoseLoading.value = true;
             try {
-                diagnoseResult.value = await api.aiDiagnose(diagnoseJob.value.id);
+                diagnoseResult.value = await api.aiDiagnose(diagnoseJob.value.id, aiSelectedModel.value);
             } catch (err) {
                 ElMessage.error('诊断失败: ' + (err.response && err.response.data && err.response.data.error ? err.response.data.error : err.message));
             } finally { diagnoseLoading.value = false; }
@@ -956,7 +1374,31 @@ const app = createApp({
 
         // 将 DAG JSON 加载到画布
         async function loadDagToCanvas(dag) {
-            if (!graph) return;
+            // v-show 切换到画布后先等待容器获得真实尺寸，避免 X6 以 0×0 初始化而不渲染节点。
+            await nextTick();
+            const container = document.getElementById('dag-canvas');
+            if (!container) throw new Error('画布容器不存在');
+            await new Promise(resolve => {
+                let attempts = 0;
+                const check = () => {
+                    if ((container.clientWidth > 0 && container.clientHeight > 0) || attempts++ >= 10) resolve();
+                    else requestAnimationFrame(check);
+                };
+                check();
+            });
+            // 画布未初始化时先初始化（覆盖编辑/导入/回滚/诊断等入口，避免静默返回导致画布空白）
+            if (!graph) {
+                initGraph();
+                setupDropHandler();
+                await new Promise(resolve => {
+                    let settled = false;
+                    const finish = () => { if (!settled) { settled = true; resolve(); } };
+                    requestAnimationFrame(() => requestAnimationFrame(finish));
+                    setTimeout(finish, 100);
+                });
+            }
+            if (!graph) throw new Error('画布初始化失败');
+            graph.resize(container.clientWidth, container.clientHeight);
             const dagLoadSnapshot = ++dagLoadSeq;
             graph.clearCells();
             selectedNode.value = null;
@@ -1048,6 +1490,9 @@ const app = createApp({
                     }
                 });
             }
+
+            // 确保保存坐标位于当前可视区域；浏览器尺寸变化后也不会出现“节点已加载但画布看起来为空”。
+            if (dag.nodes.length > 0) graph.zoomToFit({ padding: 40, maxScale: 1 });
 
             // 加载完成：清空历史栈（加载/切换作业不计入撤销）
             if (graph.history) graph.history.clean();
@@ -1144,20 +1589,21 @@ const app = createApp({
         async function openJob(row) {
             currentView.value = 'canvas';
             currentJobId = row.id;
-            jobName.value = row.name;
-            currentJobName.value = row.name;
-            parallelism.value = row.parallelism || 1;
-
-            if (row.dagJson) {
-                try {
-                    const dag = JSON.parse(row.dagJson);
-                    await nextTick();
-                    loadDagToCanvas(dag);
-                } catch (err) {
-                    ElMessage.warning('DAG JSON 解析失败');
-                    currentJobId = null;
-                    currentJobName.value = '';
-                }
+            try {
+                // 列表接口可能只返回摘要，编辑时重新读取完整作业，确保 dagJson 存在且为最新版本。
+                const job = await api.getJob(row.id);
+                jobName.value = job.name;
+                currentJobName.value = job.name;
+                parallelism.value = job.parallelism || 1;
+                if (!job.dagJson) throw new Error('作业没有 DAG 数据');
+                const dag = typeof job.dagJson === 'string' ? JSON.parse(job.dagJson) : job.dagJson;
+                await loadDagToCanvas(dag);
+                if (!dag.nodes || dag.nodes.length === 0) ElMessage.warning('该作业的 DAG 中没有节点');
+            } catch (err) {
+                console.error('打开作业失败:', err);
+                ElMessage.error('打开作业失败: ' + (err.response?.data?.message || err.message));
+                currentJobId = null;
+                currentJobName.value = '';
             }
         }
 
@@ -1210,6 +1656,67 @@ const app = createApp({
                 if (err !== 'cancel') {
                     ElMessage.error('下线失败: ' + (err.response?.data?.message || err.message));
                 }
+            }
+        }
+
+        function onJobSelectionChange(rows) {
+            selectedJobs.value = rows;
+        }
+
+        async function batchChangeOnline(online) {
+            if (!selectedJobs.value.length) {
+                ElMessage.warning('请先选择作业');
+                return;
+            }
+            if (online) {
+                batchOnlineDialogVisible.value = true;
+                return;
+            }
+            try {
+                await ElMessageBox.confirm(`确定批量下线选中的 ${selectedJobs.value.length} 个作业？`, '批量下线确认', { type: 'warning' });
+                batchOperating.value = true;
+                const result = await api.batchOfflineJobs(selectedJobs.value.map(row => row.id));
+                showBatchResult('下线', result);
+                await loadJobs();
+            } catch (err) {
+                if (err !== 'cancel') {
+                    ElMessage.error('批量下线失败: ' + (err.response?.data?.message || err.message));
+                }
+            } finally {
+                batchOperating.value = false;
+            }
+        }
+
+        function showBatchResult(action, result) {
+            const succeeded = result.succeeded?.length || 0;
+            const failed = result.failed?.length || 0;
+            if (failed) {
+                const detail = result.failed.map(item => `#${item.id}: ${item.message}`).join('；');
+                ElMessage.warning(`批量${action}完成：成功 ${succeeded}，失败 ${failed}。${detail}`);
+            } else {
+                ElMessage.success(`已成功${action} ${succeeded} 个作业`);
+            }
+        }
+
+        async function confirmBatchOnline() {
+            if (batchScheduleEnabled.value && !batchCronExpression.value.trim()) {
+                ElMessage.warning('启用调度时必须填写 Cron 表达式');
+                return;
+            }
+            try {
+                batchOperating.value = true;
+                const result = await api.batchOnlineJobs(
+                    selectedJobs.value.map(row => row.id),
+                    batchScheduleEnabled.value,
+                    batchCronExpression.value.trim()
+                );
+                batchOnlineDialogVisible.value = false;
+                showBatchResult('上线', result);
+                await loadJobs();
+            } catch (err) {
+                ElMessage.error('批量上线失败: ' + (err.response?.data?.message || err.message));
+            } finally {
+                batchOperating.value = false;
             }
         }
 
@@ -1652,14 +2159,26 @@ const app = createApp({
         }
 
         watch(currentView, (v) => {
+            if (v !== 'monitor') {
+                stopMonitorPolling();
+                if (trendChart && !trendChart.isDisposed?.()) {
+                    trendChart.dispatchAction({ type: 'hideTip' });
+                    trendChart.dispose();
+                }
+                trendChart = null;
+            }
+            if (v !== 'kafka') stopKafkaStream();
+
             if (v === 'monitor') { loadMonitor(); startMonitorPolling(); nextTick(initTrendChart); }
+            else if (v === 'kafka') { loadKafkaTopics(); nextTick(initKafkaChart); }
             else if (v === 'audit') { loadAudit(); }
             else if (v === 'workflow') { loadWorkflow(); }
             else if (v === 'alerts') { loadAlerts(); }
-            else { stopMonitorPolling(); }
+            else if (v === 'ai') { loadAiModels(); }
         });
 
         watch(monitorAutoRefresh, (on) => { if (on) { startMonitorPolling(); } else { stopMonitorPolling(); } });
+        watch([monitorTrendMode, monitorAutoScale], () => updateTrendChart());
 
         onMounted(async () => {
             const savedToken = localStorage.getItem('token');
@@ -1688,7 +2207,7 @@ const app = createApp({
         });
 
         return {
-            currentView, controls, jobs, jobSearch, jobStatusFilter, filteredJobs, jobName, parallelism, currentJobName,
+            currentView, controls, jobs, selectedJobs, batchOperating, jobSearch, jobStatusFilter, filteredJobs, jobName, parallelism, currentJobName,
             controlTab, saving, submitting, showHelp, showLogs, jobLogs,
             selectedNode, nodeParams, nodeParamSchema, jobErrors,
             previewVisible, previewLoading, previewData, previewRows, previewNode,
@@ -1696,14 +2215,15 @@ const app = createApp({
             exportDag, importDagTrigger, importDag, clearCanvas, newCanvas, applyParams,
             openJob, submitJobById, deleteJob, deleteJobFromDetail, viewLogs, statusTag, undoDag, redoDag, canUndo, canRedo,
             openJobDetail, onJobMore, jobCols, jobDetailVisible, jobDetailRow,
-            onlineJobById, offlineJobById,
+            onlineJobById, offlineJobById, onJobSelectionChange, batchChangeOnline, confirmBatchOnline,
             copyJobById, deleteMonitorJob, openScheduleDialog, saveSchedule, loadScheduleHistory,
             openVersions, rollbackVersion, versionDialogVisible, jobVersions, versionLoading,
             loadSampleDag, SAMPLE_DAGS,
-            scheduleDialogVisible, scheduleJob, scheduleEnabled, cronExpression,
+            scheduleDialogVisible, batchOnlineDialogVisible, batchScheduleEnabled, batchCronExpression,
+            scheduleJob, scheduleEnabled, cronExpression,
             scheduleMaxRetries, webhookUrl, scheduleHistory, scheduleHistoryLoading,
             schedulePresets, scheduleNlText, scheduleCronHuman, applySchedulePreset, parseNlSchedule, cronToHuman,
-            monitorJobs, monitorLoading, monitorError, monitorAutoRefresh, monitorLastUpdated, monitorStats, refreshMonitor,
+            monitorJobs, monitorLoading, monitorError, monitorAutoRefresh, monitorAutoScale, monitorTrendMode, monitorLastUpdated, monitorStats, refreshMonitor,
             monitorTrends, monitorTrendUpdated,
             fmtNum, bpClass, cpText, fmtDuration, statusTagType,
             user, canEdit, canViewAudit, loginUsername, loginPassword, loginError, loginLoading,
@@ -1712,7 +2232,8 @@ const app = createApp({
             depDialogVisible, depJob, depCandidates, depSelected, depLoading, depSaving, openDepDialog, saveDeps,
             workflowJobs, workflowEdges, workflowLoading, workflowError, workflowUpdated, loadWorkflow,
             lineageDialogVisible, lineageJob, lineageAssets, lineageLoading, openLineageDialog,
-            aiPrompt, aiLoading, aiError, aiResult, aiResultDag, aiExamples, generatePipeline, openAiResultInCanvas,
+            aiPrompt, aiModels, aiSelectedModel, aiProvider, aiConfigured, aiConfigVisible, aiProvidersVisible, aiProviders, aiProviderOperating, aiConfigSaving, aiTesting, aiConfigForm, aiLoading, aiError, aiResult, aiResultDag, aiExamples, loadAiModels, loadAiProviders, openAiProviders, openAiConfig, saveAiConfig, testAiConnection, activateAiProvider, testSavedAiProvider, deleteAiProvider, generatePipeline, openAiResultInCanvas,
+            kafkaTopics, kafkaSelectedTopic, kafkaFromMode, kafkaStreaming, kafkaMessages, kafkaMsgCount, kafkaMsgRate, kafkaError, kafkaTopicTotal, kafkaFeedRef, loadKafkaTopics, startKafkaStream, stopKafkaStream,
             alerts, alertUnread, alertsLoading, loadAlerts, markAlertRead, markAllRead, deleteAlert,
             diagnoseVisible, diagnoseLoading, diagnoseResult, diagnoseJob, hasParamFixes, openDiagnose, runDiagnose, applyDiagnoseFixes
         };

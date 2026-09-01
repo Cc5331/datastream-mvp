@@ -64,8 +64,10 @@ class DagTranslationServiceTest {
         when(controlService.findByType("json_output")).thenReturn(control("json_output", "output",
                 "CREATE TABLE ${id} (\n  data STRING\n) WITH (\n  'connector' = 'filesystem',\n  'path' = '${path}',\n  'format' = 'json'\n);"));
         when(controlService.findByType("datagen_input")).thenReturn(control("datagen_input", "input", ""));
-        when(controlService.findByType("field_concat")).thenReturn(control("field_concat", "transform", ""));
-        when(controlService.findByType("xml_json")).thenReturn(control("xml_json", "transform", ""));
+        when(controlService.findByType("field_concat")).thenReturn(control("field_concat", "transform",
+                "SELECT *, CONCAT(${fields}) AS `${newFieldName}` FROM ${id}"));
+        when(controlService.findByType("xml_json")).thenReturn(control("xml_json", "transform",
+                "SELECT *, ${direction}(`${sourceField}`) AS `${targetField}` FROM ${id}"));
     }
 
     private DagDefinition.DagNode node(String id, String type, Map<String, Object> params) {
@@ -146,7 +148,8 @@ class DagTranslationServiceTest {
     @Test
     void csvThroughFieldConcat_propagatesNewField() {
         Map<String, Object> tf = new HashMap<>();
-        tf.put("sourceFields", "sale_id,amount");
+        tf.put("fields", "`sale_id`, `amount`");
+        tf.put("separator", ",");
         tf.put("newFieldName", "merged");
         List<DagDefinition.DagNode> nodes = List.of(
                 node("csv_input_1", "csv_input", csvInputParams()),
@@ -160,7 +163,8 @@ class DagTranslationServiceTest {
 
         assertTrue(sql.contains("sale_id"), "上游 schema 应传播");
         assertTrue(sql.contains("merged"), "field_concat 新字段应出现在链路: " + sql);
-        assertTrue(sql.contains("INSERT INTO csv_output_1"), "应生成 INSERT");
+        assertTrue(sql.contains("INSERT INTO csv_output_1\nSELECT *, CONCAT(`sale_id`, `amount`) AS `merged` FROM csv_input_1;"),
+                "应生成完整可执行 INSERT SELECT: " + sql);
     }
 
     @Test
@@ -201,9 +205,13 @@ class DagTranslationServiceTest {
 
     @Test
     void xmlJsonNode_injectsUdfFunctions() {
+        Map<String, Object> transform = new HashMap<>();
+        transform.put("direction", "xml2json");
+        transform.put("sourceField", "sale_id");
+        transform.put("targetField", "result");
         List<DagDefinition.DagNode> nodes = List.of(
                 node("csv_input_1", "csv_input", csvInputParams()),
-                node("xj_1", "xml_json", new HashMap<>()),
+                node("xj_1", "xml_json", transform),
                 node("csv_output_1", "csv_output", csvOutputParams("xj.csv")));
         List<DagDefinition.DagEdge> edges = List.of(
                 edge("e1", "csv_input_1", "xj_1"),
@@ -213,6 +221,8 @@ class DagTranslationServiceTest {
 
         assertTrue(sql.contains("CREATE FUNCTION IF NOT EXISTS xml2json"), "应注入 xml2json UDF");
         assertTrue(sql.contains("CREATE FUNCTION IF NOT EXISTS json2xml"), "应注入 json2xml UDF");
+        assertTrue(sql.contains("INSERT INTO csv_output_1\nSELECT *, xml2json(`sale_id`) AS `result` FROM csv_input_1;"),
+                "应生成完整可执行 INSERT SELECT: " + sql);
     }
 
     @Test

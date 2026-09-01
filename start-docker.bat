@@ -35,10 +35,10 @@ echo.
 echo ============================================
 echo  启动完成！访问地址：
 echo    前端页面:      http://localhost:3000
-echo    后端 API:      http://localhost:8080
-echo    Flink Web UI:  http://localhost:8081
-echo    SQL Gateway:   http://localhost:8083
-echo    MySQL(本机):   localhost:3307   root / root123（默认，可用 .env 中 MYSQL_ROOT_PASSWORD 覆盖）
+echo    后端 API:      http://localhost:18080
+echo    Flink Web UI:  http://localhost:18081
+echo    SQL Gateway:   http://localhost:18083
+echo    MySQL(本机):   localhost:3307   root / .env 中 MYSQL_ROOT_PASSWORD
 echo    Kafka(本机):   localhost:29092
 echo ============================================
 echo.

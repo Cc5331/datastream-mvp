@@ -53,7 +53,7 @@ public class AgentService {
 
     // ===================== NL2Pipeline =====================
 
-    public Map<String, Object> nl2Pipeline(String prompt, CurrentUser cu) {
+    public Map<String, Object> nl2Pipeline(String prompt, String model, CurrentUser cu) {
         if (prompt == null || prompt.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请输入自然语言描述");
         }
@@ -70,7 +70,7 @@ public class AgentService {
                 + "4) edges 的 source/target 必须引用已存在的节点 id，且方向从输入到输出；"
                 + "5) 文件路径参数如果用户给了明确路径就直接使用（Windows 反斜杠路径原样保留），没有给就使用注册表中的默认路径；"
                 + "6) 输出文件默认写到 D:\\\\code\\\\比赛\\\\2026省服务外包\\\\output 目录下，文件名要体现语义；"
-                + "7) mysql_input/mysql_output 的 username 填 root，password 填空字符串，url 填 jdbc:mysql://localhost:3306/dataflow?useSSL=false&serverTimezone=Asia/Shanghai，表名按用户语义取；"
+                + "7) mysql_input/mysql_output 的 username 填 root，password 填空字符串，url 填 jdbc:mysql://localhost:3306/dataflow?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai，表名按用户语义取；"
                 + "8) 节点 id 用 类型_数字 命名（如 csv_input_1），全图唯一；"
                 + "9) parallelism 默认 1。"
                 + "以下是控件注册表：\n" + controlDigest;
@@ -80,7 +80,7 @@ public class AgentService {
 
         JsonNode raw;
         try {
-            raw = llmClient.chatJson(system, user);
+            raw = llmClient.chatJson(system, user, model);
         } catch (Exception e) {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, e.getMessage());
         }
@@ -89,7 +89,7 @@ public class AgentService {
                 "job", job,
                 "dag", job.getDagJson(),
                 "controlTypes", usedControlTypes(job.getDagJson()),
-                "source", "deepseek");
+                "source", llmClient.providerName());
     }
 
     /** 从 LLM 返回的 JSON 构建并保存 DRAFT 作业（校验 + 规范化） */
@@ -239,11 +239,25 @@ public class AgentService {
 
     // ===================== 智能诊断 =====================
 
-    public Map<String, Object> diagnose(Long jobId) {
+    public Map<String, Object> diagnose(Long jobId, String model) {
         JobDefinition job = jobService.findById(jobId);
         ObjectNode packet = buildDiagnosisPacket(job);
         Map<String, Object> ruleHit = localRuleEngine(packet);
         if (ruleHit != null) return ruleHit;
+
+        // 未配置外部 LLM 时仍返回本地诊断结果，避免前端因 502 完全不可用
+        if (!llmClient.isConfigured()) {
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("source", "local-fallback");
+            result.put("rootCause", "本地规则未识别到明确根因，且 ChatGPT API 尚未配置");
+            result.put("evidence", findFirstError(packet));
+            result.put("suggestions", List.of(
+                    "先查看作业日志中第一条 ERROR 并检查对应节点参数",
+                    "确认 Flink、SQL Gateway、数据源和输出目录均可访问",
+                    "如需 ChatGPT 深度归因，请在 .env 中设置 OPENAI_API_KEY 后重启 Backend"));
+            result.put("paramFixes", objectMapper.createObjectNode());
+            return result;
+        }
 
         // 本地规则未命中 -> LLM 归因
         try {
@@ -251,9 +265,9 @@ public class AgentService {
                     + "根据给定的作业诊断数据包，输出故障归因 JSON，不要输出额外文字。格式："
                     + "{\"rootCause\":\"一句话根因\",\"evidence\":\"关键证据\",\"suggestions\":[\"建议1\",\"建议2\"],\"paramFixes\":{\"节点id\":{\"参数名\":\"修正值\"}}}"
                     + "注意：paramFixes 只能修正 DAG 节点参数（如 path/url/table/username/password/topic/bootstrapServers），不要改节点类型；无法确定修正值时给空对象。";
-            JsonNode resp = llmClient.chatJson(system, "诊断数据包：\n" + packet.toString());
+            JsonNode resp = llmClient.chatJson(system, "诊断数据包：\n" + packet.toString(), model);
             Map<String, Object> result = new LinkedHashMap<>();
-            result.put("source", "deepseek");
+            result.put("source", llmClient.providerName());
             result.put("rootCause", resp.path("rootCause").asText("未知根因"));
             result.put("evidence", resp.path("evidence").asText(""));
             List<String> suggestions = new ArrayList<>();
@@ -336,7 +350,12 @@ public class AgentService {
         String evidence = findFirstError(packet);
 
         Map<String, Object> hit = null;
-        if (lower.contains("no such file") || lower.contains("文件不存在") || lower.contains("does not exist") || lower.contains("找不到")) {
+        if ("COMPLETED".equals(packet.path("status").asText())) {
+            hit = rule("作业当前运行正常，未发现需要修复的故障",
+                    "作业状态为 COMPLETED，Flink Job ID: " + packet.path("flinkJobId").asText("-"),
+                    List.of("检查输出文件或目标表的数据量是否符合预期", "如需持续运行，请按业务需要配置调度或上线", "可继续观察后续运行日志与告警"),
+                    Map.of(), jobName);
+        } else if (lower.contains("no such file") || lower.contains("文件不存在") || lower.contains("does not exist") || lower.contains("找不到")) {
             hit = rule("文件路径不存在", evidence,
                     List.of("检查输入/输出节点的 path 参数是否真实存在", "确认文件是否被移动或删除", "Windows 路径注意反斜杠转义"),
                     Map.of(), jobName);
@@ -358,7 +377,7 @@ public class AgentService {
                     Map.of(), jobName);
         } else if (lower.contains("mock") || lower.contains("降级") || lower.contains("flink 集群不可用")) {
             hit = rule("Flink 集群不可用（提交降级为 mock）", evidence,
-                    List.of("启动 Flink：D:\\code\\flink-1.18.1\\bin\\start-cluster.bat", "检查 Flink Web UI http://localhost:8081", "上线作业要求真实运行，先恢复集群再上线"),
+                    List.of("启动 Flink：D:\\code\\flink-1.18.1\\bin\\start-cluster.bat", "检查 Flink Web UI http://localhost:18081", "上线作业要求真实运行，先恢复集群再上线"),
                     Map.of(), jobName);
         } else if (lower.contains("unknown column") || (lower.contains("field") && lower.contains("not found"))) {
             hit = rule("字段名不匹配（DAG 中引用的字段不存在）", evidence,

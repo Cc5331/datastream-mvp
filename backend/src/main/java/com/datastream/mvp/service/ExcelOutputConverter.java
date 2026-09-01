@@ -2,6 +2,7 @@ package com.datastream.mvp.service;
 
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.xssf.streaming.SXSSFWorkbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.stereotype.Service;
 
@@ -57,7 +58,10 @@ public class ExcelOutputConverter {
             parentDir.mkdirs();
         }
 
-        try (Workbook workbook = new XSSFWorkbook();
+        Path tempOutput = xlsxFile.toPath().resolveSibling(xlsxFile.getName() + ".tmp");
+        SXSSFWorkbook workbook = new SXSSFWorkbook(100);
+        workbook.setCompressTempFiles(true);
+        try (workbook;
              BufferedReader reader = Files.newBufferedReader(csvFile.toPath(), StandardCharsets.UTF_8)) {
             Sheet sheet = workbook.createSheet(safeSheetName(sheetName, 0));
             String line;
@@ -72,25 +76,32 @@ public class ExcelOutputConverter {
                 }
             }
 
-            if (rowNum > 0) {
-                Row firstRow = sheet.getRow(0);
-                if (firstRow != null) {
-                    for (int i = 0; i < firstRow.getLastCellNum(); i++) {
-                        sheet.autoSizeColumn(i);
-                    }
-                }
+            Files.deleteIfExists(tempOutput);
+            try (OutputStream output = Files.newOutputStream(tempOutput, StandardOpenOption.CREATE_NEW)) {
+                workbook.write(output);
             }
-
-            try (FileOutputStream fos = new FileOutputStream(xlsxFile)) {
-                workbook.write(fos);
-            }
+            replaceOutput(tempOutput, xlsxFile.toPath());
 
             log.info("CSV->Excel conversion successful: {} -> {} ({} rows)", csvPath, xlsxPath, rowNum);
             return true;
-
         } catch (Exception e) {
-            log.error("Failed to convert CSV to Excel: {}", e.getMessage());
+            try {
+                Files.deleteIfExists(tempOutput);
+            } catch (IOException cleanupError) {
+                log.debug("Failed to remove incomplete Excel file {}: {}", tempOutput, cleanupError.getMessage());
+            }
+            log.error("Failed to convert CSV to Excel: {}", e.getMessage(), e);
             return false;
+        } finally {
+            workbook.dispose();
+        }
+    }
+
+    private void replaceOutput(Path tempOutput, Path targetOutput) throws IOException {
+        try {
+            Files.move(tempOutput, targetOutput, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } catch (AtomicMoveNotSupportedException e) {
+            Files.move(tempOutput, targetOutput, StandardCopyOption.REPLACE_EXISTING);
         }
     }
 
