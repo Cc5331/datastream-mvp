@@ -51,7 +51,9 @@ http.createServer((req, res) => {
       proxyApi(req, res, req.url);
       return;
     }
-    let file = req.url === '/' ? '/index.html' : req.url;
+    // Static file requests: strip query string (=cache-busting ?v=...) before resolving path
+    let urlPath = req.url === '/' ? '/' : (req.url.split('?')[0] || '/');
+    let file = urlPath === '/' ? '/index.html' : urlPath;
     file = path.join(dir, file);
     fs.readFile(file, (err, data) => {
         if (err) {
