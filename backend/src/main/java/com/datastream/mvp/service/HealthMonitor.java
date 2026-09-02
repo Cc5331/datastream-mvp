@@ -28,10 +28,11 @@ import java.util.OptionalDouble;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 故障感知监控：每 30s 扫描一次作业运行态，命中规则后写告警记录 + 邮件/webhook。
+ * 故障感知监控：默认每 10s（可配置 app.monitor.health-scan-ms）扫描一次作业运行态，命中规则后写告警记录 + 邮件/webhook。
  * 规则：作业失败 / 上线重启超限 / 吞吐归零 / 背压长时间高 / checkpoint 连续失败。
  * 同一事件去重基于 DB（重启后不重复告警）：离散事件（失败/重启超限）按故障发生时间去重，
  * 持续状态（吞吐/背压/checkpoint）按 15 分钟冷却去重。
+ * 作业失败支持事件驱动：FlinkJobStatusChecker 在置 FAILED 时调用 notifyJobFailed 即时告警。
  */
 @Slf4j
 @Component
@@ -63,7 +64,7 @@ public class HealthMonitor {
     private static final long ZERO_THROUGHPUT_ALERT_MS = 2 * 60 * 1000L;
     private static final long BACKPRESSURE_ALERT_MS = 60 * 1000L;
 
-    @Scheduled(fixedRate = 30000)
+    @Scheduled(fixedRateString = "${app.monitor.health-scan-ms:10000}")
     public void supervise() {
         List<JobDefinition> all = jobRepo.findAllByOrderByUpdatedAtDesc();
         if (all.isEmpty()) return;
@@ -89,9 +90,23 @@ public class HealthMonitor {
         }
     }
 
+    /**
+     * 事件驱动入口：作业在提交/运行阶段被置为 FAILED 时立即调用，无需等待下一次定时扫描。
+     * 复用 checkFailed（含 DB 去重与证据日志），与定时扫描共享同一套逻辑，不会重复告警。
+     */
+    public void notifyJobFailed(JobDefinition job) {
+        if (job == null) return;
+        try {
+            if (job.getStatus() == JobDefinition.JobStatus.FAILED) {
+                checkFailed(job);
+            }
+        } catch (Exception e) {
+            log.debug("HealthMonitor notifyJobFailed error for job {}: {}", job.getId(), e.getMessage());
+        }
+    }
+
     /** 规则 1：作业失败（取最近一条 ERROR 日志作为证据） */
-    private void checkFailed(JobDefinition job) {
-        LocalDateTime occurred = job.getCompletedAt() != null ? job.getCompletedAt() : job.getUpdatedAt();
+    private void checkFailed(JobDefinition job) {        LocalDateTime occurred = job.getCompletedAt() != null ? job.getCompletedAt() : job.getUpdatedAt();
         if (!shouldAlert(job.getId(), "JOB_FAILED", occurred)) return;
         List<JobLog> errors = logRepo.findByJobIdAndLevelOrderByTimestampDesc(job.getId(), "ERROR");
         String detail = "无错误日志";

@@ -40,6 +40,7 @@ public class FlinkJobStatusChecker {
     private final XmlOutputConverter xmlOutputConverter;
     private final DagTranslationService dagTranslationService;
     private final ParquetOutputConverter parquetOutputConverter;
+    private final HealthMonitor healthMonitor;
 
     @Value("${flink.cluster.host:localhost}")
     private String flinkHost;
@@ -61,7 +62,7 @@ public class FlinkJobStatusChecker {
         put("SUSPENDED", JobStatus.RUNNING);
     }};
 
-    @Scheduled(fixedRate = 15000)
+    @Scheduled(fixedRateString = "${app.monitor.status-poll-ms:5000}")
     public void syncJobStatuses() {
         List<JobDefinition> activeJobs = jobRepo.findByStatusIn(List.of(
             JobStatus.SUBMITTED, JobStatus.RUNNING
@@ -168,6 +169,8 @@ public class FlinkJobStatusChecker {
                         }
                         if (localStatus == JobStatus.FAILED) {
                             fetchFlinkJobError(job, flinkJobId);
+                            // 事件驱动：置为 FAILED 的瞬间立即告警，不等下一次 HealthMonitor 扫描
+                            healthMonitor.notifyJobFailed(job);
                         }
                     }
                     break;

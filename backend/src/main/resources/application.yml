@@ -76,5 +76,10 @@ app:
     default-username: ${MYSQL_USERNAME:root}
     default-password: ${MYSQL_PASSWORD:}
 
+  monitor:
+    # 告警/健康扫描与 Flink 状态轮询间隔（毫秒），越小告警越及时但也越耗 Flink HTTP
+    health-scan-ms: ${APP_MONITOR_HEALTH_SCAN_MS:10000}
+    status-poll-ms: ${APP_MONITOR_STATUS_POLL_MS:5000}
+
 spring.servlet.multipart.max-file-size: 50MB
 spring.servlet.multipart.max-request-size: 50MB
