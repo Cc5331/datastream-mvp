@@ -160,8 +160,10 @@ const api = {
         const res = await axios.post(API_BASE + '/ai/diagnose/' + jobId, null, { params });
         return res.data;
     },
-    async getAlerts() {
-        const res = await axios.get(API_BASE + '/alerts');
+    async getAlerts(page = 0, size = 20, read = null) {
+        const params = { page, size };
+        if (read !== null) params.read = read;
+        const res = await axios.get(API_BASE + '/alerts', { params });
         return res.data;
     },
     async getAlertUnread() {
@@ -224,7 +226,7 @@ const SAMPLE_DAGS = {
 };
 
 // ===== Vue App =====
-const { createApp, ref, reactive, computed, onMounted, watch, nextTick, toRaw } = Vue;
+const { createApp, ref, reactive, computed, onMounted, onUnmounted, watch, nextTick, toRaw } = Vue;
 const { ElMessage, ElMessageBox } = ElementPlus;
 
 const app = createApp({
@@ -326,6 +328,10 @@ const app = createApp({
         const alerts = ref([]);
         const alertUnread = ref(0);
         const alertsLoading = ref(false);
+        const alertsError = ref('');
+        const alertPage = ref(1);
+        const alertSize = ref(20);
+        const alertTotal = ref(0);
         const diagnoseVisible = ref(false);
         const diagnoseLoading = ref(false);
         const diagnoseResult = ref(null);
@@ -357,6 +363,9 @@ const app = createApp({
                     token.value = '';
                     localStorage.removeItem('token');
                     user.value = null;
+                    stopAlertPolling();
+                    alerts.value = [];
+                    alertUnread.value = 0;
                     ElMessage.warning('登录已过期，请重新登录');
                 }
             }
@@ -626,6 +635,7 @@ const app = createApp({
                 currentView.value = 'canvas';
                 await loadControls();
                 await loadJobs();
+                startAlertPolling();
                 nextTick(() => {
                     setTimeout(() => {
                         if (!graph) { initGraph(); setupDropHandler(); }
@@ -639,7 +649,9 @@ const app = createApp({
         }
         async function logout() {
             try { await api.logout(); } catch (_) {}
-            if (alertTimer) { clearInterval(alertTimer); alertTimer = null; }
+            stopAlertPolling();
+            alerts.value = [];
+            alertUnread.value = 0;
             token.value = '';
             user.value = null;
             localStorage.removeItem('token');
@@ -1141,33 +1153,59 @@ const app = createApp({
         }
 
         // ===== 告警中心 =====
-        async function loadAlerts() {
+        async function loadAlerts(page = alertPage.value) {
             alertsLoading.value = true;
+            alertsError.value = '';
             try {
-                alerts.value = await api.getAlerts();
+                const data = await api.getAlerts(Math.max(0, page - 1), alertSize.value);
+                alerts.value = data.content || [];
+                alertTotal.value = data.totalElements || 0;
+                alertPage.value = (data.number || 0) + 1;
                 const u = await api.getAlertUnread();
                 alertUnread.value = (u && u.unread) || 0;
             } catch (err) {
-                if (!(err.response && err.response.status === 401)) console.warn('加载告警失败:', err);
+                if (!(err.response && err.response.status === 401)) {
+                    alertsError.value = err.response?.data?.message || err.message || '告警加载失败';
+                    console.warn('加载告警失败:', err);
+                }
             } finally { alertsLoading.value = false; }
         }
+        function onAlertPage(page) { loadAlerts(page); }
+        function startAlertPolling() {
+            if (alertTimer) clearInterval(alertTimer);
+            loadAlerts();
+            alertTimer = setInterval(() => { if (user.value) loadAlerts(); }, 30000);
+        }
+        function stopAlertPolling() {
+            if (alertTimer) { clearInterval(alertTimer); alertTimer = null; }
+        }
         async function markAlertRead(id) {
-            try { await api.markAlertRead(id); } catch (_) {}
-            await loadAlerts();
+            try {
+                await api.markAlertRead(id);
+                await loadAlerts();
+            } catch (err) {
+                ElMessage.error('标记已读失败: ' + (err.response?.data?.message || err.message));
+            }
         }
         async function markAllRead() {
-            try { await api.markAllAlertsRead(); } catch (_) {}
-            await loadAlerts();
+            try {
+                await api.markAllAlertsRead();
+                alertPage.value = 1;
+                await loadAlerts(1);
+            } catch (err) {
+                ElMessage.error('全部已读失败: ' + (err.response?.data?.message || err.message));
+            }
         }
         async function deleteAlert(id) {
             try {
                 await ElMessageBox.confirm('确定删除此告警？删除后不可恢复。', '删除告警', { type: 'warning' });
                 await api.deleteAlert(id);
                 ElMessage.success('告警已删除');
-                await loadAlerts();
+                const targetPage = alerts.value.length === 1 && alertPage.value > 1 ? alertPage.value - 1 : alertPage.value;
+                await loadAlerts(targetPage);
             } catch (err) {
                 if (err !== 'cancel') {
-                    ElMessage.error('删除失败');
+                    ElMessage.error('删除失败: ' + (err.response?.data?.message || err.message));
                 }
             }
         }
@@ -2194,8 +2232,7 @@ const app = createApp({
             if (user.value) {
                 await loadControls();
                 await loadJobs();
-                loadAlerts();
-                alertTimer = setInterval(() => { if (user.value) loadAlerts(); }, 30000);
+                startAlertPolling();
                 // 登录态下延迟初始化画布
                 setTimeout(() => {
                     initGraph();
@@ -2204,6 +2241,11 @@ const app = createApp({
             }
 
             document.addEventListener('keydown', handleKeydown);
+        });
+
+        onUnmounted(() => {
+            stopAlertPolling();
+            document.removeEventListener('keydown', handleKeydown);
         });
 
         return {
@@ -2234,7 +2276,8 @@ const app = createApp({
             lineageDialogVisible, lineageJob, lineageAssets, lineageLoading, openLineageDialog,
             aiPrompt, aiModels, aiSelectedModel, aiProvider, aiConfigured, aiConfigVisible, aiProvidersVisible, aiProviders, aiProviderOperating, aiConfigSaving, aiTesting, aiConfigForm, aiLoading, aiError, aiResult, aiResultDag, aiExamples, loadAiModels, loadAiProviders, openAiProviders, openAiConfig, saveAiConfig, testAiConnection, activateAiProvider, testSavedAiProvider, deleteAiProvider, generatePipeline, openAiResultInCanvas,
             kafkaTopics, kafkaSelectedTopic, kafkaFromMode, kafkaStreaming, kafkaMessages, kafkaMsgCount, kafkaMsgRate, kafkaError, kafkaTopicTotal, kafkaFeedRef, loadKafkaTopics, startKafkaStream, stopKafkaStream,
-            alerts, alertUnread, alertsLoading, loadAlerts, markAlertRead, markAllRead, deleteAlert,
+            alerts, alertUnread, alertsLoading, alertsError, alertPage, alertSize, alertTotal,
+            loadAlerts, onAlertPage, markAlertRead, markAllRead, deleteAlert,
             diagnoseVisible, diagnoseLoading, diagnoseResult, diagnoseJob, hasParamFixes, openDiagnose, runDiagnose, applyDiagnoseFixes
         };
     }

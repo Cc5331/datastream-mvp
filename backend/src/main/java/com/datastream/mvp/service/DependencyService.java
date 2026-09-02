@@ -193,7 +193,7 @@ public class DependencyService {
                         job.setStatus(JobDefinition.JobStatus.BLOCKED);
                         jobRepo.save(job);
                         addLog(job.getId(), "ERROR", "上游作业失败，下游作业已阻塞（BLOCKED）");
-                        alertService.sendWebhook(job, "DEPENDENCY_BLOCKED", "上游作业失败，下游作业 " + job.getName() + " 已阻塞");
+                        alertService.sendAlert(job, "CRITICAL", "DEPENDENCY_BLOCKED", "上游作业失败，下游作业 " + job.getName() + " 已阻塞");
                     }
                 } else {
                     if (job.getStatus() != JobDefinition.JobStatus.WAITING) {

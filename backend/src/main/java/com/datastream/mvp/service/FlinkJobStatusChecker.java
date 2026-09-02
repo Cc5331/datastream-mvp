@@ -39,7 +39,6 @@ public class FlinkJobStatusChecker {
     private final ExcelOutputConverter excelOutputConverter;
     private final XmlOutputConverter xmlOutputConverter;
     private final DagTranslationService dagTranslationService;
-    private final AlertService alertService;
     private final ParquetOutputConverter parquetOutputConverter;
 
     @Value("${flink.cluster.host:localhost}")
@@ -169,7 +168,6 @@ public class FlinkJobStatusChecker {
                         }
                         if (localStatus == JobStatus.FAILED) {
                             fetchFlinkJobError(job, flinkJobId);
-                            alertService.sendWebhook(job, "JOB_FAILED", "Flink 作业运行失败: " + flinkJobId);
                         }
                     }
                     break;

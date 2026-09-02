@@ -19,6 +19,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.time.LocalDateTime;
 
 /**
@@ -44,7 +45,9 @@ public class AlertService {
     @Value("${app.alert.email.to:}")
     private String mailTo;
 
-    private final HttpClient httpClient = HttpClient.newHttpClient();
+    private final HttpClient httpClient = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(5))
+            .build();
 
     /**
      * 统一告警入口：记录 + webhook + 邮件。
@@ -58,6 +61,7 @@ public class AlertService {
             rec.setEvent(event);
             rec.setJobId(job == null ? null : job.getId());
             rec.setJobName(job == null ? null : job.getName());
+            rec.setOwnerId(job == null ? null : job.getOwnerId());
             rec.setMessage(message);
             rec.setReadFlag(false);
             rec.setCreatedAt(LocalDateTime.now());
@@ -75,10 +79,11 @@ public class AlertService {
         sendAlert(null, level, event, message);
     }
 
-    public void sendWebhook(JobDefinition job, String event, String message) {
+    private void sendWebhook(JobDefinition job, String event, String message) {
         String url = job.getWebhookUrl();
         if (url == null || url.isBlank()) return;
         try {
+            String target = url.trim();
             String body = objectMapper.createObjectNode()
                     .put("event", event)
                     .put("jobId", job.getId())
@@ -87,20 +92,41 @@ public class AlertService {
                     .put("flinkJobId", job.getFlinkJobId())
                     .put("message", message)
                     .toString();
-            httpClient.send(HttpRequest.newBuilder()
-                            .uri(URI.create(url.trim()))
-                            .header("Content-Type", "application/json")
-                            .POST(HttpRequest.BodyPublishers.ofString(body)).build(),
-                    HttpResponse.BodyHandlers.ofString());
-            JobLog l = new JobLog();
-            l.setJobId(job.getId());
-            l.setLevel("INFO");
-            l.setMessage("Webhook 告警已发送: " + url.trim() + "（event=" + event + "）");
-            l.setTimestamp(LocalDateTime.now());
-            logRepo.save(l);
-            log.info("Webhook sent for job {}: {}", job.getId(), url.trim());
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(target))
+                    .timeout(Duration.ofSeconds(10))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+            httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                    .whenComplete((response, error) -> {
+                        if (error != null) {
+                            saveWebhookLog(job.getId(), "WARN", "Webhook 告警发送失败（event=" + event + "）：" + error.getMessage());
+                            log.warn("Webhook send failed for job {}: {}", job.getId(), error.getMessage());
+                        } else if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                            saveWebhookLog(job.getId(), "WARN", "Webhook 告警发送失败（event=" + event + "，HTTP=" + response.statusCode() + "）");
+                            log.warn("Webhook returned HTTP {} for job {}", response.statusCode(), job.getId());
+                        } else {
+                            saveWebhookLog(job.getId(), "INFO", "Webhook 告警已发送: " + target + "（event=" + event + "）");
+                            log.info("Webhook sent for job {}: {}", job.getId(), target);
+                        }
+                    });
         } catch (Exception e) {
+            saveWebhookLog(job.getId(), "WARN", "Webhook 告警配置无效（event=" + event + "）：" + e.getMessage());
             log.warn("Webhook send failed for job {}: {}", job.getId(), e.getMessage());
+        }
+    }
+
+    private void saveWebhookLog(Long jobId, String level, String message) {
+        try {
+            JobLog entry = new JobLog();
+            entry.setJobId(jobId);
+            entry.setLevel(level);
+            entry.setMessage(message);
+            entry.setTimestamp(LocalDateTime.now());
+            logRepo.save(entry);
+        } catch (Exception e) {
+            log.warn("Webhook result log save failed for job {}: {}", jobId, e.getMessage());
         }
     }
 

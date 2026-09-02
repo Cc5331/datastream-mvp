@@ -96,7 +96,7 @@ public class JobScheduler {
                         jobRepo.save(job);
                         addScheduleLog(job.getId(), "ERROR", "定时调度触发失败（已重试 " + maxRetries + " 次）：" + e.getMessage());
                         saveHistory(job, "FAILED", "提交失败：" + e.getMessage(), null);
-                        alertService.sendWebhook(job, "SCHEDULE_FAILED", "定时调度提交失败：" + e.getMessage());
+                        alertService.sendAlert(job, "CRITICAL", "SCHEDULE_FAILED", "定时调度提交失败：" + e.getMessage());
                         log.warn("Scheduled job {} fire failed after {} retries: {}", job.getId(), maxRetries, e.getMessage());
                     }
                 }
@@ -143,7 +143,7 @@ public class JobScheduler {
                     jobRepo.save(job);
                     addScheduleLog(job.getId(), "ERROR",
                             "上线作业 " + ONLINE_RESTART_WINDOW_MINUTES + " 分钟内自动重启超过 " + ONLINE_RESTART_MAX + " 次，已自动下线停止处理");
-                    alertService.sendWebhook(job, "ONLINE_JOB_STOPPED",
+                    alertService.sendAlert(job, "CRITICAL", "ONLINE_JOB_STOPPED",
                             "上线作业自动重启超限已停止：作业[" + job.getName() + "] 状态=" + st);
                     continue;
                 }

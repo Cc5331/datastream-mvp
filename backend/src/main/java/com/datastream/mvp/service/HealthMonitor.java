@@ -24,6 +24,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalDouble;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -57,6 +58,7 @@ public class HealthMonitor {
     private final Map<String, Long> alertCooldown = new ConcurrentHashMap<>();
     private final Map<Long, Long> zeroThroughputSince = new ConcurrentHashMap<>();
     private final Map<Long, Long> backpressureSince = new ConcurrentHashMap<>();
+    private final Map<Long, Long> lastCheckpointFailure = new ConcurrentHashMap<>();
     private static final long COOLDOWN_MS = 15 * 60 * 1000L;
     private static final long ZERO_THROUGHPUT_ALERT_MS = 2 * 60 * 1000L;
     private static final long BACKPRESSURE_ALERT_MS = 60 * 1000L;
@@ -112,16 +114,18 @@ public class HealthMonitor {
 
     /** 规则 3/4/5：运行中作业的吞吐 / 背压 / checkpoint 指标 */
     private void checkLiveMetrics(JobDefinition job, String jid) {
-        double outRate = queryDoubleMetric(jid, "numRecordsOutPerSecond");
-        if (outRate <= 0) {
-            long since = zeroThroughputSince.computeIfAbsent(job.getId(), k -> System.currentTimeMillis());
-            if (System.currentTimeMillis() - since >= ZERO_THROUGHPUT_ALERT_MS && shouldAlert(job.getId(), "THROUGHPUT_ZERO", null)) {
-                alertService.sendAlert(job, "WARN", "THROUGHPUT_ZERO",
-                        "运行中作业持续 " + (ZERO_THROUGHPUT_ALERT_MS / 60000) + " 分钟无输出（吞吐=0 行/s），请检查数据源或下游阻塞");
-                markAlerted(job.getId(), "THROUGHPUT_ZERO");
+        OptionalDouble outRate = queryDoubleMetric(jid, "numRecordsOutPerSecond");
+        if (outRate.isPresent()) {
+            if (outRate.getAsDouble() == 0) {
+                long since = zeroThroughputSince.computeIfAbsent(job.getId(), k -> System.currentTimeMillis());
+                if (System.currentTimeMillis() - since >= ZERO_THROUGHPUT_ALERT_MS && shouldAlert(job.getId(), "THROUGHPUT_ZERO", null)) {
+                    alertService.sendAlert(job, "WARN", "THROUGHPUT_ZERO",
+                            "运行中作业持续 " + (ZERO_THROUGHPUT_ALERT_MS / 60000) + " 分钟无输出（吞吐=0 行/s），请检查数据源或下游阻塞");
+                    markAlerted(job.getId(), "THROUGHPUT_ZERO");
+                }
+            } else {
+                zeroThroughputSince.remove(job.getId());
             }
-        } else {
-            zeroThroughputSince.remove(job.getId());
         }
         if (isBackpressureHigh(jid)) {
             long since = backpressureSince.computeIfAbsent(job.getId(), k -> System.currentTimeMillis());
@@ -133,26 +137,28 @@ public class HealthMonitor {
         } else {
             backpressureSince.remove(job.getId());
         }
-        if (hasCheckpointFailure(jid) && shouldAlert(job.getId(), "CHECKPOINT_FAILED", null)) {
-            alertService.sendAlert(job, "WARN", "CHECKPOINT_FAILED", "作业最近 checkpoint 失败，请检查状态后端与网络稳定性");
+        CheckpointFailure failure = latestCheckpointFailure(jid);
+        if (failure != null && !Long.valueOf(failure.token()).equals(lastCheckpointFailure.put(job.getId(), failure.token()))
+                && shouldAlert(job.getId(), "CHECKPOINT_FAILED", failure.occurredAt())) {
+            alertService.sendAlert(job, "WARN", "CHECKPOINT_FAILED", "作业最新 checkpoint 失败，请检查状态后端与网络稳定性");
             markAlerted(job.getId(), "CHECKPOINT_FAILED");
         }
     }
 
-    private double queryDoubleMetric(String jid, String name) {
+    private OptionalDouble queryDoubleMetric(String jid, String name) {
         try {
             String url = "http://" + flinkHost + ":" + flinkPort + "/jobs/" + jid + "/metrics?get=" + name;
             HttpResponse<String> resp = httpClient.send(HttpRequest.newBuilder()
-                    .uri(URI.create(url)).GET().build(), HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) return -1;
+                    .uri(URI.create(url)).timeout(Duration.ofSeconds(5)).GET().build(), HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200) return OptionalDouble.empty();
             JsonNode arr = objectMapper.readTree(resp.body());
             if (arr.isArray() && arr.size() > 0 && arr.get(0).has("value")) {
-                return Double.parseDouble(arr.get(0).get("value").asText("0"));
+                return OptionalDouble.of(Double.parseDouble(arr.get(0).get("value").asText()));
             }
         } catch (Exception e) {
             log.debug("metric query failed: {}", e.getMessage());
         }
-        return -1;
+        return OptionalDouble.empty();
     }
 
     private boolean isBackpressureHigh(String jid) {
@@ -173,21 +179,30 @@ public class HealthMonitor {
         return false;
     }
 
-    private boolean hasCheckpointFailure(String jid) {
+    private CheckpointFailure latestCheckpointFailure(String jid) {
         try {
             String url = "http://" + flinkHost + ":" + flinkPort + "/jobs/" + jid + "/checkpoints";
             HttpResponse<String> resp = httpClient.send(HttpRequest.newBuilder()
-                    .uri(URI.create(url)).GET().build(), HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) return false;
-            JsonNode root = objectMapper.readTree(resp.body());
-            JsonNode counts = root.path("counts");
-            if (counts.path("failed").asInt(0) > 0) return true;
-            if (!root.path("latest").path("failed").isMissingNode()) return true;
+                    .uri(URI.create(url)).timeout(Duration.ofSeconds(5)).GET().build(), HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200) return null;
+            JsonNode latest = objectMapper.readTree(resp.body()).path("latest");
+            JsonNode failed = latest.path("failed");
+            if (!failed.isObject() || failed.isEmpty()) return null;
+            long failedId = failed.path("id").asLong(-1);
+            long completedId = latest.path("completed").path("id").asLong(-1);
+            if (failedId < 0 || failedId <= completedId) return null;
+            long timestamp = failed.path("failure_timestamp").asLong(
+                    failed.path("trigger_timestamp").asLong(System.currentTimeMillis()));
+            LocalDateTime occurredAt = java.time.Instant.ofEpochMilli(timestamp)
+                    .atZone(java.time.ZoneId.systemDefault()).toLocalDateTime();
+            return new CheckpointFailure(failedId, occurredAt);
         } catch (Exception e) {
             log.debug("checkpoint query failed: {}", e.getMessage());
+            return null;
         }
-        return false;
     }
+
+    private record CheckpointFailure(long token, LocalDateTime occurredAt) {}
 
     /**
      * 告警去重（DB 持久化，重启后不重复告警）：

@@ -1,4 +1,4 @@
-﻿# ===== 运行时 / 依赖 =====
+# ===== 运行时 / 依赖 =====
 flink-1.18.1/
 **/target/
 backend/data/
@@ -25,6 +25,7 @@ frontend/public/old/
 # ===== 大数据测试文件（可用 gen_test_data.py 重新生成或自行下载）=====
 test-resources/data/test_input_*.csv
 test-resources/data/free-datasets-for-learning/
+test-resources/data/large/
 
 # ===== IDE / 系统 =====
 .idea/

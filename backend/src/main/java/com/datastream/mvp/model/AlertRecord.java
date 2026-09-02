@@ -14,7 +14,10 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @AllArgsConstructor
 @Entity
-@Table(name = "alert_record")
+@Table(name = "alert_record", indexes = {
+        @Index(name = "idx_alert_owner_created", columnList = "ownerId,createdAt"),
+        @Index(name = "idx_alert_read_created", columnList = "readFlag,createdAt")
+})
 public class AlertRecord {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -28,6 +31,7 @@ public class AlertRecord {
 
     private Long jobId;
     private String jobName;
+    private Long ownerId;
 
     @Column(columnDefinition = "TEXT", nullable = false)
     private String message;

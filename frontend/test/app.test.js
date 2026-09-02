@@ -43,3 +43,12 @@ test('吞吐趋势支持独立动态刻度和统计标记', () => {
   assert.match(appJs, /v !== 'monitor'/);
   assert.match(appJs, /trendChart\.dispose\(\)/);
 });
+
+test('告警中心支持分页、登录轮询和错误反馈', () => {
+  assert.match(appJs, /data\.content \|\| \[\]/);
+  assert.match(appJs, /function startAlertPolling/);
+  assert.match(appJs, /function stopAlertPolling/);
+  assert.match(appJs, /alertsError\.value/);
+  assert.match(html, /user && user\.role !== 'VIEWER'/);
+  assert.match(html, /el-pagination/);
+});

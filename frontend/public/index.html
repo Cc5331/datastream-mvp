@@ -600,7 +600,8 @@
                         <el-button size="small" @click="markAllRead">全部已读</el-button>
                         <span class="alerts-tip">告警来源：作业失败 / 重启超限 / 吞吐归零 / 背压 / checkpoint / 调度失败（每 30s 自动扫描，可配置邮件通知）</span>
                     </div>
-                    <el-table :data="alerts" style="width:100%; height:calc(100% - 44px);" stripe empty-text="暂无告警">
+                    <el-alert v-if="alertsError" :title="alertsError" type="error" show-icon :closable="false" style="margin-bottom:10px;"></el-alert>
+                    <el-table :data="alerts" style="width:100%;" max-height="calc(100vh - 290px)" stripe :empty-text="alertsError ? '告警加载失败' : '暂无告警'">
                         <el-table-column prop="createdAt" label="时间" width="170"></el-table-column>
                         <el-table-column label="级别" width="90">
                             <template #default="scope">
@@ -620,10 +621,13 @@
                         <el-table-column label="操作" width="200">
                             <template #default="scope">
                                 <el-button v-if="!scope.row.readFlag" size="small" type="primary" plain @click="markAlertRead(scope.row.id)">标记已读</el-button>
-                                <el-button size="small" type="danger" plain @click="deleteAlert(scope.row.id)">删除</el-button>
+                                <el-button v-if="user && user.role !== 'VIEWER'" size="small" type="danger" plain @click="deleteAlert(scope.row.id)">删除</el-button>
                             </template>
                         </el-table-column>
                     </el-table>
+                    <div style="display:flex;justify-content:flex-end;margin-top:12px;">
+                        <el-pagination v-model:current-page="alertPage" :page-size="alertSize" :total="alertTotal" layout="total, prev, pager, next" @current-change="onAlertPage"></el-pagination>
+                    </div>
                 </div>
 
                 <!-- 控件管理视图 -->
