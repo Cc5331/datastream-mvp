@@ -1,4 +1,4 @@
-﻿﻿# 数据流任务管理系统（DataStream MVP）
+﻿# 数据流任务管理系统（DataStream MVP）
 
 > 基于 **Spring Boot 3.2 + Apache Flink 1.18 + Vue 3 + AntV X6** 的可视化数据流任务编排平台：在画布上拖拽控件搭建 DAG，一键翻译为 Flink 作业并提交 Standalone 集群运行，结果输出到文件或 MySQL。
 
@@ -287,6 +287,8 @@ docker compose down -v         :: 停止并删除数据卷
 | GET | /api/alerts/unread-count | 未读告警数（前端角标） |
 | POST | /api/alerts/{id}/read | 标记某条告警已读 |
 | POST | /api/alerts/read-all | 全部标记已读 |
+| POST | /api/alerts/batch-read | 批量标记已读（body: `[id, ...]`，最多 500 条，返回 `{updated}`） |
+| POST | /api/alerts/batch-delete | 批量删除（body: `[id, ...]`，最多 500 条，ADMIN/OPERATOR，返回 `{deleted}`） |
 ## 八、项目结构
 
 ```

@@ -13,6 +13,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -63,6 +64,29 @@ public class AlertController {
         return ResponseEntity.ok().build();
     }
 
+    /** 批量标记已读（body: JSON 数组 [id, ...]，最多 500 条） */
+    @PostMapping("/batch-read")
+    public ResponseEntity<Map<String, Integer>> batchMarkRead(@RequestBody List<Long> ids) {
+        List<Long> clean = sanitizeIds(ids);
+        CurrentUser user = currentUser();
+        int updated = user.isAdmin()
+                ? alertRepo.markReadByIds(clean)
+                : alertRepo.markReadByIdsAndOwnerId(clean, user.id());
+        return ResponseEntity.ok(Map.of("updated", updated));
+    }
+
+    /** 批量删除（body: JSON 数组 [id, ...]，最多 500 条） */
+    @PostMapping("/batch-delete")
+    @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
+    public ResponseEntity<Map<String, Integer>> batchDelete(@RequestBody List<Long> ids) {
+        List<Long> clean = sanitizeIds(ids);
+        CurrentUser user = currentUser();
+        int deleted = user.isAdmin()
+                ? alertRepo.deleteByIds(clean)
+                : alertRepo.deleteByIdsAndOwnerId(clean, user.id());
+        return ResponseEntity.ok(Map.of("deleted", deleted));
+    }
+
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
@@ -80,5 +104,12 @@ public class AlertController {
         CurrentUser user = SecurityUtils.currentUser();
         if (user == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "未登录或登录已过期");
         return user;
+    }
+
+    private List<Long> sanitizeIds(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "未选择任何告警");
+        }
+        return ids.stream().filter(java.util.Objects::nonNull).distinct().limit(500).toList();
     }
 }

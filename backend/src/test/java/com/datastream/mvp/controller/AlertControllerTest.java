@@ -65,6 +65,43 @@ class AlertControllerTest {
         verify(repo, never()).markAllReadByOwnerId(any());
     }
 
+    @Test
+    void batchMarkRead_nonAdminOnlyUpdatesOwnedRows() {
+        AlertRecordRepository repo = mock(AlertRecordRepository.class);
+        when(repo.markReadByIdsAndOwnerId(eq(List.of(10L, 11L)), eq(7L))).thenReturn(2);
+        authenticate(new CurrentUser(7L, "operator", "操作员", "OPERATOR"));
+
+        var res = new AlertController(repo).batchMarkRead(List.of(10L, 10L, 11L));
+
+        assertEquals(2, res.getBody().get("updated"));
+        verify(repo).markReadByIdsAndOwnerId(List.of(10L, 11L), 7L);
+        verify(repo, never()).markReadByIds(any());
+    }
+
+    @Test
+    void batchDelete_adminDeletesGivenRows() {
+        AlertRecordRepository repo = mock(AlertRecordRepository.class);
+        when(repo.deleteByIds(eq(List.of(5L, 6L)))).thenReturn(2);
+        authenticate(new CurrentUser(1L, "admin", "管理员", "ADMIN"));
+
+        var res = new AlertController(repo).batchDelete(List.of(5L, 6L));
+
+        assertEquals(2, res.getBody().get("deleted"));
+        verify(repo).deleteByIds(List.of(5L, 6L));
+        verify(repo, never()).deleteByIdsAndOwnerId(any(), any());
+    }
+
+    @Test
+    void batchMarkRead_emptySelectionRejected() {
+        AlertRecordRepository repo = mock(AlertRecordRepository.class);
+        authenticate(new CurrentUser(1L, "admin", "管理员", "ADMIN"));
+
+        org.junit.jupiter.api.Assertions.assertThrows(
+                org.springframework.web.server.ResponseStatusException.class,
+                () -> new AlertController(repo).batchMarkRead(List.of()));
+        verify(repo, never()).markReadByIds(any());
+    }
+
     private void authenticate(CurrentUser user) {
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(user, null, List.of()));

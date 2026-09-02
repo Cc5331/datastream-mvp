@@ -10,6 +10,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collection;
 import java.util.Optional;
 
 @Repository
@@ -32,4 +33,25 @@ public interface AlertRecordRepository extends JpaRepository<AlertRecord, Long> 
     @Transactional
     @Query("update AlertRecord a set a.readFlag = true where a.ownerId = :ownerId and a.readFlag = false")
     int markAllReadByOwnerId(@Param("ownerId") Long ownerId);
+
+    // ===== 批量操作 =====
+    @Modifying
+    @Transactional
+    @Query("update AlertRecord a set a.readFlag = true where a.id in :ids")
+    int markReadByIds(@Param("ids") Collection<Long> ids);
+
+    @Modifying
+    @Transactional
+    @Query("update AlertRecord a set a.readFlag = true where a.id in :ids and a.ownerId = :ownerId")
+    int markReadByIdsAndOwnerId(@Param("ids") Collection<Long> ids, @Param("ownerId") Long ownerId);
+
+    @Modifying
+    @Transactional
+    @Query("delete from AlertRecord a where a.id in :ids")
+    int deleteByIds(@Param("ids") Collection<Long> ids);
+
+    @Modifying
+    @Transactional
+    @Query("delete from AlertRecord a where a.id in :ids and a.ownerId = :ownerId")
+    int deleteByIdsAndOwnerId(@Param("ids") Collection<Long> ids, @Param("ownerId") Long ownerId);
 }

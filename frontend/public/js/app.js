@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿// ===== API 配置 =====
+﻿﻿﻿﻿﻿// ===== API 配置 =====
 const API_BASE = '/api';
 
 const api = {
@@ -179,6 +179,14 @@ const api = {
     async deleteAlert(id) {
         await axios.delete(API_BASE + '/alerts/' + id);
     },
+    async batchMarkAlertsRead(ids) {
+        const res = await axios.post(API_BASE + '/alerts/batch-read', ids);
+        return res.data;
+    },
+    async batchDeleteAlerts(ids) {
+        const res = await axios.post(API_BASE + '/alerts/batch-delete', ids);
+        return res.data;
+    },
     async getKafkaTopics() {
         const res = await axios.get(API_BASE + '/kafka/topics');
         return res.data;
@@ -332,6 +340,7 @@ const app = createApp({
         const alertPage = ref(1);
         const alertSize = ref(20);
         const alertTotal = ref(0);
+        const selectedAlerts = ref([]);
         const diagnoseVisible = ref(false);
         const diagnoseLoading = ref(false);
         const diagnoseResult = ref(null);
@@ -1206,6 +1215,39 @@ const app = createApp({
             } catch (err) {
                 if (err !== 'cancel') {
                     ElMessage.error('删除失败: ' + (err.response?.data?.message || err.message));
+                }
+            }
+        }
+        function onAlertSelectionChange(selection) {
+            selectedAlerts.value = selection.map(r => r.id);
+        }
+        function selectedAlertIds() {
+            return selectedAlerts.value.length ? [...selectedAlerts.value] : [];
+        }
+        async function batchMarkRead() {
+            const ids = selectedAlertIds();
+            if (!ids.length) { ElMessage.warning('请先勾选要标记已读的告警'); return; }
+            try {
+                const res = await api.batchMarkAlertsRead(ids);
+                ElMessage.success(`已标记 ${res.updated || 0} 条告警为已读`);
+                selectedAlerts.value = [];
+                await loadAlerts();
+            } catch (err) {
+                ElMessage.error('批量标记已读失败: ' + (err.response?.data?.message || err.message));
+            }
+        }
+        async function batchDeleteSelected() {
+            const ids = selectedAlertIds();
+            if (!ids.length) { ElMessage.warning('请先勾选要删除的告警'); return; }
+            try {
+                await ElMessageBox.confirm(`确定删除选中的 ${ids.length} 条告警？删除后不可恢复。`, '批量删除告警', { type: 'warning' });
+                const res = await api.batchDeleteAlerts(ids);
+                ElMessage.success(`已删除 ${res.deleted || 0} 条告警`);
+                selectedAlerts.value = [];
+                await loadAlerts();
+            } catch (err) {
+                if (err !== 'cancel') {
+                    ElMessage.error('批量删除失败: ' + (err.response?.data?.message || err.message));
                 }
             }
         }
@@ -2278,6 +2320,7 @@ const app = createApp({
             kafkaTopics, kafkaSelectedTopic, kafkaFromMode, kafkaStreaming, kafkaMessages, kafkaMsgCount, kafkaMsgRate, kafkaError, kafkaTopicTotal, kafkaFeedRef, loadKafkaTopics, startKafkaStream, stopKafkaStream,
             alerts, alertUnread, alertsLoading, alertsError, alertPage, alertSize, alertTotal,
             loadAlerts, onAlertPage, markAlertRead, markAllRead, deleteAlert,
+            onAlertSelectionChange, batchMarkRead, batchDeleteSelected, selectedAlerts,
             diagnoseVisible, diagnoseLoading, diagnoseResult, diagnoseJob, hasParamFixes, openDiagnose, runDiagnose, applyDiagnoseFixes
         };
     }

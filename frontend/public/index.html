@@ -598,10 +598,13 @@
                         <el-tag v-if="alertUnread > 0" type="danger" size="small">未读 {{ alertUnread }}</el-tag>
                         <el-button size="small" type="primary" :loading="alertsLoading" @click="loadAlerts">刷新</el-button>
                         <el-button size="small" @click="markAllRead">全部已读</el-button>
+                        <el-button size="small" type="primary" plain :disabled="!selectedAlerts.length" @click="batchMarkRead">批量已读</el-button>
+                        <el-button v-if="user && user.role !== 'VIEWER'" size="small" type="danger" plain :disabled="!selectedAlerts.length" @click="batchDeleteSelected">批量删除</el-button>
                         <span class="alerts-tip">告警来源：作业失败 / 重启超限 / 吞吐归零 / 背压 / checkpoint / 调度失败（每 30s 自动扫描，可配置邮件通知）</span>
                     </div>
                     <el-alert v-if="alertsError" :title="alertsError" type="error" show-icon :closable="false" style="margin-bottom:10px;"></el-alert>
-                    <el-table :data="alerts" style="width:100%;" max-height="calc(100vh - 290px)" stripe :empty-text="alertsError ? '告警加载失败' : '暂无告警'">
+                    <el-table :data="alerts" style="width:100%;" max-height="calc(100vh - 290px)" stripe :empty-text="alertsError ? '告警加载失败' : '暂无告警'" @selection-change="onAlertSelectionChange">
+                        <el-table-column type="selection" width="45"></el-table-column>
                         <el-table-column prop="createdAt" label="时间" width="170"></el-table-column>
                         <el-table-column label="级别" width="90">
                             <template #default="scope">

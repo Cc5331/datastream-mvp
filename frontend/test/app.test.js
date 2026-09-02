@@ -52,3 +52,19 @@ test('告警中心支持分页、登录轮询和错误反馈', () => {
   assert.match(html, /user && user\.role !== 'VIEWER'/);
   assert.match(html, /el-pagination/);
 });
+
+test('告警中心支持批量标记已读与批量删除', () => {
+  assert.match(appJs, /async function batchMarkRead/);
+  assert.match(appJs, /async function batchDeleteSelected/);
+  assert.match(appJs, /batchMarkAlertsRead/);
+  assert.match(appJs, /batchDeleteAlerts/);
+  assert.match(appJs, /\/alerts\/batch-read/);
+  assert.match(appJs, /\/alerts\/batch-delete/);
+  assert.match(appJs, /function onAlertSelectionChange/);
+  assert.match(appJs, /selectedAlerts\.value/);
+  assert.match(html, /type="selection"/);
+  assert.match(html, /@selection-change="onAlertSelectionChange"/);
+  assert.match(html, /@click="batchMarkRead"/);
+  assert.match(html, /@click="batchDeleteSelected"/);
+  assert.match(html, /:disabled="!selectedAlerts\.length"/);
+});
