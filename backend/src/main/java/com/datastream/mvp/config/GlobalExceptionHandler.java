@@ -26,6 +26,18 @@ public class GlobalExceptionHandler {
                 ));
     }
 
+    /** 请求体 JSON 无法解析（如批量接口收到裸数字而非数组、字段类型不符）→ 400 */
+    @ExceptionHandler(org.springframework.http.converter.HttpMessageNotReadableException.class)
+    public ResponseEntity<Map<String, Object>> handleUnreadable(org.springframework.http.converter.HttpMessageNotReadableException ex) {
+        String msg = ex.getMessage() != null ? ex.getMessage() : "请求体 JSON 格式错误";
+        if (msg.length() > 200) msg = msg.substring(0, 200) + "...";
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(Map.of(
+                        "error", "请求体 JSON 格式错误: " + msg,
+                        "status", 400
+                ));
+    }
+
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<Map<String, Object>> handleNotFound(RuntimeException ex) {
         HttpStatus status = ex.getMessage() != null && ex.getMessage().contains("not found")
