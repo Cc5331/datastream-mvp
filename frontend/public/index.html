@@ -596,7 +596,7 @@
                     <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
                         <span style="font-weight:600; font-size:14px;">🔔 告警中心</span>
                         <el-tag v-if="alertUnread > 0" type="danger" size="small">未读 {{ alertUnread }}</el-tag>
-                        <el-button size="small" type="primary" :loading="alertsLoading" @click="loadAlerts">刷新</el-button>
+                        <el-button size="small" type="primary" :loading="alertsLoading" @click="loadAlerts()">刷新</el-button>
                         <el-button size="small" @click="markAllRead">全部已读</el-button>
                         <el-button size="small" type="primary" plain :disabled="!selectedAlerts.length" @click="batchMarkRead">批量已读</el-button>
                         <el-button v-if="user && user.role !== 'VIEWER'" size="small" type="danger" plain :disabled="!selectedAlerts.length" @click="batchDeleteSelected">批量删除</el-button>
@@ -1174,18 +1174,18 @@
     </div>
 
     <!-- Vue 3 + Element Plus -->
-    <script src="vendor/vue.global.prod.js"></script>
-    <script src="vendor/element-plus.full.js"></script>
-    <script src="vendor/icons-vue.iife.min.js"></script>
-<script src="vendor/echarts.min.js"></script>
+    <script src="vendor/vue.global.prod.js?v=20260902b"></script>
+    <script src="vendor/element-plus.full.js?v=20260902b"></script>
+    <script src="vendor/icons-vue.iife.min.js?v=20260902b"></script>
+<script src="vendor/echarts.min.js?v=20260902b"></script>
 
     <!-- AntV X6 -->
-    <script src="vendor/x6.min.js"></script>
-    <script src="vendor/axios.min.js"></script>
+    <script src="vendor/x6.min.js?v=20260902b"></script>
+    <script src="vendor/axios.min.js?v=20260902b"></script>
 
 
     <!-- 主应用 -->
-    <script src="js/app.js?v=20260902a"></script>
+    <script src="js/app.js?v=20260902b"></script>
 </body>
 </html>
 

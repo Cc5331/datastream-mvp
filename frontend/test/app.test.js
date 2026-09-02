@@ -67,4 +67,6 @@ test('告警中心支持批量标记已读与批量删除', () => {
   assert.match(html, /@click="batchMarkRead"/);
   assert.match(html, /@click="batchDeleteSelected"/);
   assert.match(html, /:disabled="!selectedAlerts\.length"/);
+  // 刷新按钮必须显式 loadAlerts()，避免 Vue 把点击事件当 page 参数传入（page=NaN → 500）
+  assert.match(html, /@click="loadAlerts\(\)" *>刷新/);
 });

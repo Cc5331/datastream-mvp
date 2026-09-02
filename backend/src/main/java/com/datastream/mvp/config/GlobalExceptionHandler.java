@@ -38,6 +38,16 @@ public class GlobalExceptionHandler {
                 ));
     }
 
+    /** 请求参数类型不匹配（如 page=NaN、page=abc 等非法数字，前端误把事件当 page 传入）→ 400 */
+    @ExceptionHandler(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<Map<String, Object>> handleTypeMismatch(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(Map.of(
+                        "error", "参数格式错误: " + ex.getName() + "=" + ex.getValue() + "（期望 " + (ex.getRequiredType() != null ? ex.getRequiredType().getSimpleName() : "数字") + "）",
+                        "status", 400
+                ));
+    }
+
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<Map<String, Object>> handleNotFound(RuntimeException ex) {
         HttpStatus status = ex.getMessage() != null && ex.getMessage().contains("not found")

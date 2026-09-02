@@ -37,4 +37,17 @@ class GlobalExceptionHandlerTest {
         assertEquals(HttpStatus.BAD_REQUEST, resp.getStatusCode());
         assertTrue(((String) resp.getBody().get("error")).length() <= 220);
     }
+
+    @Test
+    void handleTypeMismatchReturns400() {
+        org.springframework.web.method.annotation.MethodArgumentTypeMismatchException ex =
+                new org.springframework.web.method.annotation.MethodArgumentTypeMismatchException(
+                        "NaN", int.class, "page", null, null);
+
+        ResponseEntity<Map<String, Object>> resp = handler.handleTypeMismatch(ex);
+
+        assertEquals(HttpStatus.BAD_REQUEST, resp.getStatusCode());
+        assertEquals(400, resp.getBody().get("status"));
+        assertTrue(((String) resp.getBody().get("error")).contains("page"));
+    }
 }
