@@ -73,6 +73,10 @@ public class DagTranslationService {
             flinkSql.append("CREATE FUNCTION IF NOT EXISTS xml2json AS 'com.datastream.udf.XmlToJson' LANGUAGE JAVA;\n");
             flinkSql.append("CREATE FUNCTION IF NOT EXISTS json2xml AS 'com.datastream.udf.JsonToXml' LANGUAGE JAVA;\n\n");
         }
+        boolean hasRedisLookup = dag.getNodes().stream().anyMatch(n -> "redis_lookup".equals(n.getType()));
+        if (hasRedisLookup) {
+            flinkSql.append("CREATE FUNCTION IF NOT EXISTS redis_lookup AS 'com.datastream.udf.RedisLookupUdf' LANGUAGE JAVA;\n\n");
+        }
 
         List<DagDefinition.DagNode> sortedNodes = topologicalSort(dag);
         Map<String, String> tableAlias = new HashMap<>();
@@ -223,6 +227,48 @@ public class DagTranslationService {
                 nodeSchemas.put(node.getId(), fields);
                 log.info("MySQL input {}: {}.{} -> {} fields", node.getId(), url, table, fields.split("\n").length);
                 flinkSql.append("-- Node: ").append(node.getLabel()).append(" (").append(node.getId()).append(") [MySQL Input]\n");
+                flinkSql.append(rendered).append("\n\n");
+                tableAlias.put(node.getId(), sanitize(node.getId()));
+                continue;
+            }
+            // PostgreSQL Input -> JDBC 读表（复用 JDBC connector，PG 方言），字段自动推导
+            if ("pg_input".equals(node.getType())) {
+                String url = node.getParams() != null && node.getParams().get("url") != null ? node.getParams().get("url").toString().trim() : "";
+                String table = node.getParams() != null && node.getParams().get("table") != null ? node.getParams().get("table").toString().trim() : "";
+                String username = node.getParams() != null && node.getParams().get("username") != null ? node.getParams().get("username").toString().trim() : "";
+                String password = resolveCredential(node.getParams() != null ? node.getParams().get("password") : null, "");
+                if (url.isEmpty() || table.isEmpty()) {
+                    throw new RuntimeException("PostgreSQL 输入缺少 url / table 参数");
+                }
+                if (!url.startsWith("jdbc:postgresql://")) {
+                    throw new RuntimeException("PostgreSQL 输入 url 必须以 jdbc:postgresql:// 开头: " + url);
+                }
+                String fields = inferJdbcFields(url, table, username, password, "PostgreSQL");
+                String rendered = generateJdbcInputDDL(sanitize(node.getId()), url, table, username, password, fields, "org.postgresql.Driver");
+                nodeSchemas.put(node.getId(), fields);
+                log.info("PostgreSQL input {}: {}.{} -> {} fields", node.getId(), url, table, fields.split("\n").length);
+                flinkSql.append("-- Node: ").append(node.getLabel()).append(" (").append(node.getId()).append(") [PostgreSQL Input]\n");
+                flinkSql.append(rendered).append("\n\n");
+                tableAlias.put(node.getId(), sanitize(node.getId()));
+                continue;
+            }
+            // Oracle Input -> JDBC 读表（Oracle 方言），字段自动推导
+            if ("oracle_input".equals(node.getType())) {
+                String url = node.getParams() != null && node.getParams().get("url") != null ? node.getParams().get("url").toString().trim() : "";
+                String table = node.getParams() != null && node.getParams().get("table") != null ? node.getParams().get("table").toString().trim().toUpperCase() : "";
+                String username = node.getParams() != null && node.getParams().get("username") != null ? node.getParams().get("username").toString().trim().toUpperCase() : "";
+                String password = resolveCredential(node.getParams() != null ? node.getParams().get("password") : null, "");
+                if (url.isEmpty() || table.isEmpty()) {
+                    throw new RuntimeException("Oracle 输入缺少 url / table 参数");
+                }
+                if (!url.startsWith("jdbc:oracle:")) {
+                    throw new RuntimeException("Oracle 输入 url 必须以 jdbc:oracle: 开头（如 jdbc:oracle:thin:@host:1521/FREE）: " + url);
+                }
+                String fields = inferJdbcFields(url, table, username, password, "Oracle");
+                String rendered = generateJdbcInputDDL(sanitize(node.getId()), url, table, username, password, fields, "oracle.jdbc.OracleDriver");
+                nodeSchemas.put(node.getId(), fields);
+                log.info("Oracle input {}: {}.{} -> {} fields", node.getId(), url, table, fields.split("\n").length);
+                flinkSql.append("-- Node: ").append(node.getLabel()).append(" (").append(node.getId()).append(") [Oracle Input]\n");
                 flinkSql.append(rendered).append("\n\n");
                 tableAlias.put(node.getId(), sanitize(node.getId()));
                 continue;
@@ -465,6 +511,9 @@ public class DagTranslationService {
                         String jfc = node.getParams() != null && node.getParams().get("fieldsConfig") != null ? node.getParams().get("fieldsConfig").toString() : "[]";
                         String extra = extractFieldsFromDatagenConfig(jfc);
                         nodeSchemas.put(node.getId(), extra != null ? incomingSchema + ",\n" + extra : incomingSchema);
+                    } else if ("redis_lookup".equals(node.getType())) {
+                        String tfn = node.getParams() != null ? node.getParams().getOrDefault("targetField", "extra_info").toString() : "extra_info";
+                        nodeSchemas.put(node.getId(), incomingSchema + ",\n  `" + tfn + "` STRING");
                     } else {
                         nodeSchemas.put(node.getId(), incomingSchema);
                     }
@@ -535,6 +584,8 @@ public class DagTranslationService {
                     ts = buildValidateSql(tp, upstreamTable);
                 } else if ("route".equals(transformType)) {
                     ts = buildRouteSql(edge, dag.getEdges(), tp, upstreamTable);
+                } else if ("redis_lookup".equals(transformType)) {
+                    ts = buildRedisLookupSelect(tp, upstreamTable);
                 } else {
                     ControlRegistry sc = controlService.findByType(transformType);
                     ts = renderTemplate(sc.getFlinkTemplate(), tp, edge.getSource());
@@ -1425,8 +1476,30 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
         return String.join(", ", parts);
     }
 
-    private String buildJsonParseSelect(Map<String, Object> params, String incomingSchema) {
-        String srcField = params != null && params.get("sourceField") != null ? params.get("sourceField").toString().trim() : "";
+    /**
+     * Redis 富化 SELECT：保留上游全部字段 + redis_lookup(字段A) 扩充 targetField。
+     * UDF 内部按 keyPrefix 拼 key：GET keyPrefix + 字段A值，取不到时返回 NULL。
+     */
+    private String buildRedisLookupSelect(Map<String, Object> params, String upstreamTable) {
+        String keyField = params != null && params.get("keyField") != null ? params.get("keyField").toString().trim() : "";
+        String targetField = params != null && params.get("targetField") != null ? params.get("targetField").toString().trim() : "extra_info";
+        String keyPrefix = params != null && params.get("keyPrefix") != null ? params.get("keyPrefix").toString() : "";
+        if (keyField.isEmpty()) {
+            throw new RuntimeException("Redis 富化: 请填写 keyField（用作 Redis key 的字段名）");
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("SELECT *, ");
+        if (keyPrefix != null && !keyPrefix.isEmpty()) {
+            sb.append("CONCAT('").append(keyPrefix.replace("'", "''")).append("', CAST(")
+              .append(quoteFlinkField(keyField)).append(" AS STRING))");
+        } else {
+            sb.append("CAST(").append(quoteFlinkField(keyField)).append(" AS STRING)");
+        }
+        sb.append(" AS ").append(quoteFlinkField(targetField));
+        return sb.append(" FROM ").append(upstreamTable).toString();
+    }
+
+    private String buildJsonParseSelect(Map<String, Object> params, String incomingSchema) {        String srcField = params != null && params.get("sourceField") != null ? params.get("sourceField").toString().trim() : "";
         String fc = params != null && params.get("fieldsConfig") != null ? params.get("fieldsConfig").toString() : "[]";
         if (srcField.isEmpty()) throw new RuntimeException("JSON 解析: 请填写 sourceField 参数");
         JsonNode fa = tryParseJsonArray(fc);
@@ -1485,6 +1558,48 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
         ddl.append("  'scan.fetch-size' = '1000'\n");
         ddl.append(");\n");
         return ddl.toString();
+    }
+
+    /** 通用 JDBC 输入 DDL（PostgreSQL / Oracle 等方言，driver 由调用方传入） */
+    private String generateJdbcInputDDL(String tableName, String url, String table, String username, String password, String fields, String driver) {
+        StringBuilder ddl = new StringBuilder();
+        ddl.append("CREATE TABLE ").append(tableName).append(" (\n");
+        ddl.append(fields).append("\n");
+        ddl.append(") WITH (\n");
+        ddl.append("  'connector' = 'jdbc',\n");
+        ddl.append("  'url' = '").append(url.replace("'", "''")).append("',\n");
+        ddl.append("  'table-name' = '").append(table.replace("'", "''")).append("',\n");
+        if (username != null && !username.isEmpty()) {
+            ddl.append("  'username' = '").append(username.replace("'", "''")).append("',\n");
+        }
+        ddl.append("  'password' = '").append(password == null ? "" : password.replace("'", "''")).append("',\n");
+        ddl.append("  'driver' = '").append(driver).append("',\n");
+        ddl.append("  'scan.fetch-size' = '1000'\n");
+        ddl.append(");\n");
+        return ddl.toString();
+    }
+
+    /** 通用 JDBC 字段推导（复用 MySQL 推导逻辑 + 类型映射，限 SELECT * LIMIT 0 元数据） */
+    private String inferJdbcFields(String url, String table, String username, String password, String label) {
+        String quotedTable = label.equals("Oracle") ? table : "\"" + table.replace("\"", "\"\"") + "\"";
+        try (Connection conn = DriverManager.getConnection(url, username, password);
+             Statement st = conn.createStatement();
+             ResultSet rs = st.executeQuery("SELECT * FROM " + quotedTable + " WHERE 1=0")) {
+            ResultSetMetaData md = rs.getMetaData();
+            StringBuilder sb = new StringBuilder();
+            for (int i = 1; i <= md.getColumnCount(); i++) {
+                String name = md.getColumnLabel(i);
+                String flinkType = mysqlToFlinkType(md.getColumnType(i), md.getPrecision(i), md.getScale(i));
+                if (sb.length() > 0) sb.append(",\n");
+                sb.append("  ").append(quoteFlinkField(name)).append(" ").append(flinkType);
+            }
+            if (sb.length() == 0) throw new RuntimeException(label + " 输入: 表无字段: " + table);
+            return sb.toString();
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException(label + " 输入读取表结构失败: " + e.getMessage() + "（请检查 url/table/username/password 与网络）", e);
+        }
     }
 
     private String generateJsonInputDDL(String tableName, String path, String fieldsConfig) {

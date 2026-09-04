@@ -1,8 +1,10 @@
 package com.datastream.mvp.config;
 
+import com.datastream.mvp.model.AlertRecord;
 import com.datastream.mvp.model.AppUser;
 import com.datastream.mvp.model.ControlRegistry;
 import com.datastream.mvp.model.JobDefinition;
+import com.datastream.mvp.repository.AlertRecordRepository;
 import com.datastream.mvp.repository.AppUserRepository;
 import com.datastream.mvp.repository.ControlRegistryRepository;
 import com.datastream.mvp.repository.JobDefinitionRepository;
@@ -24,6 +26,7 @@ public class DataInitializer implements CommandLineRunner {
     private final ControlRegistryRepository controlRepo;
     private final AppUserRepository userRepo;
     private final JobDefinitionRepository jobRepo;
+    private final AlertRecordRepository alertRepo;
     private final PasswordEncoder passwordEncoder;
 
     @Value("${app.mysql.default-username:root}")
@@ -104,6 +107,27 @@ public class DataInitializer implements CommandLineRunner {
                 "Read MySQL",
                 mysqlParamSchema(),
                 "",
+                "1.0.0", "built-in");
+
+        // PostgreSQL Input
+        createControl("pg_input", "PostgreSQL Input", "input",
+                "Read PostgreSQL (JDBC 自动推导字段)",
+                jdbcParamSchema("jdbc:postgresql://localhost:5432/dataflow", "postgres", "POSTGRES_PASSWORD", "postgres"),
+                "",
+                "1.0.0", "built-in");
+
+        // Oracle Input
+        createControl("oracle_input", "Oracle Input", "input",
+                "Read Oracle (JDBC 自动推导字段)",
+                jdbcParamSchema("jdbc:oracle:thin:@localhost:1521/FREE", "system", "ORACLE_PASSWORD", "oracle"),
+                "",
+                "1.0.0", "built-in");
+
+        // Redis 字段富化（transform：字段A → GET keyPrefix+值 → 扩充 targetField）
+        createControl("redis_lookup", "Redis 富化", "transform",
+                "根据字段A查询 Redis 扩充新字段（GET keyPrefix+值）",
+                "{\"type\":\"object\",\"properties\":{\"host\":{\"type\":\"string\",\"title\":\"Redis 地址\",\"default\":\"localhost\"},\"port\":{\"type\":\"number\",\"title\":\"端口\",\"default\":6379},\"password\":{\"type\":\"string\",\"title\":\"密码（留空无密码）\",\"default\":\"redis123\"},\"keyField\":{\"type\":\"string\",\"title\":\"字段A（值作 Redis key）\",\"default\":\"id\"},\"keyPrefix\":{\"type\":\"string\",\"title\":\"key 前缀（如 user: → GET user:1）\",\"default\":\"\"},\"targetField\":{\"type\":\"string\",\"title\":\"扩充字段名\",\"default\":\"extra_info\"}},\"required\":[\"keyField\",\"targetField\"]}",
+                "SELECT *, redis_lookup('${host}', '${port}', '${password}', `${keyField}`) AS `${targetField}` FROM ${id}",
                 "1.0.0", "built-in");
 
         // MySQL Output
@@ -213,6 +237,7 @@ public class DataInitializer implements CommandLineRunner {
 
         seedUsers();
         backfillJobOwners();
+        backfillAlertOwners();
     }
 
     /**
@@ -260,11 +285,41 @@ public class DataInitializer implements CommandLineRunner {
     }
 
     /**
+     * 历史告警归属回填：ownerId 为空且 jobId 可反查到作业的告警，按作业 ownerId 补齐；
+ * 作业也被删除的（jobId 悬空）回填给第一个管理员，保证非 admin 用户与 admin 的可见性一致。
+     */
+    private void backfillAlertOwners() {
+        AppUser admin = userRepo.findByUsername("admin").orElse(null);
+        List<AlertRecord> orphans = alertRepo.findAll().stream()
+                .filter(a -> a.getOwnerId() == null && a.getJobId() != null)
+                .toList();
+        if (orphans.isEmpty()) return;
+        int fixed = 0;
+        for (AlertRecord a : orphans) {
+            Long ownerId = jobRepo.findById(a.getJobId())
+                    .map(JobDefinition::getOwnerId)
+                    .orElseGet(() -> admin == null ? null : admin.getId());
+            if (ownerId == null) continue;
+            a.setOwnerId(ownerId);
+            alertRepo.save(a);
+            fixed++;
+        }
+        if (fixed > 0) log.info("Backfilled owner for {} historical alert records", fixed);
+    }
+
+    /**
      * MySQL 输入/输出控件参数 schema（用户名/密码默认值来自环境变量，避免硬编码密钥）
      */
     private String mysqlParamSchema() {
         // 默认值使用占位符（不预填真实密码），提交时由后端解析为环境变量 MYSQL_USERNAME / MYSQL_PASSWORD
         return "{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\",\"title\":\"JDBC URL\",\"default\":\"jdbc:mysql://localhost:3306/flink_demo?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai\"},\"table\":{\"type\":\"string\",\"title\":\"Table\",\"default\":\"output_table\"},\"username\":{\"type\":\"string\",\"title\":\"User\",\"default\":\"${MYSQL_USERNAME}\"},\"password\":{\"type\":\"string\",\"title\":\"Password\",\"default\":\"${MYSQL_PASSWORD}\"}},\"required\":[\"url\",\"table\",\"username\"]}";
+    }
+
+    /**
+     * 通用 JDBC 输入参数 schema（PostgreSQL / Oracle 共用，默认值来自环境变量占位符）
+     */
+    private String jdbcParamSchema(String defaultUrl, String defaultUser, String passwordEnv, String defaultPassword) {
+        return "{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\",\"title\":\"JDBC URL\",\"default\":\"" + defaultUrl + "\"},\"table\":{\"type\":\"string\",\"title\":\"Table\",\"default\":\"source_table\"},\"username\":{\"type\":\"string\",\"title\":\"User\",\"default\":\"${" + passwordEnv.replace("PASSWORD", "USERNAME") + ":" + defaultUser + "}\"},\"password\":{\"type\":\"string\",\"title\":\"Password\",\"default\":\"${" + passwordEnv + ":" + defaultPassword + "}\"}},\"required\":[\"url\",\"table\"]}";
     }
 
     private void createControl(String type, String name, String category, String description,

@@ -28,7 +28,8 @@ class JobServiceTest {
         translationService = mock(DagTranslationService.class);
         service = new JobService(jobRepo, mock(JobLogRepository.class), mock(JobVersionRepository.class),
                 mock(ControlRegistryService.class), translationService, new ObjectMapper(),
-                mock(ExcelPreprocessor.class), mock(FlinkJobStatusChecker.class), mock(JobDependencyRepository.class));
+                mock(ExcelPreprocessor.class), mock(FlinkJobStatusChecker.class),
+                mock(HealthMonitor.class), mock(JobDependencyRepository.class));
     }
 
     @Test

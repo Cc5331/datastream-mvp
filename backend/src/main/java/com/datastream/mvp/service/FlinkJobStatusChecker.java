@@ -433,7 +433,7 @@ convertExcelOutputsIfNeeded(job);
             if (edges == null || nodes == null || targetNodeId == null) return null;
             Set<String> transformTypes = Set.of(
                     "field_filter", "field_rename", "row_filter", "json_parse", "xml_json", "field_concat",
-                    "dedupe", "validate", "route");
+                    "dedupe", "validate", "route", "redis_lookup");
             // 沿边从输出节点向上收集节点链：输入节点在链尾，transform 依次在前
             List<String> chain = new ArrayList<>();
             String cur = targetNodeId;
@@ -587,6 +587,12 @@ convertExcelOutputsIfNeeded(job);
                 if (nfn.isEmpty()) return fields;
                 List<String> out = new ArrayList<>(fields);
                 if (!out.contains(nfn)) out.add(nfn);
+                return out;
+            } else if ("redis_lookup".equals(type)) {
+                String tfn = params != null && params.has("targetField") ? params.get("targetField").asText().trim() : "extra_info";
+                if (tfn.isEmpty()) return fields;
+                List<String> out = new ArrayList<>(fields);
+                if (!out.contains(tfn)) out.add(tfn);
                 return out;
             }
             // row_filter / xml_json：schema 透传

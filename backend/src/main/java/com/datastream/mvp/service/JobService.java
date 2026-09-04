@@ -42,6 +42,7 @@ public class JobService {
     private final ObjectMapper objectMapper;
     private final ExcelPreprocessor excelPreprocessor;
     private final FlinkJobStatusChecker flinkJobStatusChecker;
+    private final com.datastream.mvp.service.HealthMonitor healthMonitor;
     private final JobDependencyRepository dependencyRepo;
 
     @Value("${app.mysql.default-username:root}")
@@ -165,8 +166,14 @@ public class JobService {
             addLog(id, "INFO", "作业已提交，Flink Job ID: " + flinkJobId);
         } catch (Exception e) {
             job.setStatus(JobDefinition.JobStatus.FAILED);
+            job.setUpdatedAt(LocalDateTime.now());
+            // completedAt 每次失败都刷新：作为故障发生时间供告警去重——
+            // 重复手动重跑同一坏作业时，新 completedAt > 上一条告警 createdAt，天然放行产生新告警
+            job.setCompletedAt(LocalDateTime.now());
             jobRepo.save(job);
             addLog(id, "ERROR", "提交失败: " + e.getMessage());
+            // 事件驱动：提交期失败立即告警，不等轮询/扫描周期
+            healthMonitor.notifyJobFailed(job);
             throw new RuntimeException("Job submission failed: " + e.getMessage(), e);
         }
         return job;

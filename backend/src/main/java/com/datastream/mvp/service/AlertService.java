@@ -50,14 +50,15 @@ public class AlertService {
             .build();
 
     /**
-     * 统一告警入口：记录 + webhook + 邮件。
+     * 统一告警入口：记录 + webhook + 邮件（INFO 级别不发邮件，避免打扰）。
      * @param level INFO / WARN / CRITICAL
-     * @param event 事件类型（JOB_FAILED / ONLINE_JOB_STOPPED / THROUGHPUT_ZERO / ...）
+     * @param event 事件类型（JOB_FAILED / ONLINE_JOB_STOPPED / THROUGHPUT_ZERO / ALERT_RESOLVED / ...）
      */
     public void sendAlert(JobDefinition job, String level, String event, String message) {
+        String lvl = level == null ? "WARN" : level;
         try {
             AlertRecord rec = new AlertRecord();
-            rec.setLevel(level == null ? "WARN" : level);
+            rec.setLevel(lvl);
             rec.setEvent(event);
             rec.setJobId(job == null ? null : job.getId());
             rec.setJobName(job == null ? null : job.getName());
@@ -70,8 +71,54 @@ public class AlertService {
         } catch (Exception e) {
             log.warn("Alert record save failed: {}", e.getMessage());
         }
-        if (job != null) sendWebhook(job, event, message);
-        sendEmail("【数据流平台告警】" + event, message);
+        if (job != null) sendWebhook(job, lvl, event, message);
+        // INFO 级（如恢复通知）不发邮件，只落库 + webhook
+        if (!"INFO".equalsIgnoreCase(lvl)) {
+            sendEmail(buildAlertMailSubject(event, lvl, job), buildAlertMailBody(job, lvl, event, message));
+        }
+    }
+
+    /** 邮件主题：故障类型 + 作业名（系统级告警无作业名） */
+    private String buildAlertMailSubject(String event, String level, JobDefinition job) {
+        String tag = "CRITICAL".equalsIgnoreCase(level) ? "【严重】" : "【警告】";
+        return tag + "数据流平台告警 " + event + (job != null ? " - " + job.getName() : "（系统级）");
+    }
+
+    /**
+     * 邮件正文：故障类型、发生时间、涉及作业 ID + 诊断引导语（对应企业验收要求）。
+     */
+    private String buildAlertMailBody(JobDefinition job, String level, String event, String message) {
+        LocalDateTime now = LocalDateTime.now();
+        StringBuilder sb = new StringBuilder();
+        sb.append("<div style=\"font-family:'Microsoft YaHei',Arial,sans-serif;max-width:640px;\">");
+        sb.append("<h2 style=\"color:#c0392b;margin:0 0 4px;\">").append(event).append(" 告警</h2>");
+        sb.append("<table style=\"border-collapse:collapse;font-size:14px;\">");
+        sb.append(row("级别", level));
+        sb.append(row("故障类型", event));
+        sb.append(row("发生时间", now.toString().replace('T', ' ')));
+        if (job != null) {
+            sb.append(row("作业 ID", "#" + job.getId()));
+            sb.append(row("作业名称", job.getName()));
+            if (job.getFlinkJobId() != null) sb.append(row("Flink Job ID", job.getFlinkJobId()));
+        } else {
+            sb.append(row("范围", "系统级（非具体作业）"));
+        }
+        sb.append(row("详细信息", escape(message)));
+        sb.append("</table>");
+        sb.append("<p style=\"margin-top:12px;padding:10px 14px;background:#fef5e7;border-left:4px solid #e67e22;font-size:13px;\">")
+          .append("🤖 智能诊断报告生成中——请稍后在平台「告警中心」点击该作业的「诊断」查看根因与修复建议。")
+          .append("</p>");
+        sb.append("</div>");
+        return sb.toString();
+    }
+
+    private String row(String k, String v) {
+        return "<tr><td style=\"padding:4px 12px 4px 0;color:#7f8c8d;white-space:nowrap;\">" + k
+                + "</td><td style=\"padding:4px 0;color:#2c3e50;\"><b>" + escape(v == null ? "-" : v) + "</b></td></tr>";
+    }
+
+    private String escape(String s) {
+        return s == null ? "" : s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     /** 仅记录告警（无作业上下文，如系统级事件） */
@@ -79,42 +126,86 @@ public class AlertService {
         sendAlert(null, level, event, message);
     }
 
-    private void sendWebhook(JobDefinition job, String event, String message) {
+    private void sendWebhook(JobDefinition job, String level, String event, String message) {
         String url = job.getWebhookUrl();
         if (url == null || url.isBlank()) return;
+        String target = url.trim();
         try {
-            String target = url.trim();
-            String body = objectMapper.createObjectNode()
-                    .put("event", event)
-                    .put("jobId", job.getId())
-                    .put("jobName", job.getName())
-                    .put("status", job.getStatus() != null ? job.getStatus().name() : "UNKNOWN")
-                    .put("flinkJobId", job.getFlinkJobId())
-                    .put("message", message)
-                    .toString();
+            String body = buildWebhookBody(target, job, level, event, message);
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(target))
                     .timeout(Duration.ofSeconds(10))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();
-            httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
-                    .whenComplete((response, error) -> {
-                        if (error != null) {
-                            saveWebhookLog(job.getId(), "WARN", "Webhook 告警发送失败（event=" + event + "）：" + error.getMessage());
-                            log.warn("Webhook send failed for job {}: {}", job.getId(), error.getMessage());
-                        } else if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                            saveWebhookLog(job.getId(), "WARN", "Webhook 告警发送失败（event=" + event + "，HTTP=" + response.statusCode() + "）");
-                            log.warn("Webhook returned HTTP {} for job {}", response.statusCode(), job.getId());
-                        } else {
-                            saveWebhookLog(job.getId(), "INFO", "Webhook 告警已发送: " + target + "（event=" + event + "）");
-                            log.info("Webhook sent for job {}: {}", job.getId(), target);
-                        }
-                    });
+            sendWebhookWithRetry(job, request, event, target, 0);
         } catch (Exception e) {
             saveWebhookLog(job.getId(), "WARN", "Webhook 告警配置无效（event=" + event + "）：" + e.getMessage());
             log.warn("Webhook send failed for job {}: {}", job.getId(), e.getMessage());
         }
+    }
+
+    /**
+     * 识别 IM 机器人（钉钉/企业微信/飞书）并按其消息格式包装；其余发送原生 JSON。
+     */
+    private String buildWebhookBody(String target, JobDefinition job, String level, String event, String message) {
+        String jobLabel = job.getName() + "（#" + job.getId() + "）";
+        String emoji = "RESOLVED".equals(event) ? "✅" : "CRITICAL".equalsIgnoreCase(level) ? "🔴" : "🟡";
+        String text = emoji + " [" + event + "] " + jobLabel + "\n" + message;
+        if (target.contains("oapi.dingtalk.com")) {
+            return objectMapper.createObjectNode()
+                    .putObject("msgtype").put("text", "").putObject("text").put("content", text)
+                    .toString();
+        }
+        if (target.contains("qyapi.weixin.qq.com")) {
+            return objectMapper.createObjectNode()
+                    .put("msgtype", "text")
+                    .putObject("text")
+                    .put("content", text)
+                    .toString();
+        }
+        if (target.contains("open.feishu.cn")) {
+            return objectMapper.createObjectNode()
+                    .put("msg_type", "text")
+                    .putObject("content")
+                    .put("text", text)
+                    .toString();
+        }
+        // 自定义/原生 webhook：保留结构化字段
+        return objectMapper.createObjectNode()
+                .put("event", event)
+                .put("level", level)
+                .put("jobId", job.getId())
+                .put("jobName", job.getName())
+                .put("status", job.getStatus() != null ? job.getStatus().name() : "UNKNOWN")
+                .put("flinkJobId", job.getFlinkJobId())
+                .put("message", message)
+                .toString();
+    }
+
+    /** Webhook 失败有限重试（最多 2 次重试，指数退避 2s/4s），不阻塞调用线程 */
+    private void sendWebhookWithRetry(JobDefinition job, HttpRequest request, String event, String target, int attempt) {
+        final int maxRetries = 2;
+        httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                .whenComplete((response, error) -> {
+                    boolean failed = error != null || response.statusCode() < 200 || response.statusCode() >= 300;
+                    if (!failed) {
+                        saveWebhookLog(job.getId(), "INFO", "Webhook 告警已发送: " + target + "（event=" + event + "）");
+                        log.info("Webhook sent for job {}: {}", job.getId(), target);
+                        return;
+                    }
+                    String reason = error != null ? error.getMessage() : "HTTP=" + response.statusCode();
+                    if (attempt < maxRetries) {
+                        long backoffMs = 2000L * (1L << attempt);
+                        log.warn("Webhook attempt {} failed for job {} ({}), retrying in {}ms", attempt + 1, job.getId(), reason, backoffMs);
+                        java.util.concurrent.CompletableFuture.delayedExecutor(backoffMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+                                .execute(() -> sendWebhookWithRetry(job, request, event, target, attempt + 1));
+                    } else {
+                        saveWebhookLog(job.getId(), "WARN",
+                                "Webhook 告警发送失败（event=" + event + "，已重试 " + maxRetries + " 次）：" + reason);
+                        log.warn("Webhook gave up after {} retries for job {}: {}", maxRetries, job.getId(), reason);
+                    }
+                });
     }
 
     private void saveWebhookLog(Long jobId, String level, String message) {

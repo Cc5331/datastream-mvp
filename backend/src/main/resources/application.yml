@@ -70,6 +70,9 @@ app:
       host: ${SMTP_HOST:}
       username: ${SMTP_USER:}
       to: ${SMTP_TO:}
+    # 告警保留策略：默认保留 30 天且最多 5000 条（0 = 不限制该项）
+    retention-days: ${APP_ALERT_RETENTION_DAYS:30}
+    retention-max-records: ${APP_ALERT_RETENTION_MAX:5000}
 
   mysql:
     # mysql_input/mysql_output 控件默认用户名与密码（预填 + 预览用），通过环境变量注入，不入库

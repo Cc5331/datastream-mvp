@@ -10,7 +10,9 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 
 @Repository
@@ -54,4 +56,14 @@ public interface AlertRecordRepository extends JpaRepository<AlertRecord, Long> 
     @Transactional
     @Query("delete from AlertRecord a where a.id in :ids and a.ownerId = :ownerId")
     int deleteByIdsAndOwnerId(@Param("ids") Collection<Long> ids, @Param("ownerId") Long ownerId);
+
+    // ===== 保留策略 =====
+    @Modifying
+    @Transactional
+    @Query("delete from AlertRecord a where a.createdAt < :cutoff")
+    int deleteByCreatedAtBefore(@Param("cutoff") java.time.LocalDateTime cutoff);
+
+    /** 按时间升序取最旧的一批 id（用于超出上限时裁剪，保留最新 N 条） */
+    @Query("select a.id from AlertRecord a")
+    List<Long> findAllIdsOrderByCreatedAtAsc(Pageable pageable);
 }
