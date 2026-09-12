@@ -260,7 +260,7 @@ public class HealthMonitor {
 
     /** 规则 3/4/5：运行中作业的吞吐 / 背压 / checkpoint 指标 */
     private void checkLiveMetrics(JobDefinition job, String jid) {
-        OptionalDouble outRate = queryDoubleMetric(jid, "numRecordsOutPerSecond");
+        OptionalDouble outRate = queryJobThroughput(jid);
         if (outRate.isPresent()) {
             if (outRate.getAsDouble() == 0) {
                 long since = zeroThroughputSince.computeIfAbsent(job.getId(), k -> System.currentTimeMillis());
@@ -322,14 +322,61 @@ public class HealthMonitor {
         }
     }
 
-    private OptionalDouble queryDoubleMetric(String jid, String name) {
+    /**
+     * 查询作业吞吐（行/s）。
+     * Flink SQL 的 Source→Sink 融合链上，作业级 numRecordsOutPerSecond 恒为 0/缺失，
+     * 必须取算子（vertex）作用域指标（形如 0.numRecordsOutPerSecond）的最大值。
+     */
+    private OptionalDouble queryJobThroughput(String jid) {
+        OptionalDouble result = queryVertexThroughput(jid);
+        // 兜底：少数场景（如未融合的批作业）作业级通用指标可用
+        return result.isPresent() ? result : queryDoubleMetric(jid, "numRecordsOutPerSecond");
+    }
+
+    /** 遍历全部 vertex，取 numRecordsOutPerSecond 的最大值（各算子指标带数字前缀） */
+    private OptionalDouble queryVertexThroughput(String jid) {
         try {
-            String url = "http://" + flinkHost + ":" + flinkPort + "/jobs/" + jid + "/metrics?get=" + name;
+            JsonNode detail = getJson("/jobs/" + jid);
+            if (detail == null || !detail.has("vertices")) return OptionalDouble.empty();
+            double max = -1;
+            for (JsonNode v : detail.get("vertices")) {
+                String vid = v.has("id") ? v.get("id").asText() : "";
+                if (vid.isEmpty()) continue;
+                JsonNode arr = getJson("/jobs/" + jid + "/vertices/" + vid + "/metrics");
+                if (arr == null || !arr.isArray()) continue;
+                for (JsonNode m : arr) {
+                    String id = m.has("id") ? m.get("id").asText() : "";
+                    if (!id.endsWith("numRecordsOutPerSecond")) continue;
+                    // 指标值为 0/NaN 时 Flink 省略 value 字段，此处按 0 计（正是需要感知的零吞吐场景）
+                    double val = m.hasNonNull("value") ? Double.parseDouble(m.get("value").asText()) : 0;
+                    if (val > max) max = val;
+                }
+            }
+            return max < 0 ? OptionalDouble.empty() : OptionalDouble.of(max);
+        } catch (Exception e) {
+            log.debug("vertex throughput query failed for {}: {}", jid, e.getMessage());
+        }
+        return OptionalDouble.empty();
+    }
+
+    /** 读取 Flink REST 相对路径，返回 JSON 或 null */
+    private JsonNode getJson(String path) {
+        try {
+            String url = "http://" + flinkHost + ":" + flinkPort + path;
             HttpResponse<String> resp = httpClient.send(HttpRequest.newBuilder()
                     .uri(URI.create(url)).timeout(Duration.ofSeconds(5)).GET().build(), HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) return OptionalDouble.empty();
-            JsonNode arr = objectMapper.readTree(resp.body());
-            if (arr.isArray() && arr.size() > 0 && arr.get(0).has("value")) {
+            if (resp.statusCode() != 200) return null;
+            return objectMapper.readTree(resp.body());
+        } catch (Exception e) {
+            log.debug("flink REST {} failed: {}", path, e.getMessage());
+            return null;
+        }
+    }
+
+    private OptionalDouble queryDoubleMetric(String jid, String name) {
+        try {
+            JsonNode arr = getJson("/jobs/" + jid + "/metrics?get=" + name);
+            if (arr != null && arr.isArray() && arr.size() > 0 && arr.get(0).hasNonNull("value")) {
                 return OptionalDouble.of(Double.parseDouble(arr.get(0).get("value").asText()));
             }
         } catch (Exception e) {

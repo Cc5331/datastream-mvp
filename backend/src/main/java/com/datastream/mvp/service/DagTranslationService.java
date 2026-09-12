@@ -46,6 +46,9 @@ public class DagTranslationService {
     @Value("${flink.cluster.host:localhost}")
     private String flinkHost;
 
+    /** 本次提交时刻（毫秒），用于认领新作业时排除归档后重现的旧作业 */
+    private volatile long baselineTime = 0;
+
     @Value("${flink.cluster.port:8081}")
     private int flinkPort;
 
@@ -892,6 +895,8 @@ public class DagTranslationService {
         // Capture job list before submission for downstream job detection
         var initialHc = java.net.http.HttpClient.newHttpClient();
         java.util.Set<String> initialBeforeIds = getCurrentJobIds(initialHc);
+        // 提交时刻下界：只认领此时间之后启动的作业，避免误认领归档后重现的旧作业
+        this.baselineTime = System.currentTimeMillis();
 
         String jobId = trySqlGateway(flinkSql, parallelism);
         if (jobId != null) { log.info("Job via SQL Gateway: {}", jobId); Files.deleteIfExists(tempSqlFile); return jobId; }
@@ -1157,6 +1162,15 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
     }
 
     private String findNewFlinkJob(java.net.http.HttpClient httpClient, java.util.Set<String> beforeIds) {
+        return findNewFlinkJob(httpClient, beforeIds, baselineTime);
+    }
+
+    /**
+     * 认领本次提交产生的新 Flink 作业。
+     * 除「jid 不在提交前基线中」外，还必须满足 start-time 不早于提交时刻：
+     * 历史作业归档后重新出现在 overview 时会带旧 jid，仅靠差集会误认领，导致作业状态被旧 jid 的错误状态覆盖。
+     */
+    private String findNewFlinkJob(java.net.http.HttpClient httpClient, java.util.Set<String> beforeIds, long notBefore) {
         try {
             String jobsResp = httpClient.send(
                 java.net.http.HttpRequest.newBuilder()
@@ -1172,14 +1186,16 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
                 for (int i = 0; i < jobs.size(); i++) {
                     JsonNode j = jobs.get(i);
                     String jid = j.get("jid").asText();
-                    if (!beforeIds.contains(jid)) {
-                        String state = j.has("state") ? j.get("state").asText() : "";
-                          // Accept any state (including FAILED)
-                          long startTime = j.has("start-time") ? j.get("start-time").asLong() : 0;
-                        if (startTime > bestTime) {
-                            bestTime = startTime;
-                            bestJid = jid;
-                        }
+                    if (beforeIds.contains(jid)) continue;
+                    long startTime = j.has("start-time") ? j.get("start-time").asLong() : 0;
+                    // 容差 3s：作业可能在基线采集前的一瞬间已启动
+                    if (notBefore > 0 && startTime < notBefore - 3000) {
+                        log.debug("Skip stale Flink job {} (startTime={} < notBefore={})", jid, startTime, notBefore);
+                        continue;
+                    }
+                    if (startTime > bestTime) {
+                        bestTime = startTime;
+                        bestJid = jid;
                     }
                 }
                 if (bestJid != null) {

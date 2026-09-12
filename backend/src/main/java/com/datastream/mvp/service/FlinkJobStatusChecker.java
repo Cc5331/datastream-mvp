@@ -63,6 +63,9 @@ public class FlinkJobStatusChecker {
     @Value("${app.oracle.default-password:}")
     private String defaultOraclePassword;
 
+    /** mock 占位 ID 认领真实作业的最大时间差：超过则认为不是本次提交产生的作业 */
+    private static final long MOCK_RESOLVE_MAX_DIFF_MS = 5 * 60 * 1000L;
+
     private static final Map<String, JobStatus> FLINK_TO_LOCAL_STATUS = new java.util.HashMap<>() {{
         put("CREATED", JobStatus.SUBMITTED);
         put("INITIALIZING", JobStatus.RUNNING);
@@ -136,11 +139,16 @@ public class FlinkJobStatusChecker {
                             bestJid = entry.getKey();
                         }
                     }
-                    if (bestJid != null) {
+                    // 仅在时间足够接近时才认领；否则会误把十分钟前的历史作业当成本次提交的作业，
+                    // 导致作业状态被旧作业的错误状态覆盖（如被误判为 CANCELLED）
+                    if (bestJid != null && bestDiff <= MOCK_RESOLVE_MAX_DIFF_MS) {
                         log.info("Resolved mock Flink job ID {} -> real Flink job ID {} (diff={}ms)", job.getId(), bestJid, bestDiff);
                         job.setFlinkJobId(bestJid);
                         flinkJobId = bestJid;
                         jobRepo.save(job);
+                    } else if (bestJid != null) {
+                        log.warn("Skip mock ID resolution for job {}: nearest Flink job {} diff={}ms exceeds {}ms window",
+                                job.getId(), bestJid, bestDiff, MOCK_RESOLVE_MAX_DIFF_MS);
                     }
                 }
 
