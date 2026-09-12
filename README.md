@@ -1,4 +1,4 @@
-﻿# 数据流任务管理系统（DataStream MVP）
+# 数据流任务管理系统（DataStream MVP）
 
 > 基于 **Spring Boot 3.2 + Apache Flink 1.18 + Vue 3 + AntV X6** 的可视化数据流任务编排平台：在画布上拖拽控件搭建 DAG，一键翻译为 Flink 作业并提交 Standalone 集群运行，结果输出到文件或 MySQL。
 
@@ -14,7 +14,7 @@ flowchart LR
         C["JobService<br/>保存 / 提交 / 复制 / 调度"]
         D["DagTranslationService<br/>DAG JSON → Flink SQL"]
         E["提交三路降级<br/>SQL Client / SQL Gateway / Flink REST"]
-        F["FlinkJobStatusChecker<br/>每 15s 轮询回写状态与日志"]
+        F["FlinkJobStatusChecker<br/>每 5s 轮询回写状态与日志"]
         G["输出后处理<br/>part 合并 / Excel / XML / Parquet"]
     end
     subgraph FL["Flink Standalone 集群（端口 8081 / 8083）"]
@@ -38,7 +38,7 @@ flowchart LR
 
 - **可视化画布**：AntV X6 拖拽建节点、端口连线、点选配置参数、Delete 键 / 双击删除、保存 / 提交 / 导出 / 导入 JSON、新建画布、清空画布、Ctrl+S 保存。
 - **29 个内置控件**：CSV / Excel / JSON / XML / Parquet / HDFS / MySQL / PostgreSQL / Oracle / Kafka / Datagen 输入输出 + Redis 富化、字段拼接、字段过滤、字段改名、行过滤、JSON 解析、XML↔JSON 转换和数据质量控件。
-- **作业管理**：状态机 DRAFT → SUBMITTED → RUNNING → COMPLETED / FAILED / CANCELLED，Flink 状态每 15s 轮询回写，日志落库可查。
+- **作业管理**：状态机 DRAFT → SUBMITTED → RUNNING → COMPLETED / FAILED / CANCELLED（依赖编排另有 WAITING / BLOCKED），Flink 状态每 5s 轮询回写（`app.monitor.status-poll-ms` 可配），日志落库可查。
 - **作业复制 / 定时调度**：一键复制作业（名称追加「（副本）」，状态重置 DRAFT）；作业可配置 cron 表达式定时自动提交（JobScheduler 每 30s 扫描，运行中不重复提交）。
 - **动态参数面板**：按控件 paramSchema 自动渲染 string / number / boolean / enum / array 类型参数。
 - **实时监控面板**：运行中作业每 5s 自动刷新，展示吞吐（行/s）、背压（ok/low/high）、Checkpoint 状态与运行时长（聚合 Flink REST 指标）。
@@ -48,7 +48,7 @@ flowchart LR
 - **已实测链路**：CSV → CSV / Excel / MySQL；Excel → CSV / MySQL；Datagen → CSV / Excel；JSON → JSON；CSV → JSON（字段过滤 / 改名 / 行过滤 / JSON 解析）；CSV → Kafka → CSV；MySQL → CSV；CSV → xml_json → CSV（XML↔JSON 字段级转换，需 UDF jar）；Parquet → CSV / CSV → Parquet（类型自动推断）；多 Sheet Excel 输出（同一 xlsx 多个 sheet）；去重 / 空值校验 / 条件路由（一条流分流到两个输出）。
 - **性能基准**：`test-resources/benchmark.py` 真实提交 Flink 作业产出报告（见「性能基准测试」章节）。
 - **AI 助手（NL2Pipeline Agent）**：输入自然语言需求（如「读取 sales.csv，把 product_category 和 channel 拼接成新列，写出到 MySQL 表 ai_demo」），DeepSeek 依据控件注册表摘要生成可执行 DAG（仅使用合法控件类型与参数），落库为 DRAFT 作业，人工确认后可打开画布微调并提交运行。
-- **告警中心（故障感知）**：每 30s 自动扫描作业失败 / 在线重启超限 / 吞吐归零 / 高背压 / Checkpoint 失败，15 分钟去重后落库展示，支持邮件 + webhook 通知，前端带未读角标与已读管理。
+- **告警中心（故障感知）**：每 10s 自动扫描作业失败 / 在线重启超限 / 吞吐归零 / 高背压 / Checkpoint 失败 / 资源超阈值（`app.monitor.health-scan-ms` 可配），15 分钟去重后落库展示，支持邮件 + webhook 通知与恢复闭环，前端带未读角标与已读管理。
 - **智能诊断 Agent**：对失败作业一键诊断——本地规则引擎先命中 8 类高频错误（文件不存在、路径乱码、字段配置缺失、Kafka 不可用等），未命中自动调用 DeepSeek 归因，返回根因 / 关键证据 / 修复建议，部分参数可一键修正。
 
 ## 二、快速启动
@@ -59,22 +59,23 @@ flowchart LR
 
 ```bat
 D:\code\flink-1.18.1\bin\start-cluster.bat
-start_sql_gw.bat     :: SQL Gateway（端口 8083，可选）
+start_sql_gw.bat     :: SQL Gateway（可选）
 ```
 
-验证：浏览器打开 http://localhost:8081 能看到 Flink Web UI。
+验证：浏览器打开 http://localhost:18081 能看到 Flink Web UI（本机 `flink-conf.yaml` 里 rest.port=18081、SQL Gateway 18083）。
 
-> 注意：Flink 未启动时，作业提交走 mock 模式，状态会显示 COMPLETED，但不会真正执行。
+> 注意：Flink 未启动时作业提交走 mock，作业会**停在 SUBMITTED**，不会真正执行也不会自动完成。
+> 手工起后端时要让端口对齐：`FLINK_CLUSTER_PORT=18081`、`FLINK_SQL_GATEWAY_PORT=18083`（`start-all.bat` 已自动注入）。
 
 #### 2. 启动后端
 
 ```bat
 cd backend
-mvn spring-boot:run
+mvn spring-boot:run -Dspring-boot.run.jvmArguments="-DFLINK_CLUSTER_PORT=18081 -DFLINK_SQL_GATEWAY_PORT=18083"
 ```
 
-- 后端地址：http://localhost:8080
-- 元数据库（默认 H2）：http://localhost:8080/h2-console ，JDBC URL `jdbc:h2:file:./data/mvpdb`，用户名 `sa`，密码留空
+- 后端地址：http://localhost:8080（`start-all.bat` 一键启动时使用 18080）
+- 元数据库（默认 H2）：H2 Web 控制台**默认关闭**；需要时用 `H2_CONSOLE_ENABLED=true` 启动，再以 ADMIN 账号访问 http://localhost:8080/h2-console （JDBC URL `jdbc:h2:file:./data/mvpdb`，用户名 `sa`，密码留空）
 - 启动时自动初始化 29 个内置控件
 - 首次空库启动前必须在 `.env` 配置 `JWT_SECRET`、启用 `BOOTSTRAP_USERS_ENABLED`，并设置三个角色的初始密码；已有用户库不会重复创建账号
 
@@ -85,13 +86,16 @@ cd frontend
 npm run dev        :: 等价于 node serve.js
 ```
 
-- 前端地址：http://localhost:3000 （serve.js 提供静态服务并反向代理 /api 到 8080）
+- 前端地址：http://localhost:3000 （serve.js 提供静态服务并反向代理 /api 到后端，端口用 `BACKEND_PORT` 指定，默认 8080）
 
 ### 方式二：一键脚本
 
 ```bat
 start-all.bat
 ```
+
+> `start-all.bat` 幂等（按端口探活跳过已在跑的服务），依次拉起 Kafka → Flink(JM 18081/TM) → SQL Gateway(18083) → 后端(18080) → 前端(3000)。
+> 它**只启动已编译好的 `backend/target/mvp-backend-1.0.0.jar`，不会自动编译**；改过后端代码要先 `cd backend && mvn -DskipTests package`。
 
 > `start-all.bat` 已改为基于脚本自身路径（`%~dp0`）定位后端/前端，不再依赖硬编码中文路径；首次使用前请确认 `FLINK_HOME`（默认 `D:\\code\\flink-1.18.1`）。
 
@@ -116,7 +120,7 @@ docker compose ps       :: 查看状态，全部应为 healthy
 6. （可选）点选输入节点，点右侧参数面板「📊 预览数据」，弹窗查看 CSV / Excel / JSON / XML / TXT 前 10 行，确认数据与字段后再提交。
 7. 点击「保存」，再点击「提交运行」。
 8. 到 http://localhost:8081 查看 Flink Job 运行状态；到项目根目录 `output/` 查看输出文件。
-9. 使用 MySQL 输出控件时，提交成功后在 `dataflow` 库中查看自动创建的表。
+9. 使用 MySQL 输出控件时，提交成功后在控件配置的库中查看自动创建的表（控件默认库为 `flink_demo`，Docker 编排另建 `datastream`）。
 
 ## 四、内置控件（29 个）
 
@@ -350,7 +354,7 @@ public class RedisLookupPlugin implements DataStreamPlugin {
 | JDK | 17 |
 | Spring Boot | 3.2.5（web / data-jpa / validation） |
 | 元数据库 | H2 file（默认）/ MySQL（profile 切换） |
-| Apache Flink | 1.18.1 Standalone（JobManager 8081 / SQL Gateway 8083） |
+| Apache Flink | 1.18.1 Standalone（本机 JobManager 18081 / SQL Gateway 18083；Docker 容器内 8081 / 8083） |
 | 前端 | Vue 3 + Element Plus 2.9.1 + AntV X6 3.1.7 + axios |
 | 其他 | Lombok、Jackson、Apache Commons CSV、Apache POI（Excel） |
 
@@ -362,7 +366,7 @@ public class RedisLookupPlugin implements DataStreamPlugin {
 python test-resources/benchmark.py
 ```
 
-前置条件：后端 8080、Flink 8081 已启动（psutil 未安装时资源列显示 `-`，不影响结果）。
+前置条件：后端已启动（手工 8080 / `start-all.bat` 为 18080）、Flink Web UI 可访问（18081）（psutil 未安装时资源列显示 `-`，不影响结果）。
 
 实测结果（2026-08-05，32 vCPU / 16G RAM，CSV 透传）：
 
@@ -378,7 +382,7 @@ python test-resources/benchmark.py
 平台内置三条 AI 能力，全部以「AI 生成/建议 + 人工确认」为原则，不绕过既有审核与上线机制：
 
 1. **NL2Pipeline Agent**：前端「AI 助手」页输入自然语言需求 → DeepSeek 依据控件注册表摘要与参数 Schema 生成合法 DAG → 落库为 DRAFT 作业 → 人工「打开画布编辑」微调后提交。
-2. **故障感知告警中心**：`HealthMonitor` 每 30s 扫描（作业失败 / 在线重启超限 / 吞吐归零 / 高背压 / Checkpoint 失败），15 分钟去重后写入 `alert_record`，前端「告警中心」展示；命中时同步触发 webhook 与邮件通知。
+2. **故障感知告警中心**：`HealthMonitor` 每 10s 扫描（作业失败 / 在线重启超限 / 吞吐归零 / 高背压 / Checkpoint 失败 / 资源超阈值），15 分钟去重后写入 `alert_record`，前端「告警中心」展示；命中时同步触发 webhook 与邮件通知，恢复正常后发送 ALERT_RESOLVED 闭环。
 3. **智能诊断 Agent**：作业列表点「🤖 诊断」→ 本地规则引擎先覆盖 8 类高频错误（秒级返回），未命中时调用 DeepSeek 结合作业配置与最近日志归因，返回 `rootCause / evidence / suggestions / paramFixes`，支持一键修正后重跑。
 
 ### 配置（.env，密钥不入库、不提交仓库）
@@ -387,7 +391,11 @@ python test-resources/benchmark.py
 |------|------|
 | DEEPSEEK_API_KEY | DeepSeek API Key（必填，未配置时 AI 接口返回明确错误） |
 | DEEPSEEK_BASE_URL | 默认 `https://api.deepseek.com` |
-| DEEPSEEK_MODEL | 默认 `deepseek-chat` |
+| DEEPSEEK_MODEL | 覆盖 `application.yml` 的默认模型（默认 `deepseek-v4-flash`）；前端「AI 服务商」里只能选 `AI_ALLOWED_MODELS` 白名单内的模型 |
+| AI_CONFIG_ENCRYPTION_KEY | AI 服务商 API Key 落盘加密密钥；不配置时自动使用 `backend/data/.ai_config_key` 本机密钥文件（二者都不进仓库） |
+| AI_LEGACY_ENCRYPTION_KEY | 可选，一次性迁移用：解密旧密钥加密的历史配置，解密后自动用新密钥重新加密落盘 |
+| H2_CONSOLE_ENABLED | 默认 `false`；置 `true` 才开启 H2 Web 控制台，且仅 ADMIN 可访问 |
+| CORS_ALLOWED_ORIGINS | 允许跨域访问 /api 的来源白名单，默认 `http://localhost:3000,http://127.0.0.1:3000` |
 | SMTP_HOST / SMTP_PORT | 邮件服务器，默认 `smtp.qq.com:465`（SSL） |
 | SMTP_USER / SMTP_PASSWORD | 发件邮箱与 SMTP 授权码（QQ 邮箱需开启 SMTP 服务） |
 | SMTP_TO | 告警收件邮箱（可多个，逗号分隔） |
@@ -397,7 +405,8 @@ python test-resources/benchmark.py
 ## 十一、相关文档
 
 - `DEVELOPMENT.md`：开发维护指南（逻辑框架 / 扩展规范 / 红线 / 回归清单）
-- `docs/`：详细设计文档
+- `AGENTS.md`：AI 助手工作区指令（动代码前先读 DEVELOPMENT.md）
+- `docs/`：目前为空目录（原计划的设计文档内容已并入 `DEVELOPMENT.md`）
 - `test-resources/benchmark.py`：性能基准测试脚本
 
 ---

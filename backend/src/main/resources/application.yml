@@ -19,7 +19,9 @@ spring:
     password:
   h2:
     console:
-      enabled: true
+      # 默认关闭 H2 Web 控制台（它可直连元数据库读写用户表/AI 配置）；
+      # 仅本机排障时用 H2_CONSOLE_ENABLED=true 临时开启，且开启后仍需 ADMIN 角色登录（见 SecurityConfig）
+      enabled: ${H2_CONSOLE_ENABLED:false}
   jpa:
     hibernate:
       ddl-auto: update
@@ -62,6 +64,8 @@ app:
     admin-password: ${ADMIN_PASSWORD:}
     operator-password: ${OPERATOR_PASSWORD:}
     viewer-password: ${VIEWER_PASSWORD:}
+    # 允许跨域访问 /api 的来源白名单（逗号分隔）；写 * 时不携带凭据，仅用于临时排障
+    cors-allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://127.0.0.1:3000}
   hadoop-home: ${HADOOP_HOME:D:\\code\\hadoop}
   ai:
     provider: ${AI_PROVIDER:openai}

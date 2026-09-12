@@ -218,7 +218,8 @@ public class HealthMonitor {
                 if (watermark != null && l.getTimestamp().isAfter(watermark)
                         && shouldAlert(job.getId(), "LOG_ERROR", null)) {
                     String msg = l.getMessage() == null ? "" : l.getMessage();
-                    if (msg.contains("Exception") || msg.contains("ERROR") || msg.length() > 0) {
+                    // 查询已按 level=ERROR 过滤，这里只保证告警正文非空（原条件 ... || msg.length() > 0 恒真，属笔误）
+                    if (!msg.isBlank()) {
                         if (msg.length() > 300) msg = msg.substring(0, 300);
                         alertService.sendAlert(job, "WARN", "LOG_ERROR", "运行中作业日志出现异常关键字：" + msg);
                         markAlerted(job.getId(), "LOG_ERROR");

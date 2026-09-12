@@ -81,3 +81,28 @@ test('告警中心支持批量标记已读与批量删除', () => {
   // 刷新按钮必须显式 loadAlerts()，避免 Vue 把点击事件当 page 参数传入（page=NaN → 500）
   assert.match(html, /@click="loadAlerts\(\)" *>刷新/);
 });
+
+test('内置控件降级副本与后端注册表保持一致', () => {
+  // 红线：DataInitializer 与 getBuiltinControls 必须同步，否则后端不可用时画布缺控件
+  const backendSrc = fs.readFileSync(
+    path.resolve(root, '..', 'backend/src/main/java/com/datastream/mvp/config/DataInitializer.java'), 'utf8');
+  const backendTypes = [...backendSrc.matchAll(/createControl\("([a-z0-9_]+)"/g)].map(m => m[1]).sort();
+
+  const block = appJs.slice(appJs.indexOf('function getBuiltinControls()'));
+  const arrayLiteral = block.match(/return\s*\[([\s\S]*?)\n\s*\];/);
+  assert.ok(arrayLiteral, 'getBuiltinControls 应返回控件数组');
+  const feControls = vm.runInNewContext('[' + arrayLiteral[1] + ']');
+
+  assert.equal(feControls.length, 29, '内置控件降级副本数量应与后端一致');
+  assert.equal(feControls.filter(c => !c).length, 0, '控件数组不能有空元素');
+  // Array.from 归一到当前 realm，避免 vm 跨 realm 原型导致的 deepEqual 误报
+  const feTypes = Array.from(feControls, c => c && c.type).sort();
+
+  assert.deepEqual(feTypes, backendTypes, '前后端控件类型必须一一对应');
+
+  for (const c of Array.from(feControls)) {
+    assert.doesNotThrow(() => JSON.parse(c.paramSchema), `控件 ${c.type} 的 paramSchema 必须是合法 JSON`);
+    assert.ok(c.name && c.category, `控件 ${c.type} 缺少 name/category`);
+  }
+});
+

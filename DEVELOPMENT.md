@@ -33,12 +33,14 @@
   - JSON → JSON（JSON Lines 读写 + part 合并单文件）
   - CSV → JSON（field_filter / field_rename / row_filter / json_parse 转换链路）
   - CSV → Kafka → CSV（Docker Kafka 3.8 实测：生产者写 3000 条 JSON 消息，消费者读回写 CSV，中文正常）
-- **作业管理**：状态机 DRAFT → SUBMITTED → RUNNING → COMPLETED / FAILED / CANCELLED；Flink 状态每 15s 轮询回写；日志落库可查；一键复制作业（名称追加「（副本）」）；按 cron 定时自动提交（JobScheduler 每 30s 扫描，运行中不重复提交）；上线/下线生命周期——上线后流式作业后台持续运行、异常 10 分钟窗口内自动重启最多 3 次，批量作业按 cron 周期重跑，Flink 不可用禁止上线。
+- **作业管理**：状态机 DRAFT → SUBMITTED → RUNNING → COMPLETED / FAILED / CANCELLED（另有 WAITING/BLOCKED 用于依赖编排）；Flink 状态每 **5s** 轮询回写；日志落库可查；一键复制作业（名称追加「（副本）」）；按 cron 定时自动提交（JobScheduler 每 30s 扫描，运行中不重复提交）；上线/下线生命周期——上线后流式作业后台持续运行、异常 10 分钟窗口内自动重启最多 3 次，批量作业按 cron 周期重跑，Flink 不可用禁止上线。
 - **参数面板**：按控件 paramSchema 动态渲染（string / number / boolean / enum / array）。
+- **企业能力（2026-08/09 迭代）**：JWT + RBAC（ADMIN/OPERATOR/VIEWER，含 owner 隔离）+ 操作审计 + 用户管理 CRUD；作业版本历史与回滚；作业依赖编排（环检测、上游完成自动触发）与工作流图；数据血缘；实时监控面板（吞吐趋势 / 背压 / checkpoint / 历史卡片兜底）；Kafka 可视化（SSE 实时消息流）；故障感知告警中心（10s 扫描 + DB 去重 + 恢复闭环 + webhook/邮件）；AI 层（NL2Pipeline 自然语言建作业、智能诊断规则引擎 + LLM 归因、草稿人工确认）；数据预览。
 
 ### 1.3 未实现 / TODO（后续完善方向）
-- 控件插件热加载（plugin 包）：只有骨架，MVP 实际使用内置注册表。
-- 性能基准测试脚本已改造为真实提交 Flink 作业并产出报告（test-results/benchmark_report.md），暂未纳入 CI。
+- 控件插件热加载：PluginLoaderService 已能扫描 `backend/plugins` 注册外部插件，但 MVP 仍以内置注册表为准，尚未做插件的端到端验证与 UI 管理。
+- 性能基准脚本已能真实提交 Flink 作业并产出报告（test-results/benchmark_report.md），但未纳入 CI。
+- 测试空白区：FlinkJobStatusChecker、MysqlTableCreator、Kafka/Parquet/HDFS 链路、调度与用户隔离（详见第 10 节）。
 
 ---
 
@@ -48,43 +50,57 @@
 |---|---|
 | JDK | 17 |
 | Spring Boot | 3.2.5（web / data-jpa / validation） |
-| 元数据库 | H2 file：backend/data/mvpdb（application.yml）；可切 MySQL（application-mysql.yml） |
-| 业务 MySQL | 本机 localhost:3306，库 dataflow（账号/密码见 `.env`：`MYSQL_USERNAME`/`MYSQL_PASSWORD`）；Docker 版映射 3307 |
-| Flink | 1.18.1 Standalone：JobManager 8081、SQL Gateway 8083、sql-client |
-| 前端 | Vue 3（unpkg 全局版）+ Element Plus 2.9.1 + AntV X6 3.1.7 + axios；serve.js 静态服务并反代 /api |
-| 其他 | Lombok、Jackson、Apache Commons CSV、Apache POI（Excel）、java.net.http（调 Flink REST） |
+| 元数据库 | H2 file：backend/data/mvpdb（application.yml，默认）；可切 MySQL（application-mysql.yml，库 mvp_backend）。**H2 Web 控制台默认关闭**（`H2_CONSOLE_ENABLED=true` 才开，且仅 ADMIN 可访问） |
+| 业务 MySQL | 本机 localhost:3306；控件默认 JDBC 库为 `flink_demo`（DataInitializer），docker-compose 另建 `datastream`；账号/密码见 `.env`（`MYSQL_USERNAME`/`MYSQL_PASSWORD`）；Docker 版映射 3307 |
+| Flink | 1.18.1 Standalone。本机 `D:\code\flink-1.18.1\conf\flink-conf.yaml` 写的是 **JobManager 18081 / SQL Gateway 18083**（start-all.bat 同步注入 `FLINK_CLUSTER_PORT`/`FLINK_SQL_GATEWAY_PORT`）；application.yml 默认值仍是 8081/8083，手工起后端时必须显式覆盖端口，否则连不上集群 |
+| 前端 | Vue 3 + Element Plus 2.9.1 + AntV X6 3.1.8 + ECharts 5.5.1 + axios，**全部本地化在 frontend/public/vendor（无 CDN 依赖）**；serve.js 静态服务并反代 /api |
+| 其他 | Lombok、Jackson、Apache Commons CSV、Apache POI（Excel）、OSHI 6.4.13（资源监控）、JJWT 0.12.5（JWT）、Hadoop 3.3.6 + parquet-hadoop 1.13.1、PostgreSQL 42.7.3 / Oracle ojdbc11、Jedis + Caffeine（UDF）、java.net.http（调 Flink REST） |
 
 ---
 
 ## 3. 目录结构（当前实际）
 
     D:\code\比赛\2026省服务外包
-    ├── backend/                        # Spring Boot 后端
+    ├── AGENTS.md                       # 工作区指令（AI 助手自动加载：动代码前先读本文件）
+    ├── pom.xml                         # 根聚合 POM（plugin-sdk / plugin-example / backend / udf）
+    ├── backend/                        # Spring Boot 后端（103 个 Java 文件 / 约 12.4k 行）
+    │   ├── plugin-sdk/                 # 控件插件 SPI（DataStreamPlugin，无第三方依赖）
+    │   ├── plugin-example/             # 插件示例（redis-connector，走 META-INF/services）
     │   ├── src/main/java/com/datastream/mvp/
     │   │   ├── MvpBackendApplication.java
-    │   │   ├── config/                 # DataInitializer(控件种子) / GlobalExceptionHandler / WebConfig
-    │   │   ├── controller/             # JobController / ControlRegistryController
+    │   │   ├── ai/                     # LlmClient(多服务商/加密落盘) / AgentService(NL2Pipeline + 诊断)
+    │   │   ├── audit/                  # @Audit 注解 + AuditAspect(audit_log 落库)
+    │   │   ├── config/                 # DataInitializer(控件种子 29 个) / SecurityConfig / WebConfig / GlobalExceptionHandler / HadoopHomeConfig
+    │   │   ├── controller/             # 11 个：Job/Auth/User/Ai/Alert/Audit/Monitor/Lineage/ControlRegistry/KafkaMonitor/Preview
     │   │   ├── dag/                    # DagDefinition(DAG模型) / DagExecutor / FlinkDagExecutor / LocalDagExecutor
-    │   │   ├── model/                  # JobDefinition / ControlRegistry / JobLog
-    │   │   ├── plugin/                 # 控件插件 SPI（骨架，未启用）
-    │   │   ├── repository/             # JPA Repository × 3
-    │   │   └── service/                # JobService / DagTranslationService / MysqlTableCreator / ExcelPreprocessor / ExcelOutputConverter / FlinkJobStatusChecker / ControlRegistryService
-    │   ├── src/main/resources/         # application.yml / application-mysql.yml / application-linux.yml
-    │   └── data/mvpdb.mv.db            # H2 元数据库文件（运行时生成）
+    │   │   ├── model/                  # 11 个实体：JobDefinition / ControlRegistry / JobLog / JobVersion / JobDependency / AppUser / AuditLog / AlertRecord / DiagnosisReport / ScheduleHistory / TrendPoint
+    │   │   ├── plugin/                 # 控件插件 SPI + PluginLoaderService（已启用，扫 backend/plugins）
+    │   │   ├── repository/             # JPA Repository × 11
+    │   │   ├── security/               # JwtUtil / JwtAuthFilter / CurrentUser / SecurityUtils
+    │   │   ├── service/                # 27 个，核心见 6.1
+    │   │   └── util/                   # JdbcUrlUtil / ManagedFiles / MysqlIdentifier / LanguageDetector
+    │   ├── src/main/resources/         # application.yml / application-mysql.yml / application-linux.yml + ai-prompts/(中英提示词模板)
+    │   ├── src/test/java/              # 18 个测试类 / 71 个用例
+    │   └── data/                       # H2 元数据库 mvpdb.mv.db + ai_providers.json + .ai_config_key（本机密钥，均已被 .gitignore 覆盖）
     ├── frontend/
-    │   ├── serve.js                    # 静态服务 + /api 反代（无缓存头）
-    │   ├── package.json
+    │   ├── serve.js                    # 静态服务 + /api 反代（无缓存头，路径穿越防护）
+    │   ├── test/app.test.js            # 前端 9 个用例（含控件注册表前后端一致性校验）
     │   └── public/
-    │       ├── index.html              # 主页面（三个视图 + 帮助 + 日志弹窗）
+    │       ├── index.html              # 单页应用（10 个视图）
     │       ├── css/style.css
-    │       └── js/app.js               # 全部前端逻辑（Vue3 + X6）
+    │       ├── js/app.js               # 全部前端逻辑（2451 行，Vue3 + X6）
+    │       └── vendor/                 # Vue/ElementPlus/X6/ECharts 本地化依赖
     ├── flink-1.18.1/                   # Flink 发行版副本（本机运行时用 D:\code\flink-1.18.1）
-    ├── udf/                            # UDF jar 工程（XmlToJson / JsonToXml 等）
+    ├── udf/                            # UDF jar 工程（XmlToJson / JsonToXml / RedisLookup）
     ├── scripts/                        # init_mysql.sql / test-mysql-flow.ps1
-    ├── docker/                         # Docker 化相关（flink 镜像等）
+    ├── docker/                         # Dockerfile（flink 镜像、prepare-flink-jars.bat 等）
     ├── docker-compose.yml              # 全容器化编排（MySQL:3307 / Kafka / Flink / 后端 / 前端）
-    ├── output/                         # 作业输出目录（CSV/Excel 等）
-    ├── test-resources/                 # 测试数据（sales.csv / sample_data.xlsx）与基准脚本
+    ├── data/                           # 本机业务库初始化脚本与样例数据（mysql_setup.sql / sales.csv）
+    ├── ai_sidecar/                     # 早期 Python(FastAPI+Ollama) 试验侧车：**当前架构未使用**，保留参考
+    ├── output/                         # 作业输出目录（CSV/Excel 等，gitignore）
+    ├── test-resources/                 # 测试数据（sales.csv / sample_data.xlsx / large 大数据集）与基准脚本
+    ├── test-results/                   # 性能基准报告产物
+    ├── docs/                           # 目前为空目录（README 中原「详细设计文档」已并入本文件）
     ├── start-all.bat / start-docker.bat / stop-docker.bat / start_sql_gw.bat
     ├── deploy-linux.sh / stop-linux.sh
     └── README.md                       # 用户向 README
@@ -93,43 +109,59 @@
 
 ## 4. 启动 / 停止 / 验证命令（Windows 本机，当前实际）
 
-### 4.1 端口一览
+### 4.1 端口一览（2026-09-11 实测）
 | 服务 | 端口 |
 |---|---|
 | 前端 | 3000 |
-| 后端 | 8080（H2 console：http://localhost:8080/h2-console，JDBC jdbc:h2:file:./data/mvpdb，user sa，空密码） |
-| Flink JobManager（Web UI） | 8081 |
-| Flink SQL Gateway | 8083 |
+| 后端 | **start-all.bat 用 18080**（`set SERVER_PORT=18080`）；直接 `mvn spring-boot:run` 用 application.yml 默认 8080 |
+| H2 console | 默认 **关闭**；需要时 `H2_CONSOLE_ENABLED=true` 启动，再以 ADMIN 登录后访问 /h2-console（JDBC jdbc:h2:file:./data/mvpdb，user sa，空密码） |
+| Flink JobManager（Web UI） | 本机 **18081**（flink-conf.yaml rest.port）；Docker 容器内 8081 → 宿主 18081 |
+| Flink SQL Gateway | 本机 **18083**；Docker 容器内 8083 → 宿主 18083 |
 | MySQL | 3306（Docker 版 3307） |
+| Kafka | 29092（docker compose 单节点） |
+
+> 本机 Flink 用的是 18081/18083（8083 曾被系统进程占用），因此**手工**起后端时务必带
+> `-DFLINK_CLUSTER_PORT=18081 -DFLINK_SQL_GATEWAY_PORT=18083`（或对应环境变量），否则提交会走 mock。
 
 ### 4.2 启动
-    # 1) 后端（在 backend 目录，日志重定向到 backend_h2.log）
+    # 0) 一键启动（推荐，幂等：按 netstat 探活跳过已在跑的服务）
+    start-all.bat            # Kafka → Flink(JM 18081/TM) → SQL Gateway 18083 → 后端 18080 → 前端 3000
+    #    注意：它只启动已编译好的 backend\target\mvp-backend-1.0.0.jar，不自动编译；
+    #    改了后端代码要先 cd backend && mvn -DskipTests package
+
+    # 1) 后端（手工方式：在 backend 目录，端口与 Flink 端口都要对齐）
     cd D:\code\比赛\2026省服务外包\backend
-    mvn spring-boot:run
+    mvn spring-boot:run -Dspring-boot.run.jvmArguments="-DFLINK_CLUSTER_PORT=18081 -DFLINK_SQL_GATEWAY_PORT=18083"
 
     # 2) 前端（在 frontend 目录）
     cd D:\code\比赛\2026省服务外包\frontend
     node serve.js
 
-    # 3) Flink Standalone 集群（FLINK_HOME 在本机为 D:\code\flink-1.18.1）
+    # 3) Flink Standalone 集群（FLINK_HOME 在本机为 D:\code\flink-1.18.1，conf 里 rest.port=18081）
     D:\code\flink-1.18.1\bin\start-cluster.bat
 
-    # 4) Flink SQL Gateway（可选，翻译层会自动探测）
-    java -cp "D:\code\flink-1.18.1\lib\*" org.apache.flink.table.gateway.SqlGateway -D sql-gateway.endpoint.rest.port=8083
+    # 4) Flink SQL Gateway（可选；本机端口与 flink-conf 一致为 18083，start_sql_gw.bat 等价）
+    start_sql_gw.bat
+    # 等价命令：
+    java -cp "D:\code\flink-1.18.1\lib\*" org.apache.flink.table.gateway.SqlGateway -Dsql-gateway.endpoint.rest.port=18083 -Drest.address=localhost -Drest.port=18081
 
 ### 4.3 停止
-    # 按端口找 PID 再杀
-    Get-NetTCPConnection -LocalPort 3000,8080,8081,8083 -State Listen | Select-Object LocalPort,OwningProcess
+    # 按端口找 PID 再杀（start-all.bat 起的服务端口是 3000,18080,18081,18083）
+    Get-NetTCPConnection -LocalPort 3000,18080,18081,18083 -State Listen | Select-Object LocalPort,OwningProcess
     Stop-Process -Id <PID> -Force
     # Flink 集群停止
     D:\code\flink-1.18.1\bin\stop-cluster.bat
 
 ### 4.4 常用验证命令
-    curl http://localhost:8080/api/jobs              # 作业列表
-    curl http://localhost:8080/api/controls          # 控件注册表
-    curl http://localhost:8081/jobs/overview         # Flink 作业
-    curl http://localhost:8081/taskmanagers          # Flink TaskManager（若 404 说明集群未起）
-    mysql -u root -p dataflow -e "SHOW TABLES;"   # 密码见 .env / MYSQL_PASSWORD
+    curl http://localhost:18080/api/jobs              # 作业列表（手工起后端时是 8080）
+    curl http://localhost:18080/api/controls          # 控件注册表
+    curl http://localhost:18081/jobs/overview         # Flink 作业
+    curl http://localhost:18081/taskmanagers          # Flink TaskManager（若 404 说明集群未起）
+    mysql -u root -p flink_demo -e "SHOW TABLES;"     # 密码见 .env / MYSQL_PASSWORD
+
+### 4.5 构建与测试（改完必跑，见第 9 节）
+    mvn -B -f pom.xml test          # 根聚合：全 5 模块；后端 71 个用例（2026-09-11 实测全绿）
+    cd frontend; node --test test/app.test.js   # 前端 9 个用例（含控件注册表前后端一致性校验）
 
 ---
 
@@ -163,22 +195,31 @@
 - **新增控件必须两端同步**：后端注册表驱动翻译层，前端副本驱动画布展示与参数面板。只改一端会导致「画布有控件但提交失败」或「翻译报未知控件」。
 
 ### 5.4 DAG → Flink SQL 翻译（DagTranslationService，最大单文件，改这里要最小心）
-- translate() 先 topologicalSort，再逐节点按 type 分支生成 SQL：
+- translate() 先 cleanOutputTempDirs → 头部 SET/UDF 注册（xml_json、redis_lookup）→ topologicalSort → 逐节点按 type 分支生成 SQL → 边循环生成 INSERT：
   - datagen_input → generateDatagenDDL + 从 fieldsConfig 提取字段（extractFieldsFromDatagenConfig）。
   - csv_input → 校验文件存在、autoDetectDelimiter 探测分隔符；无 fieldsConfig 时 detectCsvColumns 读表头自动生成列（含中文列名、去重）。
-  - excel_input → ExcelPreprocessor.convertToCsv 转临时 CSV 后走 CSV 逻辑（hasHeader 默认 true）。
+  - excel_input / xml_input / parquet_input / json_input(array) → 对应 Preprocessor 转临时 CSV 后走 CSV 逻辑。
+  - json_input(lines) → filesystem + json connector。
+  - mysql_input / pg_input / oracle_input / hdfs_input → JDBC/filesystem DDL，字段由元数据或 fieldsConfig 推导。
   - kafka_input / kafka_output → 模板渲染。
-  - csv_output / excel_output → 模板 + 临时表（stripCsvHeaderIfNeeded 处理表头）。
+  - csv_output / json_output → 模板渲染 + path 改 `<path>.tmp`；excel/parquet/xml_output → 先写 `*_temp_csv` 临时 CSV，作业完成后由对应 Converter 转目标格式。
   - mysql_output → 提交前 MysqlTableCreator.ensureTable 自动建表，再生成 JDBC sink。
-  - field_concat / xml_json → transform 分支（findTransformSql 等）。
-- **schema 传播**：nodeSchemas（节点 id → DDL 字段串）贯穿全流程；findIncomingSourceTable / findTransformBetween / findTransformSql / findIncomingSourceSchema 处理「输入→转换→输出」中间节点；**新增控件必须接入这条 schema 链**，否则下游输出拿不到字段。
+  - transform（field_concat / xml_json / dedupe / validate / route / field_filter / field_rename / row_filter / json_parse / redis_lookup）→ **不生成独立表**，SQL 在边循环里内联进 INSERT。
+- **schema 传播**：nodeSchemas（节点 id → DDL 字段串）贯穿全流程，输出/转换节点统一通过 **findIncomingSourceSchema** 取上游字段；**新增控件必须接入这条 schema 链**，否则下游输出拿不到字段。
+  - 注意：`findTransformBetween` / `findTransformSql` / `pollFlinkJob` / `generateDDLFromTemplate` 已无调用（历史残留，勿当作现行链路）。
+- **表头是另一条链（容易漏改）**：FlinkJobStatusChecker 侧的 findSourceHeader → sourceHeaderFields → applyTransformHeader 会**重新解析 DAG JSON** 合成输出表头，不复用 nodeSchemas。新增输入/转换控件若要输出表头，这里也要加分支。
 - 路径类参数统一 .trim() 后再用（历史 bug：前导空格导致路径失效）。
 
-### 5.5 提交三路降级（submitToFlink）
-1. checkFlinkCluster()：探测 flinkHost:flinkPort(8081) TCP 是否通。
-2. 通 → submitViaSqlClient（写临时 .sql 调 sql-client）→ 失败降级 trySqlGateway（SQL Gateway REST）→ 失败降级 submitViaFlinkRestApi（REST 提交 + 轮询新 job id）。
-3. 不通 / 全部失败 → 返回 mock flink-job-<uuid>（本地无集群也能走完流程）。
-4. cancelFlinkJob：mock id（flink-job- 前缀）直接跳过 REST。
+### 5.5 提交降级链（submitToFlink，**实际顺序与旧文档相反**）
+1. checkFlinkCluster()：裸 Socket 探测 flinkHost:flinkPort 是否通（当前默认端口见 4.1）。
+2. 通 → submitViaSqlClient，内部按顺序尝试：
+   a. **trySqlGateway**（SQL Gateway REST，主力路径）；
+   b. 失败 → trySqlClientScript（本地 .sql + sql-client，依赖 Git bash 路径）；
+   c. 失败 → submitViaFlinkRestApi（**注意：它不做提交**，只是轮询 /jobs/overview 认领新出现的 jid）。
+3. 不通 或 三段全失败 → 返回 mock id（`flink-job-<uuid>`）。
+4. cancelFlinkJob：mock id（`flink-job-` / `mock-` 前缀）直接跳过 REST。
+- **mock 的真实后果**：Flink 未启动时提交不会报错，但作业会**一直停在 SUBMITTED**（overview 请求异常被轮询器吞掉，永远不会进入「不在 overview → COMPLETED」分支）。要验证真实链路必须先起集群。
+- 已知脆弱点：Gateway 侧按 `;` 裸切分 SQL，单条语句失败只 warn 继续，可能出现「半提交但仍返回 jobId」。
 
 ### 5.6 前端画布逻辑（app.js）
 - initGraph()：创建 X6 Graph（网格、拖拽平移、滚轮缩放、连线配置、节点点击/删除/双击事件）。
@@ -191,10 +232,13 @@
 - 作业切换：作业列表「编辑」/ 双击行 → openJob → loadDagToCanvas。
 - 提交前校验 validateDagForSubmit：有节点必须连线、输出节点必须有路径。
 
-### 5.7 状态与日志
-- FlinkJobStatusChecker @Scheduled(fixedRate=15000) 只轮询 SUBMITTED/RUNNING 的作业，映射 Flink 状态到本地状态。
+### 5.7 状态与日志（间隔已配置化，比旧文档快 3 倍）
+- FlinkJobStatusChecker `@Scheduled(fixedRateString = "${app.monitor.status-poll-ms:5000}")` → **默认 5s**（旧文档写 15s），只轮询 SUBMITTED/RUNNING 的作业，按 FLINK_TO_LOCAL_STATUS 映射状态。
+- HealthMonitor 健康扫描默认 **10s**（`app.monitor.health-scan-ms`，旧文档写 30s）；HeartbeatMonitor 心跳探测默认 10s（`app.monitor.heartbeat-scan-ms`）。
+- 失败即时告警：FlinkJobStatusChecker 置 FAILED 的瞬间直接调 HealthMonitor.notifyJobFailed（事件驱动），JobService.submit 失败分支同样即时通知。
 - JobLog 落库，GET /api/jobs/{id}/logs 查询（按时间倒序）。
-- ExcelOutputConverter：CSV 结果 → .xlsx 后处理（在状态轮询链中完成时触发）。
+- 输出后处理：作业转 COMPLETED（或 CANCELLED）时触发 Excel/Xml/Parquet 转换与 CSV/JSON part 合并；cancel/offline 也会显式调用 finalizeJobOutputs。
+- **自动 COMPLETED 的判定**：真实 jid 的作业「不在 /jobs/overview 里」即被置为 COMPLETED（含 Flink 重启后归档的情况）。这意味着 Flink 重启可能把 RUNNING 作业误判完成，与 HeartbeatMonitor 的 JOB_HEARTBEAT_LOST 语义存在冲突，改这块要一起考虑。
 
 ---
 
@@ -203,16 +247,22 @@
 ### 6.1 后端
 | 文件 | 职责 | 改动注意 |
 |---|---|---|
-| service/DagTranslationService.java | DAG→SQL、提交、schema 传播 | 新增控件主要改这里；先看 5.4 |
-| service/JobService.java | 作业 CRUD、提交入口、日志 | 状态流转别乱改 |
+| service/DagTranslationService.java | DAG→SQL、提交降级、schema 传播 | 新增控件主要改这里；先看 5.4 / 5.5 |
+| service/JobService.java | 作业 CRUD、提交入口、上线/下线、版本与调度 | 状态流转别乱改；submit 无锁，注意并发触发 |
+| service/FlinkJobStatusChecker.java | 5s 状态轮询 + 输出后处理 + 表头合成 | 表头逻辑是独立一条链，见 5.4/5.7 |
 | service/MysqlTableCreator.java | MySQL 自动建表 + 类型映射 | 类型映射表、保留字反引号、utf8mb4 |
-| service/ExcelPreprocessor.java | Excel→临时 CSV（WorkbookFactory，支持 .xls/.xlsx） | 临时文件放 output/*_temp_csv |
-| service/ExcelOutputConverter.java | CSV→.xlsx 后处理 | 输出文件路径来自节点 params.path |
-| service/FlinkJobStatusChecker.java | 15s 状态轮询 | 只轮询活跃作业 |
-| config/DataInitializer.java | 控件种子（11 个） | 新增控件第一站 |
-| controller/JobController.java | REST 路由 | 已有 preview 接口（可用未完善） |
+| service/ExcelPreprocessor.java / JsonPreprocessor / XmlPreprocessor / ParquetPreprocessor | 各种格式 → 临时 CSV | 临时文件放 output/*_temp_csv，注意编码 BOM |
+| service/ExcelOutputConverter.java / XmlOutputConverter / ParquetOutputConverter | CSV → 目标格式后处理 | 输出路径来自节点 params.path |
+| service/MonitorService.java + FlinkMetricsService | Flink 指标采集、趋势缓冲、历史卡片兜底 | 2s 采集走 HTTP，注意阻塞单线程调度器 |
+| service/HealthMonitor.java / AlertService.java / AlertRetentionService.java / HeartbeatMonitor.java | 告警判定、去重、恢复闭环、通知、保留策略 | 新增检查项要同步 shouldAlert/markAlerted |
+| ai/LlmClient.java / ai/AgentService.java + ai/PromptCatalog | 多服务商 LLM 客户端、NL2Pipeline、智能诊断 | API Key 加密密钥来自环境变量或 backend/data/.ai_config_key，**不得硬编码** |
+| service/JobScheduler.java / DependencyService.java | cron 调度、依赖编排与自动触发 | 30s 扫描；运行中作业不重复提交 |
+| service/AuditService（audit 包）/ UserService.java / LineageService.java / PreviewService.java / KafkaMonitorService.java | 审计、用户管理、血缘、预览、Kafka 可视化 | 新端点记得 @PreAuthorize + owner 校验 |
+| config/DataInitializer.java | 控件种子（**29 个**，启动时清空重建） | 新增控件第一站，必须与前端 getBuiltinControls 同步 |
+| config/SecurityConfig.java / WebConfig.java | 鉴权规则、CORS 白名单 | H2 console 默认关闭且仅 ADMIN；CORS 默认只放行本机 3000 |
+| controller/JobController.java | 作业 REST 路由（11 个控制器之一） | 写操作需 ADMIN/OPERATOR + owner |
 | dag/DagDefinition.java | DAG 模型 | 字段名即契约，勿改 |
-| application.yml | H2、Flink 地址、端口 | Flink 配置集中在 flink.* |
+| application.yml | H2、Flink 地址、端口、监控/告警间隔、AI、CORS | 全部可用环境变量覆盖 |
 
 ### 6.2 前端
 | 文件 | 职责 | 改动注意 |
@@ -228,14 +278,15 @@
 
 ### 7.1 新增一个控件（标准流程）
 1. DataInitializer 注册控件（type/name/category/paramSchema/flinkTemplate）。
-2. frontend/js/app.js 的 getBuiltinControls() 同步一份（降级副本）。
+2. frontend/js/app.js 的 getBuiltinControls() 同步一份（降级副本）：**类型必须一一对应，且 paramSchema 字面量 JS 求值后必须是合法 JSON**（前端测试 `frontend/test/app.test.js` 会自动校验这两点，不同步会红）。
 3. DagTranslationService.translate() 加对应 type 分支：
    - input：生成 CREATE TABLE DDL，并把字段写入 nodeSchemas；
-   - output：findIncomingSourceTable 拿上游表，生成 INSERT INTO ... SELECT；
-   - transform：接 schema 传播（findIncomingSourceSchema + 生成转换 SQL）。
+   - output：用 findIncomingSourceSchema 取上游字段（决定 DDL 列），生成 INSERT INTO ... SELECT；
+   - transform：接 schema 传播（findIncomingSourceSchema + 生成内联转换 SQL）。
 4. 输出类控件如需后处理，参考 ExcelOutputConverter 挂到状态完成链路。
-5. 前端参数面板无需改（自动按 paramSchema 渲染）。
-6. 跑通一条实测链路（如 9.2），并把结果追加到 1.2。
+5. 需要输出表头的控件，还要在 FlinkJobStatusChecker 的 sourceHeaderFields / applyTransformHeader 加分支（见 5.4）。
+6. 前端参数面板无需改（自动按 paramSchema 渲染）。
+7. 跑通一条实测链路（如 9.2），并把结果追加到 1.2。
 
 ### 7.2 JDBC 输入（已实现）
 - `mysql_input`、`pg_input`、`oracle_input` 均通过 JDBC connector 读取并自动推导字段。
@@ -260,21 +311,26 @@
    - MySQL 表 DEFAULT CHARSET=utf8mb4（MysqlTableCreator 已做），乱码先查这里。
    - 新增 Java 文件不要用 Set-Content 写（会加 BOM 导致 javac 报 \ufeff 错误），用 Node 写或写后去 BOM。
    - app.js 带 BOM、后端 Java 是 CRLF：编辑脚本先统一为 LF，写回时保留 BOM / CRLF。
-5. **本环境 apply_patch 不可用**（Access denied）：改文件用「写 _x.cjs → node _x.cjs → 删除」的方式。
+5. **本机没有 apply_patch**：改文件用编辑器工具或「写 _x.cjs → node _x.cjs → 删」的方式。
 6. **PowerShell 复杂内嵌命令会被策略拒**（如内嵌 mvn + 等待 + Start-Process）：拆成简单命令分步执行。
 7. **路径参数一律 .trim()**（历史 bug：前导空格导致文件找不到）。
 8. **start-all.bat 的中文路径是乱码**：在中文路径机器上以手动命令启动为准（见 4.2）。
 9. **H2 元数据库**在 backend/data/mvpdb；切换 MySQL 用 --spring.profiles.active=mysql（application-mysql.yml）。
 10. **提交失败先看日志**：GET /api/jobs/{id}/logs；翻译错误会置作业 FAILED 并写 ERROR 日志。
 11. **Excel 输出临时文件**：output/*_temp_csv、*.tmp 是中间产物，可清理，不影响功能。
-12. **Flink 集群没起时**：提交走 mock，作业状态会标 COMPLETED 但不会真跑；测试真实链路必须先起 Flink（4.2）。
+12. **Flink 集群没起时**：提交走 mock，作业会**停在 SUBMITTED**（不会自动 COMPLETED），要测真实链路必须先起 Flink（4.2）。
+13. **H2 Web 控制台默认关闭**：不要为了排障把它改成 `enabled: true` 提交；需要时用 `H2_CONSOLE_ENABLED=true` 临时起，且它现在只对 ADMIN 开放。
+14. **CORS 是白名单**（`app.security.cors-allowed-origins` / `CORS_ALLOWED_ORIGINS`）：不要改回 `*` + 凭据组合；前端 3000 走 serve.js 反代，本身不需要跨域。
+15. **AI 相关密钥不得硬编码**：加密密钥来自 `AI_CONFIG_ENCRYPTION_KEY`，未配置时用 backend/data/.ai_config_key 本机密钥文件；两个文件都在 .gitignore 内，别提交。
+16. **控件 paramSchema 必须是合法 JSON**：前端降级副本里写 `D:\code\...` 这类单反斜杠会让 JSON.parse 抛错（历史 bug，已修 11 个控件）。
 
 ---
 
 ## 9. 回归验证清单（每次改完必跑）
 
 ### 9.1 服务健康
-- 前端 3000 返回 200、后端 8080 返回 200、Flink 8081 返回 200（如已启动）。
+- 前端 3000 返回 200、后端 18080（或手工启动的 8080）返回 200、Flink 18081 返回 200（如已启动）。
+- 后端 `/api/controls` 返回 **29** 个控件（重启后 DataInitializer 会清空重建注册表）。
 
 ### 9.2 核心链路（用 test-resources/data/sales.csv、sample_data.xlsx）
 - [ ] CSV → CSV：output/dag_sales_out2.csv 生成，行数 = 源行数 + 表头，中文正常。
@@ -289,17 +345,22 @@
 - [ ] 参数面板：改参数 → 应用 → 保存 → 重开，值保持。
 - [ ] 导出 JSON → 导入 JSON → 画布一致。
 
+### 9.4 自动化测试（改完必跑，2026-09-11 实测全绿）
+- [ ] `mvn -B -f pom.xml test` → 5 模块 BUILD SUCCESS，后端 **71** 个用例 0 失败。
+- [ ] `cd frontend; node --test test/app.test.js` → **9** 个用例 0 失败（含前后端控件注册表一致性 + paramSchema 合法性）。
+- [ ] 改了安全配置时的手工验证：未登录访问 `/api/jobs` 返回 401；`/h2-console` 未登录不可访问（默认还是关闭状态）。
+
 ---
 
-## 10. 后续完善路线（建议顺序）
-
-1. **补齐 MySQL Input（读库）**——框架已有占位，收益最大。
-2. **更多转换控件**（字段过滤、字段改名、行过滤、JSON 解析）——按 7.1 流程。
-3. **文件格式扩展**（JSON / Parquet / 多 Sheet Excel）——按 7.3 流程。
-4. **作业级增强**：✅ 定时调度、✅ 复制作业（已实现）；版本历史待做。
-5. **性能基准**：✅ 已完成（真实提交 Flink 作业，产出 8vCPU 目标环境报告，实测机器 32 vCPU）。
-6. **Docker 全容器化收尾**：docker-compose.yml 已有雏形，补齐后端/前端镜像与一键脚本。
-7. **UDF 扩展**：udf/ 工程追加自定义函数，翻译层 CREATE FUNCTION 注入。
+## 10. 后续完善路线（2026-09-11 重排）
+1. **安全收尾**：token 吊销（黑名单/版本号）、Monitor/Kafka/Preview 端点补角色与 owner 限制、ownerId 为空的历史作业收紧可见性、审计与日志脱敏。
+2. **Flink 状态语义修正**：区分「作业完成」与「Flink 重启后归档」，消除与 HeartbeatMonitor 的冲突；mock 作业增加超时兜底状态。
+3. **并发安全**：JobService.submit 加状态 CAS/锁，定时器与依赖触发不重复提交；输出合并加锁，避免与轮询器并发写同一批 part。
+4. **调度线程池隔离**：MonitorService 的 2s HTTP 采集与告警/调度分池，避免互相阻塞。
+5. **补测试空白**：FlinkJobStatusChecker、MysqlTableCreator、PluginLoaderService、Kafka/Parquet/HDFS 链路、调度与用户隔离。
+6. **前端工程化**：拆分 app.js 巨石、清理死 CSS、定时器/图表统一 dispose（可选引入构建步骤）。
+7. **AI 侧**：多服务商接入更多模型、诊断规则库扩充、Prompt 版本管理。
+8. **Docker 收尾**：docker-compose 已可用，补齐 compose 环境下的初始化剧本与一键验收脚本。
 
 ---
 
@@ -399,3 +460,8 @@
 | 2026-09-08 | 企业验收补齐（P0：5 项 + P1：3 项）。① 用户管理 CRUD：仅 ADMIN 的 /api/users 列表/创建/改/重置密码/删除，BCrypt、用户名密码校验、防删当前账号、保留至少一个启用管理员、操作审计；② AI 草稿确认模型：JobDefinition 增 source(MANUAL/AI)、confirmationStatus(NOT_REQUIRED/PENDING/CONFIRMED)、confirmedBy/ByName/At；服务端强制推导确认状态（忽略客户端伪造，防绕过），未确认 AI 草稿禁止提交/上线，POST /api/jobs/{id}/confirm 记录确认人，前端提交 AI 草稿先确认；③ 独立心跳检测：HeartbeatMonitor 监测 JobManager/TaskManager 存活与 RUNNING 作业从集群消失，CLUSTER_HEARTBEAT_LOST / JOB_HEARTBEAT_LOST + 恢复闭环，DB 冷却去重；④ 诊断报告持久化：DiagnosisReport 实体 + /api/ai/diagnose/{jobId}(GET) 历史查询；⑤ 故障自动诊断闭环：AlertService 发布 AlertTriggeredEvent，@Async AutoDiagnosisListener 自动调用 AgentService.autoDiagnose 生成 trigger=事件 的报告（无循环依赖）；⑥ 双语 NL2Pipeline：LanguageDetector 语言检测 + 英文提示词；⑦ Prompt 模板管理：ai-prompts/nl2pipeline.{zh,en}.txt 外部资源 + {{registry}} 注入；⑧ 20 万条验收脚本 acceptance_200k.py（全覆盖/完整性/耗时吞吐报告）；后端 66 测试全绿，Maven Reactor 5/5 | UserController/UserService/JobDefinition/JobService/HeartbeatMonitor/DiagnosisReport/AutoDiagnosisListener/AlertService/AgentService/PromptCatalog/LanguageDetector/acceptance_200k.py + docs |
 | 2026-09-10 | 企业认证门户升级：登录封面重设计为深色数据编排品牌页（能力指标、动态数据链路、响应式布局）；登录/注册双模式切换；新增公开 POST /api/auth/register，自助注册执行用户名/显示名/密码强度校验、BCrypt 哈希、重复账号冲突保护，账号固定为启用 VIEWER 并记录 REGISTER 审计；前后端认证测试通过 | AuthController / SecurityConfig / 前端 index.html + app.js + style.css |
 | 2026-09-10 | 监控页吞吐趋势支持逐条移除：独立刻度模式下每条作业曲线右侧新增删除按钮，仅清理该作业趋势（内存缓冲 + 落库趋势点），不影响作业本身；后端新增 MonitorService.removeTrend 与 DELETE /api/monitor/trends/{jobId}，删除失败只降级内存清理不阻断热路径；后端 71 测试、前端 8 测试全绿 | MonitorService / MonitorController / 前端 index.html + app.js + style.css |
+| 2026-09-11 | 未提交工作收口：把 2026-09-07~09-10 期间已完成但散落在工作区的 66 个文件（安全与工程治理、用户管理、AI 草稿确认、心跳检测、诊断持久化与自动诊断、双语 Prompt、认证门户、趋势移除、验收脚本）整理为一次可追溯提交 `5f5671d`；提交前核对暂存清单，确认 `.env` / `backend/data/` / `output/` / `large/` 等敏感与大数据目录被 .gitignore 排除 | 66 files（含新增 pom.xml 根聚合、HeartbeatMonitor、UserService、ai-prompts 等） |
+| 2026-09-11 | **P0 安全加固**：① H2 Web 控制台默认关闭（`H2_CONSOLE_ENABLED`，且 `SecurityConfig` 由 permitAll 改为 **仅 ADMIN**）——此前未认证即可读写元数据库；② CORS 由 `allowedOriginPatterns("*") + allowCredentials(true)` 改为可配置白名单（`app.security.cors-allowed-origins` / `CORS_ALLOWED_ORIGINS`，默认只放行本机 3000，写 `*` 时自动关闭凭据）；③ 删除 LlmClient 中硬编码的加密兜底密钥 `dataflow-mvp-ai-provider-dev-key-2026`，改为「环境变量 `AI_CONFIG_ENCRYPTION_KEY` → 本机自动生成密钥文件 `backend/data/.ai_config_key`」，并提供 `AI_LEGACY_ENCRYPTION_KEY` 一次性迁移与「落盘密钥不可用时回退环境变量 Key」的兜底，避免 AI 能力中断。**运行时冒烟验证（2026-09-12）**：未登录访问 `/api/jobs`、`/api/controls`、`/h2-console/` 均返回 401；CORS 白名单来源 `http://localhost:3000` 返回 `Access-Control-Allow-Origin` + `Allow-Credentials: true`，非白名单来源返回 403 且无 allow-origin 头；启动日志无「H2 console available」行（控制台未启用）；`backend/data/.ai_config_key` 首启自动生成（32 字节随机），旧的固定密钥密文解不开时按预期回退环境变量 Key 并给出可操作告警 | SecurityConfig / WebConfig / application.yml / LlmClient / .env.example |
+| 2026-09-11 | 两个确定性缺陷修复：① `HealthMonitor.checkLogKeywords` 中恒真条件 `... \|\| msg.length() > 0`（等于任意 ERROR 日志都命中）改为 `!msg.isBlank()`；② 前端 `getBuiltinControls()` 降级副本补齐缺失的 `datagen_input`（后端 29 个 vs 前端 28 个），修复 3 处历史编辑残留（行首多余逗号造成的**数组空元素**、缩进错乱、两条控件挤在同一行），并规整 11 个非法 JSON 的 paramSchema（`D:\code\...` 单反斜杠 / 嵌套 `\"` 未二次转义 → 参数面板 `JSON.parse` 抛错）；新增前端测试「内置控件降级副本与后端注册表保持一致」用 DataInitializer 反查类型清单，前后端控件数量/类型/paramSchema 合法性纳入 CI | HealthMonitor / 前端 app.js + test/app.test.js |
+| 2026-09-11 | 文档纠偏：把第 2 节技术栈、第 3 节目录结构（11 Controller / 27 Service / 11 Repository、plugin-sdk、ai_sidecar、data、docs、test-results）、第 4 节端口与启动命令（本机 18080/18081/18083、start-all.bat 不编译、需带 FLINK_CLUSTER_PORT）、第 5.4 节 schema 链与死代码说明、第 5.5 节提交顺序（**Gateway 优先**，REST 仅轮询认领）与 mock 真实后果（停在 SUBMITTED）、第 5.7 节轮询间隔（5s/10s/10s）、第 6.1 节文件地图（DataInitializer 种子 **29** 个）、第 7.1 节新增控件流程、第 8 节红线（新增 H2/CORS/AI 密钥/paramSchema 四条）、第 9 节回归清单（补自动化测试）与第 10 节路线全部改写；README 同步端口、轮询间隔、mock 说明、H2 开关、环境变量表、docs 现状 | DEVELOPMENT.md / README.md / .env.example |
+| 2026-09-11 | 新增根目录 `AGENTS.md` 工作区指令（DSH 自动注入，每个会话首次请求加载）：固化「改代码前先读 DEVELOPMENT.md」硬规则 + 第 5/6/8/9 节使用顺序 + 硬红线清单 + 文档纪律，避免每次重复口头交代 | 新增 AGENTS.md（根目录） |

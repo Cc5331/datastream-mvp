@@ -156,6 +156,11 @@ public class LlmClient {
                 profile.provider = p.provider;
                 profile.baseUrl = p.baseUrl;
                 profile.apiKey = p.encryptedApiKey == null ? "" : decrypt(p.encryptedApiKey);
+                if (profile.apiKey.isBlank() && apiKey != null && !apiKey.isBlank()) {
+                    // 落盘密钥解不开时（例如加密密钥变更）回退到环境变量里的 API Key，避免 AI 能力整体不可用
+                    profile.apiKey = apiKey;
+                    log.warn("AI 服务商 {} 的落盘密钥不可用，已回退为环境变量配置的 API Key", profile.id);
+                }
                 profile.defaultModel = p.defaultModel;
                 profile.models = p.models == null ? List.of() : new ArrayList<>(p.models);
                 profile.wireApi = normalizeWireApi(p.wireApi);
@@ -165,6 +170,10 @@ public class LlmClient {
                     profiles.put(profile.id, profile);
                     if (p.active) activeId = profile.id;
                 }
+            }
+            if (legacySecretUsed) {
+                // 旧密钥解出的明文立刻用新密钥重新加密落盘，避免长期依赖旧密钥
+                persistProfiles();
             }
             if (activeId != null && profiles.containsKey(activeId)) {
                 activateProvider(activeId);
@@ -217,12 +226,69 @@ public class LlmClient {
         }
     }
 
+    private volatile String cachedEncryptionSecret;
+    private volatile boolean legacySecretUsed;
+
+    /**
+     * 加密密钥来源（按优先级）：
+     * 1) 环境变量 AI_CONFIG_ENCRYPTION_KEY；
+     * 2) 本机自动生成的密钥文件（与服务商配置文件同目录，已被 .gitignore 覆盖，不随仓库分发）。
+     * 刻意不提供硬编码兜底密钥——源码中的常量等于把落盘密文对所有人公开。
+     */
     private String encryptionSecret() {
-        String secret = System.getenv("AI_CONFIG_ENCRYPTION_KEY");
-        if (secret == null || secret.isBlank()) {
-            secret = "dataflow-mvp-ai-provider-dev-key-2026";
+        String cached = cachedEncryptionSecret;
+        if (cached != null) return cached;
+        synchronized (this) {
+            if (cachedEncryptionSecret != null) return cachedEncryptionSecret;
+            String env = System.getenv("AI_CONFIG_ENCRYPTION_KEY");
+            if (env != null && !env.isBlank()) {
+                cachedEncryptionSecret = env.trim();
+            } else {
+                cachedEncryptionSecret = loadOrCreateLocalKey();
+                log.warn("AI_CONFIG_ENCRYPTION_KEY 未配置，AI 服务商密钥改用本机密钥文件 {}（请勿删除，勿提交仓库）",
+                        localKeyFile().getAbsolutePath());
+            }
+            return cachedEncryptionSecret;
         }
-        return secret;
+    }
+
+    private File localKeyFile() {
+        File dir = providerFile().getAbsoluteFile().getParentFile();
+        return new File(dir, ".ai_config_key");
+    }
+
+    private String loadOrCreateLocalKey() {
+        File keyFile = localKeyFile();
+        try {
+            if (keyFile.isFile()) {
+                String existing = new String(java.nio.file.Files.readAllBytes(keyFile.toPath()),
+                        java.nio.charset.StandardCharsets.UTF_8).trim();
+                if (!existing.isEmpty()) return existing;
+            }
+            String generated = newSecret();
+            if (keyFile.getParentFile() != null) keyFile.getParentFile().mkdirs();
+            java.nio.file.Files.write(keyFile.toPath(),
+                    generated.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            try {
+                keyFile.setReadable(false, false);
+                keyFile.setReadable(true, true);
+                keyFile.setWritable(false, false);
+                keyFile.setWritable(true, true);
+            } catch (Exception ignore) {
+                // Windows 上收紧文件权限可能失败，不影响功能
+            }
+            return generated;
+        } catch (Exception e) {
+            // 兜底：进程内随机密钥（重启后旧密文不可解，需重新录入），绝不退回可预测常量
+            log.warn("无法读写本机 AI 密钥文件 {}：{}；本次运行使用内存随机密钥", keyFile, e.getMessage());
+            return newSecret();
+        }
+    }
+
+    private String newSecret() {
+        byte[] raw = new byte[32];
+        SECURE_RANDOM.nextBytes(raw);
+        return Base64.getEncoder().encodeToString(raw);
     }
 
     private String encrypt(String plain) {
@@ -246,6 +312,25 @@ public class LlmClient {
     }
 
     private String decrypt(String encoded) {
+        String primary = decryptWith(encryptionSecret(), encoded);
+        if (primary != null) return primary;
+        // 迁移路径：旧版本用固定兜底密钥加密的历史密文，可由 AI_LEGACY_ENCRYPTION_KEY 显式提供旧密钥解密；
+        // 解出后 initializeDefaultProfile 会立刻用新密钥重新加密落盘
+        String legacy = System.getenv("AI_LEGACY_ENCRYPTION_KEY");
+        if (legacy != null && !legacy.isBlank()) {
+            String migrated = decryptWith(legacy.trim(), encoded);
+            if (migrated != null) {
+                legacySecretUsed = true;
+                log.warn("AI 服务商密钥使用 AI_LEGACY_ENCRYPTION_KEY 解密成功，将按新密钥重新加密落盘；确认无误后可移除该环境变量");
+                return migrated;
+            }
+        }
+        log.warn("Failed to decrypt AI API Key（配置可能由其它密钥加密）：请在「AI 服务商」中重新录入密钥，"
+                + "或配置 AI_CONFIG_ENCRYPTION_KEY / AI_LEGACY_ENCRYPTION_KEY");
+        return "";
+    }
+
+    private String decryptWith(String secret, String encoded) {
         try {
             byte[] in = Base64.getDecoder().decode(encoded);
             byte[] salt = new byte[SALT_LEN_BYTES];
@@ -254,13 +339,13 @@ public class LlmClient {
             System.arraycopy(in, salt.length, iv, 0, iv.length);
             byte[] cipherText = new byte[in.length - salt.length - iv.length];
             System.arraycopy(in, salt.length + iv.length, cipherText, 0, cipherText.length);
-            SecretKeySpec key = deriveKey(encryptionSecret(), salt);
+            SecretKeySpec key = deriveKey(secret, salt);
             Cipher cipher = Cipher.getInstance(CIPHER);
             cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(GCM_TAG_BITS, iv));
             return new String(cipher.doFinal(cipherText), java.nio.charset.StandardCharsets.UTF_8);
         } catch (Exception e) {
-            log.warn("Failed to decrypt AI API Key (config may be stale): {}", e.getMessage());
-            return "";
+            log.debug("Decrypt attempt failed: {}", e.getMessage());
+            return null;
         }
     }
 

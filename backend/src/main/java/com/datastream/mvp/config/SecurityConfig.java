@@ -34,7 +34,8 @@ public class SecurityConfig {
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/auth/login", "/api/auth/register", "/api/auth/me", "/error").permitAll()
-                .requestMatchers("/h2-console/**").permitAll()
+                // H2 控制台默认关闭（H2_CONSOLE_ENABLED）；即便开启也不允许匿名访问，仅 ADMIN 可用
+                .requestMatchers("/h2-console/**").hasRole("ADMIN")
                 .anyRequest().authenticated())
             .exceptionHandling(ex -> ex
                 .authenticationEntryPoint((request, response, authException) -> {
