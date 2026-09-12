@@ -261,6 +261,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      kafka:
+        condition: service_healthy
     ports:
       - "${BACKEND_PORT:-18080}:8080" # 后端 API（宿主机端口可覆盖）
     environment:
@@ -269,6 +271,8 @@ services:
       FLINK_SQL_GATEWAY_HOST: sql-gateway
       FLINK_SQL_GATEWAY_PORT: "8083"
       FLINK_HOME: /opt/flink
+      # Kafka 可视化：容器内走 kafka:9092（宿主机访问用 localhost:29092）
+      APP_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       PLUGIN_DIR: /app/plugins
       JWT_SECRET: ${JWT_SECRET:?请在 .env 中设置至少 32 字节的 JWT_SECRET}
       BOOTSTRAP_USERS_ENABLED: ${BOOTSTRAP_USERS_ENABLED:-false}
@@ -293,6 +297,12 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+      # 告警邮件（QQ 邮箱 SMTP）；未配置时告警仅落库+Webhook，跳过发信
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_TO: ${SMTP_TO:-}
       SPRING_JPA_HIBERNATE_DDL_AUTO: update
     volumes:
       - ./backend/data:/app/data          # H2 数据库持久化

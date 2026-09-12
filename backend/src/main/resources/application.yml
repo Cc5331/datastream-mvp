@@ -105,6 +105,10 @@ app:
     default-username: ${ORACLE_USERNAME:system}
     default-password: ${ORACLE_PASSWORD:}
 
+  kafka:
+    # Kafka 可视化（/api/kafka/*）连接地址；本机运行用 localhost:29092，容器内用 kafka:9092
+    bootstrap-servers: ${APP_KAFKA_BOOTSTRAP_SERVERS:localhost:29092}
+
   monitor:
     # 告警/健康扫描与 Flink 状态轮询间隔（毫秒），越小告警越及时但也越耗 Flink HTTP
     health-scan-ms: ${APP_MONITOR_HEALTH_SCAN_MS:10000}
