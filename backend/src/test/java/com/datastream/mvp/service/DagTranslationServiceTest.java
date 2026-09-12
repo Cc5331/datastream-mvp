@@ -12,7 +12,10 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -28,6 +31,8 @@ class DagTranslationServiceTest {
 
     private ControlRegistryService controlService;
     private MysqlTableCreator mysqlTableCreator;
+    private PostgresqlTableCreator postgresqlTableCreator;
+    private OracleTableCreator oracleTableCreator;
     private ExcelPreprocessor excelPreprocessor;
     private XmlPreprocessor xmlPreprocessor;
     private JsonPreprocessor jsonPreprocessor;
@@ -38,12 +43,15 @@ class DagTranslationServiceTest {
     void setUp() {
         controlService = mock(ControlRegistryService.class);
         mysqlTableCreator = mock(MysqlTableCreator.class);
+        postgresqlTableCreator = mock(PostgresqlTableCreator.class);
+        oracleTableCreator = mock(OracleTableCreator.class);
         excelPreprocessor = mock(ExcelPreprocessor.class);
         xmlPreprocessor = mock(XmlPreprocessor.class);
         jsonPreprocessor = mock(JsonPreprocessor.class);
         parquetPreprocessor = mock(ParquetPreprocessor.class);
         service = new DagTranslationService(controlService, new ObjectMapper(),
-                excelPreprocessor, mysqlTableCreator, xmlPreprocessor, jsonPreprocessor, parquetPreprocessor);
+                excelPreprocessor, mysqlTableCreator, postgresqlTableCreator, oracleTableCreator,
+                xmlPreprocessor, jsonPreprocessor, parquetPreprocessor);
         stubControls();
     }
 
@@ -66,10 +74,15 @@ class DagTranslationServiceTest {
         when(controlService.findByType("datagen_input")).thenReturn(control("datagen_input", "input", ""));
         when(controlService.findByType("hdfs_input")).thenReturn(control("hdfs_input", "input", ""));
         when(controlService.findByType("hdfs_output")).thenReturn(control("hdfs_output", "output", ""));
+        when(controlService.findByType("pg_output")).thenReturn(control("pg_output", "output", ""));
+        when(controlService.findByType("oracle_output")).thenReturn(control("oracle_output", "output", ""));
+        when(postgresqlTableCreator.qualifiedTable(anyMap())).thenReturn("public.target_table");
+        when(oracleTableCreator.qualifiedTable(anyMap())).thenReturn("DATAFLOW.TARGET_TABLE");
         when(controlService.findByType("field_concat")).thenReturn(control("field_concat", "transform",
                 "SELECT *, CONCAT(${fields}) AS `${newFieldName}` FROM ${id}"));
         when(controlService.findByType("xml_json")).thenReturn(control("xml_json", "transform",
                 "SELECT *, ${direction}(`${sourceField}`) AS `${targetField}` FROM ${id}"));
+        when(controlService.findByType("redis_lookup")).thenReturn(control("redis_lookup", "transform", ""));
     }
 
     private DagDefinition.DagNode node(String id, String type, Map<String, Object> params) {
@@ -192,10 +205,67 @@ class DagTranslationServiceTest {
     }
 
     @Test
+    void datagenToPostgresql_generatesSinkAndPreparesTable() {
+        Map<String, Object> in = new HashMap<>();
+        in.put("rowsPerSecond", "10");
+        in.put("fieldsConfig", "[{\"name\":\"id\",\"type\":\"INT\"},{\"name\":\"name\",\"type\":\"STRING\"}]");
+        Map<String, Object> out = new HashMap<>();
+        out.put("url", "jdbc:postgresql://localhost:5432/dataflow");
+        out.put("schema", "public");
+        out.put("table", "target_table");
+        out.put("username", "postgres");
+        out.put("password", "secret");
+        out.put("createTablePolicy", "CREATE_IF_MISSING");
+        out.put("batchSize", 500);
+        List<DagDefinition.DagNode> nodes = List.of(
+                node("dg_1", "datagen_input", in),
+                node("pg_out_1", "pg_output", out));
+
+        String sql = service.translate(dag("pg-output", 1, nodes,
+                List.of(edge("e1", "dg_1", "pg_out_1"))));
+
+        assertTrue(sql.contains("CREATE TABLE pg_out_1"));
+        assertTrue(sql.contains("'url' = 'jdbc:postgresql://localhost:5432/dataflow'"));
+        assertTrue(sql.contains("'table-name' = 'public.target_table'"));
+        assertTrue(sql.contains("'driver' = 'org.postgresql.Driver'"));
+        assertTrue(sql.contains("'sink.buffer-flush.max-rows' = '500'"));
+        assertTrue(sql.contains("INSERT INTO pg_out_1 SELECT * FROM dg_1;"));
+        verify(postgresqlTableCreator).ensureTable(anyMap(), anyString());
+    }
+
+    @Test
+    void datagenToOracle_generatesSinkAndPreparesTable() {
+        Map<String, Object> in = new HashMap<>();
+        in.put("rowsPerSecond", "10");
+        in.put("fieldsConfig", "[{\"name\":\"id\",\"type\":\"INT\"},{\"name\":\"name\",\"type\":\"STRING\"}]");
+        Map<String, Object> out = new HashMap<>();
+        out.put("url", "jdbc:oracle:thin:@localhost:1521/FREEPDB1");
+        out.put("schema", "DATAFLOW");
+        out.put("table", "TARGET_TABLE");
+        out.put("username", "dataflow");
+        out.put("password", "secret");
+        out.put("createTablePolicy", "CREATE_IF_MISSING");
+        List<DagDefinition.DagNode> nodes = List.of(
+                node("dg_1", "datagen_input", in),
+                node("oracle_out_1", "oracle_output", out));
+
+        String sql = service.translate(dag("oracle-output", 1, nodes,
+                List.of(edge("e1", "dg_1", "oracle_out_1"))));
+
+        assertTrue(sql.contains("CREATE TABLE oracle_out_1"));
+        assertTrue(sql.contains("'table-name' = 'DATAFLOW.TARGET_TABLE'"));
+        assertTrue(sql.contains("'driver' = 'oracle.jdbc.OracleDriver'"));
+        assertTrue(sql.contains("INSERT INTO oracle_out_1 SELECT * FROM dg_1;"));
+        verify(oracleTableCreator).ensureTable(anyMap(), anyString());
+    }
+
+    @Test
     void hdfsInputToOutput_generatesFilesystemTablesAndPropagatesSchema() {
         Map<String, Object> in = new HashMap<>();
         in.put("path", "hdfs://localhost:9000/data/students.csv");
         in.put("delimiter", ",");
+        // 源文件无表头：按声明类型读取，schema 原样传播
+        in.put("hasHeader", false);
         in.put("fieldsConfig", "[{\"name\":\"id\",\"type\":\"INT\"},{\"name\":\"name\",\"type\":\"STRING\"}]");
         Map<String, Object> out = new HashMap<>();
         out.put("path", "hdfs://localhost:9000/output/result");
@@ -213,6 +283,30 @@ class DagTranslationServiceTest {
         assertTrue(sql.contains("`id` INT"), "输入 schema 应传播到输出表: " + sql);
         assertTrue(sql.contains("'csv.delimiter' = '|'"), "应使用输出分隔符");
         assertTrue(sql.contains("INSERT INTO hdfs_output_1 SELECT * FROM hdfs_input_1;"), "应生成 HDFS 写入语句: " + sql);
+        assertTrue(!sql.contains("WHERE"), "无表头时不应生成表头过滤条件");
+    }
+
+    @Test
+    void hdfsInputWithHeader_readsAsStringAndFiltersHeaderRow() {
+        Map<String, Object> in = new HashMap<>();
+        in.put("path", "hdfs://localhost:9000/data/with_header.csv");
+        in.put("delimiter", ",");
+        in.put("hasHeader", true);
+        in.put("fieldsConfig", "[{\"name\":\"id\",\"type\":\"INT\"},{\"name\":\"name\",\"type\":\"STRING\"}]");
+        Map<String, Object> out = new HashMap<>();
+        out.put("path", "hdfs://localhost:9000/output/result2");
+        out.put("delimiter", ",");
+        List<DagDefinition.DagNode> nodes = List.of(
+                node("hdfs-input-2", "hdfs_input", in),
+                node("hdfs-output-2", "hdfs_output", out));
+        List<DagDefinition.DagEdge> edges = List.of(edge("e1", "hdfs-input-2", "hdfs-output-2"));
+
+        String sql = service.translate(dag("hdfs-header", 1, nodes, edges));
+
+        // 表头行首列为字段名文本，必须全列按 STRING 读，否则整行解析失败被丢弃
+        assertTrue(sql.contains("`id` STRING"), "跳表头时输入列应为 STRING: " + sql);
+        assertTrue(sql.contains("WHERE `id` <> 'id'"), "应生成表头行过滤条件: " + sql);
+        assertTrue(sql.contains("`id` STRING"), "下游 schema 应同步为 STRING，避免 sink 类型校验失败: " + sql);
     }
 
     @Test
@@ -261,6 +355,51 @@ class DagTranslationServiceTest {
         assertTrue(sql.contains("CREATE FUNCTION IF NOT EXISTS json2xml"), "应注入 json2xml UDF");
         assertTrue(sql.contains("INSERT INTO csv_output_1\nSELECT *, xml2json(`sale_id`) AS `result` FROM csv_input_1;"),
                 "应生成完整可执行 INSERT SELECT: " + sql);
+    }
+
+    @Test
+    void redisLookup_callsUdfWithConnectionAndPrefixedKey() {
+        Map<String, Object> transform = new HashMap<>();
+        transform.put("host", "redis");
+        transform.put("port", 6379);
+        transform.put("password", "p'ass");
+        transform.put("keyField", "sale_id");
+        transform.put("keyPrefix", "sale:");
+        transform.put("targetField", "redis_value");
+        List<DagDefinition.DagNode> nodes = List.of(
+                node("csv_input_1", "csv_input", csvInputParams()),
+                node("redis_1", "redis_lookup", transform),
+                node("csv_output_1", "csv_output", csvOutputParams("redis.csv")));
+        List<DagDefinition.DagEdge> edges = List.of(
+                edge("e1", "csv_input_1", "redis_1"),
+                edge("e2", "redis_1", "csv_output_1"));
+
+        String sql = service.translate(dag("redis-lookup", 1, nodes, edges));
+
+        assertTrue(sql.contains("CREATE FUNCTION IF NOT EXISTS redis_lookup"), "应注册 Redis UDF: " + sql);
+        assertTrue(sql.contains("redis_lookup('redis', '6379', 'p''ass', CONCAT('sale:', CAST(`sale_id` AS STRING))) AS `redis_value`"),
+                "SELECT 必须实际调用 Redis UDF，而不是只输出 key: " + sql);
+        assertTrue(sql.contains("`redis_value` STRING"), "输出 schema 应包含 Redis 富化字段: " + sql);
+    }
+
+    @Test
+    void redisLookup_invalidPort_throws() {
+        Map<String, Object> transform = new HashMap<>();
+        transform.put("host", "redis");
+        transform.put("port", 70000);
+        transform.put("keyField", "sale_id");
+        transform.put("targetField", "redis_value");
+        List<DagDefinition.DagNode> nodes = List.of(
+                node("csv_input_1", "csv_input", csvInputParams()),
+                node("redis_1", "redis_lookup", transform),
+                node("csv_output_1", "csv_output", csvOutputParams("redis-invalid.csv")));
+        List<DagDefinition.DagEdge> edges = List.of(
+                edge("e1", "csv_input_1", "redis_1"),
+                edge("e2", "redis_1", "csv_output_1"));
+
+        RuntimeException ex = assertThrows(RuntimeException.class,
+                () -> service.translate(dag("redis-invalid", 1, nodes, edges)));
+        assertTrue(ex.getMessage().contains("1-65535"));
     }
 
     @Test

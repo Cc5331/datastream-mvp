@@ -119,10 +119,24 @@ public class DataInitializer implements CommandLineRunner {
                 "",
                 "1.0.0", "built-in");
 
+        // PostgreSQL Output
+        createControl("pg_output", "PostgreSQL Output", "output",
+                "Write PostgreSQL（可选安全自动建表）",
+                jdbcOutputParamSchema("jdbc:postgresql://localhost:5432/dataflow", "public", "postgres", "POSTGRES"),
+                "",
+                "1.0.0", "built-in");
+
         // Oracle Input
         createControl("oracle_input", "Oracle Input", "input",
                 "Read Oracle (JDBC 自动推导字段)",
-                jdbcParamSchema("jdbc:oracle:thin:@localhost:1521/FREE", "system", "ORACLE_PASSWORD", "oracle"),
+                "{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\",\"title\":\"JDBC URL\",\"default\":\"jdbc:oracle:thin:@localhost:1521/FREEPDB1\"},\"schema\":{\"type\":\"string\",\"title\":\"Schema\",\"default\":\"DATAFLOW\"},\"table\":{\"type\":\"string\",\"title\":\"Table\",\"default\":\"SOURCE_TABLE\"},\"username\":{\"type\":\"string\",\"title\":\"User\",\"default\":\"${ORACLE_USERNAME}\"},\"password\":{\"type\":\"string\",\"title\":\"Password\",\"default\":\"${ORACLE_PASSWORD}\"}},\"required\":[\"url\",\"table\"]}",
+                "",
+                "1.0.0", "built-in");
+
+        // Oracle Output
+        createControl("oracle_output", "Oracle Output", "output",
+                "Write Oracle（可选安全自动建表）",
+                jdbcOutputParamSchema("jdbc:oracle:thin:@localhost:1521/FREEPDB1", "DATAFLOW", "dataflow", "ORACLE"),
                 "",
                 "1.0.0", "built-in");
 
@@ -136,7 +150,7 @@ public class DataInitializer implements CommandLineRunner {
         // HDFS Input（filesystem connector，fieldsConfig 声明 schema）
         createControl("hdfs_input", "HDFS 输入", "input",
                 "读取 HDFS 上的 CSV 文件（hdfs://，字段需声明）",
-                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"title\":\"HDFS 路径\",\"default\":\"hdfs://localhost:9000/data/input.csv\"},\"delimiter\":{\"type\":\"string\",\"title\":\"分隔符\",\"default\":\",\"},\"fieldsConfig\":{\"type\":\"string\",\"title\":\"字段定义（JSON 数组，HDFS 无法自动推导表头）\",\"default\":\"[{\\\"name\\\":\\\"id\\\",\\\"type\\\":\\\"INT\\\"},{\\\"name\\\":\\\"name\\\",\\\"type\\\":\\\"STRING\\\"}]\"}},\"required\":[\"path\",\"fieldsConfig\"]}",
+                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"title\":\"HDFS 路径\",\"default\":\"hdfs://localhost:9000/data/input.csv\"},\"delimiter\":{\"type\":\"string\",\"title\":\"分隔符\",\"default\":\",\"},\"hasHeader\":{\"type\":\"boolean\",\"title\":\"首行是表头（读入后自动过滤）\",\"default\":true},\"fieldsConfig\":{\"type\":\"string\",\"title\":\"字段定义（JSON 数组，HDFS 无法自动推导表头）\",\"default\":\"[{\\\"name\\\":\\\"id\\\",\\\"type\\\":\\\"INT\\\"},{\\\"name\\\":\\\"name\\\",\\\"type\\\":\\\"STRING\\\"}]\"}},\"required\":[\"path\",\"fieldsConfig\"]}",
                 "",
                 "1.0.0", "built-in");
 
@@ -344,6 +358,19 @@ public class DataInitializer implements CommandLineRunner {
      */
     private String jdbcParamSchema(String defaultUrl, String defaultUser, String passwordEnv, String defaultPassword) {
         return "{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\",\"title\":\"JDBC URL\",\"default\":\"" + defaultUrl + "\"},\"table\":{\"type\":\"string\",\"title\":\"Table\",\"default\":\"source_table\"},\"username\":{\"type\":\"string\",\"title\":\"User\",\"default\":\"${" + passwordEnv.replace("PASSWORD", "USERNAME") + ":" + defaultUser + "}\"},\"password\":{\"type\":\"string\",\"title\":\"Password\",\"default\":\"${" + passwordEnv + ":" + defaultPassword + "}\"}},\"required\":[\"url\",\"table\"]}";
+    }
+
+    private String jdbcOutputParamSchema(String defaultUrl, String defaultSchema, String defaultUser, String envPrefix) {
+        return "{\"type\":\"object\",\"properties\":{"
+                + "\"url\":{\"type\":\"string\",\"title\":\"JDBC URL\",\"default\":\"" + defaultUrl + "\"},"
+                + "\"schema\":{\"type\":\"string\",\"title\":\"Schema\",\"default\":\"" + defaultSchema + "\"},"
+                + "\"table\":{\"type\":\"string\",\"title\":\"Table\",\"default\":\"target_table\"},"
+                + "\"username\":{\"type\":\"string\",\"title\":\"User\",\"default\":\"${" + envPrefix + "_USERNAME}\"},"
+                + "\"password\":{\"type\":\"string\",\"title\":\"Password\",\"default\":\"${" + envPrefix + "_PASSWORD}\"},"
+                + "\"createTablePolicy\":{\"type\":\"string\",\"title\":\"建表策略\",\"enum\":[\"FAIL_IF_MISSING\",\"CREATE_IF_MISSING\",\"VALIDATE_EXISTING\"],\"default\":\"FAIL_IF_MISSING\"},"
+                + "\"writeMode\":{\"type\":\"string\",\"title\":\"写入模式\",\"enum\":[\"append\"],\"default\":\"append\"},"
+                + "\"batchSize\":{\"type\":\"number\",\"title\":\"批量条数\",\"default\":1000}},"
+                + "\"required\":[\"url\",\"schema\",\"table\"]}";
     }
 
     private void createControl(String type, String name, String category, String description,

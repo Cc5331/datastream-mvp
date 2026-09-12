@@ -1,5 +1,8 @@
 package com.datastream.mvp.service;
 
+import com.datastream.mvp.model.JobDefinition;
+import com.datastream.mvp.util.JdbcUrlUtil;
+import com.datastream.mvp.util.MysqlIdentifier;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -17,8 +20,15 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.io.Reader;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.Statement;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -28,6 +38,9 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 通用数据预览服务：按文件类型读取前 N 行，返回结构化表格数据（列名 + 行）。
@@ -46,6 +59,30 @@ public class PreviewService {
 
     @Value("${app.preview.max-file-bytes:67108864}")
     private long maxFileBytes;
+
+    @Value("${app.preview.allowed-jdbc-hosts:localhost,127.0.0.1,postgres,oracle,mysql}")
+    private String allowedJdbcHosts;
+
+    @Value("${app.preview.allowed-hdfs-authorities:localhost:9000,namenode:9000}")
+    private String allowedHdfsAuthorities;
+
+    @Value("${app.mysql.default-username:root}")
+    private String defaultMysqlUsername;
+
+    @Value("${app.mysql.default-password:}")
+    private String defaultMysqlPassword;
+
+    @Value("${app.postgres.default-username:postgres}")
+    private String defaultPostgresUsername;
+
+    @Value("${app.postgres.default-password:}")
+    private String defaultPostgresPassword;
+
+    @Value("${app.oracle.default-username:system}")
+    private String defaultOracleUsername;
+
+    @Value("${app.oracle.default-password:}")
+    private String defaultOraclePassword;
 
     public Map<String, Object> previewFile(String path, int limit) {
         Map<String, Object> result = new LinkedHashMap<>();
@@ -71,6 +108,184 @@ public class PreviewService {
             result.put("message", "预览失败: " + e.getMessage());
         }
         return result;
+    }
+
+    /** 从已授权作业的 DAG 中读取节点配置，避免客户端伪造远程连接参数。 */
+    public Map<String, Object> previewNode(JobDefinition job, String nodeId, int limit) {
+        int normalizedLimit = limit <= 0 ? 20 : Math.min(limit, 100);
+        try {
+            JsonNode root = objectMapper.readTree(job.getDagJson());
+            JsonNode target = null;
+            for (JsonNode node : root.path("nodes")) {
+                if (nodeId.equals(node.path("id").asText())) {
+                    target = node;
+                    break;
+                }
+            }
+            if (target == null) throw new IllegalArgumentException("作业中不存在节点: " + nodeId);
+            String type = target.path("type").asText();
+            JsonNode params = target.path("params");
+            return switch (type) {
+                case "mysql_input", "mysql_output" -> previewJdbc(type, params, normalizedLimit);
+                case "pg_input", "pg_output" -> previewJdbc(type, params, normalizedLimit);
+                case "oracle_input", "oracle_output" -> previewJdbc(type, params, normalizedLimit);
+                case "hdfs_input" -> previewHdfs(params, normalizedLimit);
+                default -> throw new IllegalArgumentException("该节点类型不支持远程预览: " + type);
+            };
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("Remote preview failed for job {} node {}: {}", job.getId(), nodeId, e.getMessage());
+            throw new IllegalArgumentException("远程数据预览失败，请检查连接、权限和节点参数");
+        }
+    }
+
+    private Map<String, Object> previewJdbc(String type, JsonNode params, int limit) throws Exception {
+        String url = text(params, "url");
+        String schema = text(params, "schema");
+        String table = text(params, "table");
+        String username = text(params, "username");
+        String password = text(params, "password");
+        String qualified;
+        String query;
+
+        if (type.startsWith("mysql_")) {
+            url = JdbcUrlUtil.normalize(url);
+            requireJdbcUrl(url, "jdbc:mysql://");
+            username = resolveCredential(username, defaultMysqlUsername);
+            password = resolveCredential(password, defaultMysqlPassword);
+            qualified = MysqlIdentifier.quoteTable(table);
+            query = "SELECT * FROM " + qualified + " LIMIT " + (limit + 1);
+        } else if (type.startsWith("pg_")) {
+            requireJdbcUrl(url, "jdbc:postgresql://");
+            username = resolveCredential(username, defaultPostgresUsername);
+            password = resolveCredential(password, defaultPostgresPassword);
+            schema = schema.isBlank() ? "public" : schema;
+            qualified = quoteQualified(schema, table, "PostgreSQL");
+            query = "SELECT * FROM " + qualified + " LIMIT " + (limit + 1);
+        } else {
+            requireJdbcUrl(url, "jdbc:oracle:");
+            username = resolveCredential(username, defaultOracleUsername);
+            password = resolveCredential(password, defaultOraclePassword);
+            schema = schema.isBlank() ? username : schema;
+            qualified = quoteQualified(schema.toUpperCase(), table.toUpperCase(), "Oracle");
+            query = "SELECT * FROM " + qualified + " FETCH FIRST " + (limit + 1) + " ROWS ONLY";
+        }
+
+        List<String> columns = new ArrayList<>();
+        List<List<String>> rows = new ArrayList<>();
+        try (Connection connection = DriverManager.getConnection(url, username, password);
+             Statement statement = connection.createStatement()) {
+            statement.setQueryTimeout(8);
+            statement.setFetchSize(limit + 1);
+            try (ResultSet resultSet = statement.executeQuery(query)) {
+                ResultSetMetaData metadata = resultSet.getMetaData();
+                for (int i = 1; i <= metadata.getColumnCount(); i++) columns.add(metadata.getColumnLabel(i));
+                while (resultSet.next() && rows.size() <= limit) {
+                    List<String> row = new ArrayList<>();
+                    for (int i = 1; i <= metadata.getColumnCount(); i++) {
+                        Object value = resultSet.getObject(i);
+                        row.add(value == null ? "" : String.valueOf(value));
+                    }
+                    rows.add(row);
+                }
+            }
+        }
+        boolean truncated = rows.size() > limit;
+        if (truncated) rows.remove(rows.size() - 1);
+        return remoteResult(type, columns, rows, truncated);
+    }
+
+    private Map<String, Object> previewHdfs(JsonNode params, int limit) throws Exception {
+        String path = text(params, "path").trim();
+        String delimiter = text(params, "delimiter");
+        if (delimiter.isEmpty()) delimiter = ",";
+        if (delimiter.length() != 1) throw new IllegalArgumentException("HDFS delimiter 必须是单个字符");
+        URI uri = URI.create(path);
+        if (!"hdfs".equalsIgnoreCase(uri.getScheme())) throw new IllegalArgumentException("HDFS 路径必须使用 hdfs://");
+        if (!allowedValues(allowedHdfsAuthorities).contains(uri.getAuthority())) {
+            throw new IllegalArgumentException("HDFS 地址不在预览白名单中");
+        }
+        List<String> columns = fieldNames(text(params, "fieldsConfig"));
+        if (columns.isEmpty()) throw new IllegalArgumentException("HDFS 预览缺少 fieldsConfig");
+        List<List<String>> rows = new ArrayList<>();
+        org.apache.hadoop.conf.Configuration configuration = new org.apache.hadoop.conf.Configuration();
+        try (org.apache.hadoop.fs.FileSystem fileSystem = org.apache.hadoop.fs.FileSystem.get(uri, configuration);
+             Reader reader = new InputStreamReader(fileSystem.open(new org.apache.hadoop.fs.Path(uri)), StandardCharsets.UTF_8);
+             CSVParser parser = CSVFormat.DEFAULT.builder().setDelimiter(delimiter.charAt(0)).build().parse(reader)) {
+            for (CSVRecord record : parser) {
+                if (rows.size() > limit) break;
+                List<String> row = new ArrayList<>();
+                for (int i = 0; i < columns.size(); i++) row.add(i < record.size() ? record.get(i) : "");
+                rows.add(row);
+            }
+        }
+        boolean truncated = rows.size() > limit;
+        if (truncated) rows.remove(rows.size() - 1);
+        return remoteResult("hdfs_input", columns, rows, truncated);
+    }
+
+    private Map<String, Object> remoteResult(String source, List<String> columns, List<List<String>> rows, boolean truncated) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("source", source);
+        result.put("columns", columns);
+        result.put("rows", rows);
+        result.put("truncated", truncated);
+        return result;
+    }
+
+    private void requireJdbcUrl(String url, String prefix) {
+        if (url == null || !url.startsWith(prefix)) throw new IllegalArgumentException("JDBC URL 类型与节点不匹配");
+        String host;
+        try {
+            if (prefix.equals("jdbc:oracle:")) {
+                Matcher matcher = Pattern.compile("@(?:\\/\\/)?([^:/]+)").matcher(url);
+                if (!matcher.find()) throw new IllegalArgumentException("Oracle JDBC URL 无法解析主机");
+                host = matcher.group(1);
+            } else {
+                host = URI.create(url.substring(5)).getHost();
+            }
+        } catch (Exception e) {
+            throw new IllegalArgumentException("JDBC URL 无法解析");
+        }
+        if (host == null || !allowedValues(allowedJdbcHosts).contains(host)) {
+            throw new IllegalArgumentException("JDBC 主机不在预览白名单中");
+        }
+    }
+
+    private String quoteQualified(String schema, String table, String label) {
+        Pattern identifier = Pattern.compile("[A-Za-z_][A-Za-z0-9_$]*");
+        if (!identifier.matcher(schema).matches() || !identifier.matcher(table).matches()) {
+            throw new IllegalArgumentException(label + " Schema 或表名不合法");
+        }
+        return "\"" + schema + "\".\"" + table + "\"";
+    }
+
+    private List<String> fieldNames(String fieldsConfig) throws Exception {
+        List<String> names = new ArrayList<>();
+        JsonNode fields = objectMapper.readTree(fieldsConfig == null || fieldsConfig.isBlank() ? "[]" : fieldsConfig);
+        if (!fields.isArray()) return names;
+        for (JsonNode field : fields) {
+            String name = field.path("name").asText().trim();
+            if (!name.isEmpty()) names.add(name);
+        }
+        return names;
+    }
+
+    private String resolveCredential(String value, String fallback) {
+        String trimmed = value == null ? "" : value.trim();
+        return trimmed.isEmpty() || (trimmed.startsWith("${") && trimmed.endsWith("}"))
+                ? (fallback == null ? "" : fallback) : trimmed;
+    }
+
+    private Set<String> allowedValues(String csv) {
+        Set<String> result = new LinkedHashSet<>();
+        if (csv != null) for (String value : csv.split(",")) result.add(value.trim());
+        return result;
+    }
+
+    private String text(JsonNode node, String field) {
+        return node != null && node.hasNonNull(field) ? node.get(field).asText() : "";
     }
 
     private Map<String, Object> previewCsv(java.io.File f, int n) {

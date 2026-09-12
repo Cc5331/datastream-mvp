@@ -21,6 +21,115 @@ services:
       timeout: 5s
       retries: 12
 
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    container_name: mvp-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-dataflow}
+      POSTGRES_USER: ${POSTGRES_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}
+      TZ: Asia/Shanghai
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./data/postgres_setup.sql:/docker-entrypoint-initdb.d/01-setup.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: ${REDIS_IMAGE:-redis:7.4-alpine}
+    container_name: mvp-redis
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?请在 .env 中设置 REDIS_PASSWORD}", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?请在 .env 中设置 REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  redis-init:
+    image: ${REDIS_IMAGE:-redis:7.4-alpine}
+    depends_on:
+      redis:
+        condition: service_healthy
+    command:
+      - sh
+      - -c
+      - |
+        redis-cli -h redis -a "$${REDIS_PASSWORD}" SET user:1 VIP
+        redis-cli -h redis -a "$${REDIS_PASSWORD}" SET user:2 NORMAL
+        redis-cli -h redis -a "$${REDIS_PASSWORD}" SET sale:1 华东重点订单
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?请在 .env 中设置 REDIS_PASSWORD}
+    restart: "no"
+
+  namenode:
+    image: ${HADOOP_IMAGE:-apache/hadoop:3.3.6}
+    container_name: mvp-namenode
+    hostname: namenode
+    user: root
+    command: ["bash", "-c", "/opt/hadoop/bin/hdfs namenode -format -nonInteractive -force && exec /opt/hadoop/bin/hdfs namenode"]
+    environment:
+      HADOOP_HOME: /opt/hadoop
+      HADOOP_CONF_DIR: /opt/hadoop/etc/hadoop
+    ports:
+      - "${HDFS_RPC_PORT:-9000}:9000"
+      - "${HDFS_UI_PORT:-9870}:9870"
+    volumes:
+      - ./docker/hadoop-conf/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml:ro
+      - ./docker/hadoop-conf/hdfs-site.xml:/opt/hadoop/etc/hadoop/hdfs-site.xml:ro
+      - namenode_data:/tmp/hadoop-root/dfs/name
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/hadoop/bin/hdfs dfsadmin -report >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 8s
+      retries: 24
+
+  datanode:
+    image: ${HADOOP_IMAGE:-apache/hadoop:3.3.6}
+    container_name: mvp-datanode
+    hostname: datanode
+    user: root
+    command: ["bash", "-c", "exec /opt/hadoop/bin/hdfs datanode"]
+    depends_on:
+      namenode:
+        condition: service_healthy
+    environment:
+      HADOOP_HOME: /opt/hadoop
+      HADOOP_CONF_DIR: /opt/hadoop/etc/hadoop
+    ports:
+      - "${HDFS_DATANODE_UI_PORT:-9864}:9864"
+    volumes:
+      - ./docker/hadoop-conf/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml:ro
+      - ./docker/hadoop-conf/hdfs-site.xml:/opt/hadoop/etc/hadoop/hdfs-site.xml:ro
+      - datanode_data:/tmp/hadoop-root/dfs/data
+
+  oracle:
+    profiles: ["oracle"]
+    image: gvenzl/oracle-free:23-slim-faststart
+    container_name: mvp-oracle
+    environment:
+      ORACLE_PASSWORD: ${ORACLE_SYS_PASSWORD:?请在 .env 中设置 ORACLE_SYS_PASSWORD}
+      APP_USER: ${ORACLE_USERNAME:-dataflow}
+      APP_USER_PASSWORD: ${ORACLE_PASSWORD:?请在 .env 中设置 ORACLE_PASSWORD}
+    ports:
+      - "${ORACLE_PORT:-1521}:1521"
+    volumes:
+      - oracle_data:/opt/oracle/oradata
+      - ./data/oracle_setup.sql:/container-entrypoint-initdb.d/01-setup.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "healthcheck.sh"]
+      interval: 15s
+      timeout: 10s
+      retries: 30
+
   kafka:
     image: apache/kafka:3.8.0
     container_name: mvp-kafka
@@ -57,6 +166,7 @@ services:
     ports:
       - "${FLINK_UI_PORT:-18081}:8081" # Flink Web UI / REST（宿主机端口可覆盖）
     environment:
+      HADOOP_CONF_DIR: /opt/hadoop-conf
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: jobmanager
         jobmanager.memory.process.size: 1024m
@@ -68,7 +178,10 @@ services:
     volumes:
       - flink_checkpoints:/flink-checkpoints
       - ./output:/output       # 作业输出目录（与宿主机共享）
-      - ./data:/data           # 作业输入数据目录
+      - ./data:/data           # 业务数据目录
+      - ./test-resources:/test-resources  # 测试数据集（表头剥离需写入 .nohdr，故可写）
+      - ./docker/hadoop-conf:/opt/hadoop-conf:ro
+
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/8081'"]
       interval: 10s
@@ -84,6 +197,7 @@ services:
       jobmanager:
         condition: service_healthy
     environment:
+      HADOOP_CONF_DIR: /opt/hadoop-conf
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: jobmanager
         taskmanager.host: taskmanager
@@ -97,6 +211,8 @@ services:
       - flink_checkpoints:/flink-checkpoints
       - ./output:/output
       - ./data:/data
+      - ./test-resources:/test-resources  # 表头剥离需写入 .nohdr 临时文件，故可写
+      - ./docker/hadoop-conf:/opt/hadoop-conf:ro
 
   sql-gateway:
     build: ./docker/flink
@@ -109,6 +225,7 @@ services:
     ports:
       - "${SQL_GATEWAY_PORT:-18083}:8083" # Flink SQL Gateway REST（宿主机端口可覆盖）
     environment:
+      HADOOP_CONF_DIR: /opt/hadoop-conf
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: jobmanager
         rest.address: jobmanager
@@ -122,6 +239,8 @@ services:
       - flink_checkpoints:/flink-checkpoints
       - ./output:/output
       - ./data:/data
+      - ./test-resources:/test-resources  # 表头剥离需写入 .nohdr 临时文件，故可写
+      - ./docker/hadoop-conf:/opt/hadoop-conf:ro
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/8083'"]
       interval: 10s
@@ -138,6 +257,10 @@ services:
         condition: service_healthy
       sql-gateway:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - "${BACKEND_PORT:-18080}:8080" # 后端 API（宿主机端口可覆盖）
     environment:
@@ -152,7 +275,14 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       OPERATOR_PASSWORD: ${OPERATOR_PASSWORD:-}
       VIEWER_PASSWORD: ${VIEWER_PASSWORD:-}
+      POSTGRES_USERNAME: ${POSTGRES_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}
+      ORACLE_USERNAME: ${ORACLE_USERNAME:-dataflow}
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD:?请在 .env 中设置 ORACLE_PASSWORD}
       APP_PREVIEW_ALLOWED_ROOTS: /data,/output
+      APP_PREVIEW_ALLOWED_JDBC_HOSTS: postgres,oracle,mysql
+      APP_PREVIEW_ALLOWED_HDFS_AUTHORITIES: namenode:9000
+      HADOOP_CONF_DIR: /opt/hadoop-conf
       OUTPUT_ROOT: /output
       AI_PROVIDER: ${AI_PROVIDER:-openai}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -168,6 +298,8 @@ services:
       - ./backend/plugins:/app/plugins    # 控件插件热加载
       - ./output:/output
       - ./data:/data
+      - ./test-resources:/test-resources  # 表头剥离需写入 .nohdr 临时文件，故可写
+      - ./docker/hadoop-conf:/opt/hadoop-conf:ro
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/8080'"]
       interval: 10s
@@ -190,5 +322,10 @@ services:
 
 volumes:
   mysql_data:
+  postgres_data:
+  redis_data:
+  namenode_data:
+  datanode_data:
+  oracle_data:
   kafka_data:
   flink_checkpoints:

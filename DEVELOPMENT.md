@@ -21,9 +21,9 @@
 
 ### 1.2 当前已实现功能（2026-08 实测可用）
 - **画布**：左侧控件库拖拽控件到画布、端口连线、点选配置参数、Delete 删除、双击删除、保存 / 提交 / 导出 / 导入 JSON、新建画布、清空、Ctrl+S 保存。
-- **控件（29 个内置）**：
+- **控件（31 个内置）**：
   - 输入：Datagen、CSV、Excel、JSON、XML、Parquet、HDFS、Kafka、MySQL、PostgreSQL、Oracle。
-  - 输出：CSV、Excel、JSON、XML、Parquet、HDFS、Kafka、MySQL。
+  - 输出：CSV、Excel、JSON、XML、Parquet、HDFS、Kafka、MySQL、PostgreSQL、Oracle。
   - 转换：字段拼接/过滤/改名、行过滤、JSON 解析、XML↔JSON、Redis 富化、去重、空值校验、条件路由。
 - **已实测链路**：
   - CSV → CSV / Excel / MySQL（自动建表，中文无乱码）
@@ -70,7 +70,7 @@
     │   │   ├── MvpBackendApplication.java
     │   │   ├── ai/                     # LlmClient(多服务商/加密落盘) / AgentService(NL2Pipeline + 诊断)
     │   │   ├── audit/                  # @Audit 注解 + AuditAspect(audit_log 落库)
-    │   │   ├── config/                 # DataInitializer(控件种子 29 个) / SecurityConfig / WebConfig / GlobalExceptionHandler / HadoopHomeConfig
+    │   │   ├── config/                 # DataInitializer(控件种子 31 个) / SecurityConfig / WebConfig / GlobalExceptionHandler / HadoopHomeConfig
     │   │   ├── controller/             # 11 个：Job/Auth/User/Ai/Alert/Audit/Monitor/Lineage/ControlRegistry/KafkaMonitor/Preview
     │   │   ├── dag/                    # DagDefinition(DAG模型) / DagExecutor / FlinkDagExecutor / LocalDagExecutor
     │   │   ├── model/                  # 11 个实体：JobDefinition / ControlRegistry / JobLog / JobVersion / JobDependency / AppUser / AuditLog / AlertRecord / DiagnosisReport / ScheduleHistory / TrendPoint
@@ -258,7 +258,7 @@
 | ai/LlmClient.java / ai/AgentService.java + ai/PromptCatalog | 多服务商 LLM 客户端、NL2Pipeline、智能诊断 | API Key 加密密钥来自环境变量或 backend/data/.ai_config_key，**不得硬编码** |
 | service/JobScheduler.java / DependencyService.java | cron 调度、依赖编排与自动触发 | 30s 扫描；运行中作业不重复提交 |
 | service/AuditService（audit 包）/ UserService.java / LineageService.java / PreviewService.java / KafkaMonitorService.java | 审计、用户管理、血缘、预览、Kafka 可视化 | 新端点记得 @PreAuthorize + owner 校验 |
-| config/DataInitializer.java | 控件种子（**29 个**，启动时清空重建） | 新增控件第一站，必须与前端 getBuiltinControls 同步 |
+| config/DataInitializer.java | 控件种子（**31 个**，启动时清空重建） | 新增控件第一站，必须与前端 getBuiltinControls 同步 |
 | config/SecurityConfig.java / WebConfig.java | 鉴权规则、CORS 白名单 | H2 console 默认关闭且仅 ADMIN；CORS 默认只放行本机 3000 |
 | controller/JobController.java | 作业 REST 路由（11 个控制器之一） | 写操作需 ADMIN/OPERATOR + owner |
 | dag/DagDefinition.java | DAG 模型 | 字段名即契约，勿改 |
@@ -465,3 +465,9 @@
 | 2026-09-11 | 两个确定性缺陷修复：① `HealthMonitor.checkLogKeywords` 中恒真条件 `... \|\| msg.length() > 0`（等于任意 ERROR 日志都命中）改为 `!msg.isBlank()`；② 前端 `getBuiltinControls()` 降级副本补齐缺失的 `datagen_input`（后端 29 个 vs 前端 28 个），修复 3 处历史编辑残留（行首多余逗号造成的**数组空元素**、缩进错乱、两条控件挤在同一行），并规整 11 个非法 JSON 的 paramSchema（`D:\code\...` 单反斜杠 / 嵌套 `\"` 未二次转义 → 参数面板 `JSON.parse` 抛错）；新增前端测试「内置控件降级副本与后端注册表保持一致」用 DataInitializer 反查类型清单，前后端控件数量/类型/paramSchema 合法性纳入 CI | HealthMonitor / 前端 app.js + test/app.test.js |
 | 2026-09-11 | 文档纠偏：把第 2 节技术栈、第 3 节目录结构（11 Controller / 27 Service / 11 Repository、plugin-sdk、ai_sidecar、data、docs、test-results）、第 4 节端口与启动命令（本机 18080/18081/18083、start-all.bat 不编译、需带 FLINK_CLUSTER_PORT）、第 5.4 节 schema 链与死代码说明、第 5.5 节提交顺序（**Gateway 优先**，REST 仅轮询认领）与 mock 真实后果（停在 SUBMITTED）、第 5.7 节轮询间隔（5s/10s/10s）、第 6.1 节文件地图（DataInitializer 种子 **29** 个）、第 7.1 节新增控件流程、第 8 节红线（新增 H2/CORS/AI 密钥/paramSchema 四条）、第 9 节回归清单（补自动化测试）与第 10 节路线全部改写；README 同步端口、轮询间隔、mock 说明、H2 开关、环境变量表、docs 现状 | DEVELOPMENT.md / README.md / .env.example |
 | 2026-09-11 | 新增根目录 `AGENTS.md` 工作区指令（DSH 自动注入，每个会话首次请求加载）：固化「改代码前先读 DEVELOPMENT.md」硬规则 + 第 5/6/8/9 节使用顺序 + 硬红线清单 + 文档纪律，避免每次重复口头交代 | 新增 AGENTS.md（根目录） |
+| 2026-09-12 | 多数据源互转 P0-1：修复 redis_lookup 仅输出 key、未查询 Redis 的问题，生成 SQL 现真实调用四参 RedisLookupUdf（host/port/password/keyPrefix+keyField），端口范围与必填字段服务端校验、SQL 字符串转义；UDF 可在 endpoint 变化时安全重建连接池；Docker Compose 增 Redis 7.4、持久卷、健康检查及幂等演示 key 初始化；DAG 翻译 11 测试、UDF 构建与 Compose 配置校验通过 | DagTranslationService / RedisLookupUdf / DagTranslationServiceTest / docker-compose.yml |
+| 2026-09-12 | 多数据源互转 P0-2：新增 PostgreSQL 双向转换（pg_output）。翻译层按上游 Schema 生成 JDBC Sink DDL，提交前经 PostgresqlTableCreator 按 FAIL_IF_MISSING / CREATE_IF_MISSING / VALIDATE_EXISTING 策略校验或建表；schema/table 白名单正则 + 双引号引用防注入，字段名支持中文；凭据走 POSTGRES_USERNAME/POSTGRES_PASSWORD 环境变量；新增 generateJdbcOutputDDL 与 batchSize 边界校验；日志中 password 统一脱敏为 ******；前后端控件注册表同步（29→30）；Docker 增 PostgreSQL 16 服务、初始化 SQL 与 healthcheck | DagTranslationService / PostgresqlTableCreator / DataInitializer / application.yml / docker-compose.yml / 前端 app.js |
+| 2026-09-12 | 多数据源互转 P0-3：HDFS 验收闭环。hdfs_input/hdfs_output 增加 Schema 缺失与 delimiter 单字符校验，杜绝 null 拼入 DDL；Docker 增 NameNode/DataNode（含 dfs.client.use.datanode.hostname）、共享 core-site.xml/hdfs-site.xml 与 HADOOP_CONF_DIR 注入 JobManager/TaskManager/SQL Gateway；prepare-flink-jars 补 Hadoop uber JAR | DagTranslationService / docker-compose.yml / docker/hadoop-conf / prepare-flink-jars.bat |
+| 2026-09-12 | 多数据源互转 P1-1：远程数据源预览与表头链。新增 POST /api/preview/node，仅接受 jobId+nodeId，由 JobService.findByIdForUser 做 owner 校验后从已保存 DAG 读取节点参数（不接受客户端伪造连接串）；支持 pg/oracle/mysql 输入输出与 hdfs_input，JDBC 主机与 HDFS authority 走配置白名单防 SSRF，标识符校验 + 只读限行查询 + 8s 超时，错误信息不回显密码；前端按节点类型分流并在未保存时提示先保存；FlinkJobStatusChecker.sourceHeaderFields 补齐 pg_input/oracle_input（JDBC 元数据）与 hdfs_input（fieldsConfig）表头 | PreviewController / PreviewService / FlinkJobStatusChecker / application.yml / 前端 app.js |
+| 2026-09-12 | 多数据源互转 P1-2：新增 Oracle 双向转换（oracle_output）。OracleTableCreator 统一大写规范、双引号引用、NUMBER/VARCHAR2/BINARY_DOUBLE/CLOB 类型映射与三种建表策略；oracle_input 改为 schema.table 限定名并复用同一标识符校验，凭据走 ORACLE_USERNAME/ORACLE_PASSWORD；Docker 增 Oracle Free 23 profile（gvenzl/oracle-free，不阻塞默认轻量编排）与初始化 SQL；前后端控件同步（30→31）；后端 84 测试、前端 10 测试、Maven Reactor 5/5、Compose 默认与 oracle profile 校验全绿 | DagTranslationService / OracleTableCreator / DataInitializer / docker-compose.yml / data/oracle_setup.sql / 前端 app.js + docs |
+| 2026-09-12 | 多数据源交叉 E2E 验收 **7/7 通过**（test-resources/multisource_e2e.py，真实 Flink 提交）：PostgreSQL→CSV(3行) / CSV→PostgreSQL(3000行+自动建表) / PostgreSQL→HDFS(part 文件) / HDFS→CSV(表头正确过滤) / CSV→Redis Lookup→CSV(取到真实 Redis 值「华东重点订单」) / CSV→字段过滤→PostgreSQL(3000行,列=sale_id/region/amount) / PostgreSQL→HDFS 链路。验收暴露并修复 5 个真实缺陷：① hdfs_input 把 CSV 表头当数据行读入——新增 hasHeader 参数，按 STRING 全列读取+SQL 层 `WHERE 首列 <> 字段名` 过滤表头，且 nodeSchemas 同步为 STRING 避免 sink 类型校验失败；② Flink 容器未挂载 test-resources，作业读不到输入数据——compose 为 JM/TM/SG/Backend 增加挂载（须可写，表头剥离要生成 .nohdr）；③ HDFS 容器权限——hdfs-site.xml 关闭 dfs.permissions.enabled（演示环境）；④ HDFS 集群重建后 DataNode 集群 ID 不匹配——清卷重建；⑤ 脚本 `.bat` 与 `docker exec` 路径/子命令格式修正（hdfs dfs 子命令需 `-` 前缀）。另将手动 HDFS 容器替换为 compose 管理的 namenode/datanode（apache/hadoop:3.3.6，含持久卷与健康检查） | test-resources/multisource_e2e.py + DagTranslationService + DataInitializer + docker-compose.yml + docker/hadoop-conf/ + 前端 app.js + docs |

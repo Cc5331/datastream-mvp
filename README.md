@@ -37,7 +37,7 @@ flowchart LR
 ## 一、功能特性
 
 - **可视化画布**：AntV X6 拖拽建节点、端口连线、点选配置参数、Delete 键 / 双击删除、保存 / 提交 / 导出 / 导入 JSON、新建画布、清空画布、Ctrl+S 保存。
-- **29 个内置控件**：CSV / Excel / JSON / XML / Parquet / HDFS / MySQL / PostgreSQL / Oracle / Kafka / Datagen 输入输出 + Redis 富化、字段拼接、字段过滤、字段改名、行过滤、JSON 解析、XML↔JSON 转换和数据质量控件。
+- **31 个内置控件**：CSV / Excel / JSON / XML / Parquet / HDFS / MySQL / PostgreSQL / Oracle / Kafka / Datagen 输入输出 + Redis 富化、字段拼接、字段过滤、字段改名、行过滤、JSON 解析、XML↔JSON 转换和数据质量控件。
 - **作业管理**：状态机 DRAFT → SUBMITTED → RUNNING → COMPLETED / FAILED / CANCELLED（依赖编排另有 WAITING / BLOCKED），Flink 状态每 5s 轮询回写（`app.monitor.status-poll-ms` 可配），日志落库可查。
 - **作业复制 / 定时调度**：一键复制作业（名称追加「（副本）」，状态重置 DRAFT）；作业可配置 cron 表达式定时自动提交（JobScheduler 每 30s 扫描，运行中不重复提交）。
 - **动态参数面板**：按控件 paramSchema 自动渲染 string / number / boolean / enum / array 类型参数。
@@ -76,7 +76,7 @@ mvn spring-boot:run -Dspring-boot.run.jvmArguments="-DFLINK_CLUSTER_PORT=18081 -
 
 - 后端地址：http://localhost:8080（`start-all.bat` 一键启动时使用 18080）
 - 元数据库（默认 H2）：H2 Web 控制台**默认关闭**；需要时用 `H2_CONSOLE_ENABLED=true` 启动，再以 ADMIN 账号访问 http://localhost:8080/h2-console （JDBC URL `jdbc:h2:file:./data/mvpdb`，用户名 `sa`，密码留空）
-- 启动时自动初始化 29 个内置控件
+- 启动时自动初始化 31 个内置控件
 - 首次空库启动前必须在 `.env` 配置 `JWT_SECRET`、启用 `BOOTSTRAP_USERS_ENABLED`，并设置三个角色的初始密码；已有用户库不会重复创建账号
 
 #### 3. 启动前端
@@ -122,7 +122,7 @@ docker compose ps       :: 查看状态，全部应为 healthy
 8. 到 http://localhost:8081 查看 Flink Job 运行状态；到项目根目录 `output/` 查看输出文件。
 9. 使用 MySQL 输出控件时，提交成功后在控件配置的库中查看自动创建的表（控件默认库为 `flink_demo`，Docker 编排另建 `datastream`）。
 
-## 四、内置控件（29 个）
+## 四、内置控件（31 个）
 
 | 分类 | type | 说明 | 状态 |
 |------|------|------|------|
@@ -141,12 +141,14 @@ docker compose ps       :: 查看状态，全部应为 healthy
 | 转换 | json_parse | 从 JSON 字段解析多个字段 | 可用 |
 | 输出 | json_output | 写 JSON Lines 文件（part 自动合并为单文件） | 可用 |
 | 转换 | field_concat | 多字段拼接为新字段 | 可用 |
-| 转换 | redis_lookup | 使用 Redis 查询结果富化字段 | 需 Redis/UDF jar |
+| 转换 | redis_lookup | 按字段值 GET Redis 并富化新字段 | 需 Redis/UDF jar |
 | 转换 | xml_json | XML ↔ JSON 互转 | 需 UDF jar |
 | 输出 | csv_output | 写 CSV 文件 | 可用 |
 | 输出 | excel_output | 写 .xlsx（临时 CSV + POI 转换） | 可用 |
 | 输出 | kafka_output | 写 Kafka 主题 | 需自建 Kafka |
 | 输出 | mysql_output | 写 MySQL 表（自动建表 utf8mb4） | 可用 |
+| 输出 | pg_output | 写 PostgreSQL 表（可选安全自动建表） | 可用 |
+| 输出 | oracle_output | 写 Oracle 表（可选安全自动建表） | 可用 |
 | 输出 | hdfs_output | 写 HDFS CSV 目录 | 可用 |
 | 输入 | xml_input | 读取 XML 文件（记录列表结构，嵌套子结构保留为 JSON） | 可用 |
 | 输出 | xml_output | 写 XML 文件（rootTag/rowTag 包裹） | 可用 |

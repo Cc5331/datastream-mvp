@@ -16,6 +16,9 @@ copy /y "%SRC%\flink-connector-jdbc-3.1.2-1.18.jar" lib\ >nul 2>nul
 copy /y "%SRC%\flink-sql-connector-kafka-3.2.0-1.18.jar" lib\ >nul 2>nul
 copy /y "%SRC%\mysql-connector-j-9.6.0.jar" lib\ >nul 2>nul
 copy /y "%SRC%\mysql-connector-java-8.0.28.jar" lib\ >nul 2>nul
+copy /y "%SRC%\postgresql-42.7.3.jar" lib\ >nul 2>nul
+copy /y "%SRC%\ojdbc11-23.4.0.24.05.jar" lib\ >nul 2>nul
+copy /y "%SRC%\flink-shaded-hadoop-2-uber-2.8.3-10.0.jar" lib\ >nul 2>nul
 
 echo [3/3] 当前 docker/flink/lib 内容:
 dir /b lib

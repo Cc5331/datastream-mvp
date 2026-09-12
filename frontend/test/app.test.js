@@ -82,6 +82,14 @@ test('告警中心支持批量标记已读与批量删除', () => {
   assert.match(html, /@click="loadAlerts\(\)" *>刷新/);
 });
 
+test('远程数据源预览使用已保存作业与节点标识', () => {
+  assert.match(appJs, /async previewNode\(jobId, nodeId, limit = 20\)/);
+  assert.match(appJs, /preview\/node/);
+  assert.match(appJs, /remoteTypes = new Set/);
+  assert.match(appJs, /api\.previewNode\(currentJobId, selectedNode\.value\.id\)/);
+  assert.match(appJs, /远程数据源预览前请先保存作业/);
+});
+
 test('内置控件降级副本与后端注册表保持一致', () => {
   // 红线：DataInitializer 与 getBuiltinControls 必须同步，否则后端不可用时画布缺控件
   const backendSrc = fs.readFileSync(
@@ -93,7 +101,7 @@ test('内置控件降级副本与后端注册表保持一致', () => {
   assert.ok(arrayLiteral, 'getBuiltinControls 应返回控件数组');
   const feControls = vm.runInNewContext('[' + arrayLiteral[1] + ']');
 
-  assert.equal(feControls.length, 29, '内置控件降级副本数量应与后端一致');
+  assert.equal(feControls.length, backendTypes.length, '内置控件降级副本数量应与后端一致');
   assert.equal(feControls.filter(c => !c).length, 0, '控件数组不能有空元素');
   // Array.from 归一到当前 realm，避免 vm 跨 realm 原型导致的 deepEqual 误报
   const feTypes = Array.from(feControls, c => c && c.type).sort();

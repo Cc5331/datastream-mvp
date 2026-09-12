@@ -51,6 +51,18 @@ public class FlinkJobStatusChecker {
     @Value("${app.storage.output-root:../output}")
     private String outputRoot;
 
+    @Value("${app.postgres.default-username:postgres}")
+    private String defaultPostgresUsername;
+
+    @Value("${app.postgres.default-password:}")
+    private String defaultPostgresPassword;
+
+    @Value("${app.oracle.default-username:system}")
+    private String defaultOracleUsername;
+
+    @Value("${app.oracle.default-password:}")
+    private String defaultOraclePassword;
+
     private static final Map<String, JobStatus> FLINK_TO_LOCAL_STATUS = new java.util.HashMap<>() {{
         put("CREATED", JobStatus.SUBMITTED);
         put("INITIALIZING", JobStatus.RUNNING);
@@ -537,7 +549,22 @@ convertExcelOutputsIfNeeded(job);
                     String password = params.has("password") ? params.get("password").asText() : "";
                     if (url.isEmpty() || table.isEmpty()) return null;
                     return mysqlColumnNameList(url, table, username, password);
-                } else if ("datagen_input".equals(type) || "kafka_input".equals(type)) {
+                } else if ("pg_input".equals(type)) {
+                    String url = params.path("url").asText().trim();
+                    String schema = params.path("schema").asText("public").trim();
+                    if (schema.isEmpty()) schema = "public";
+                    String table = params.path("table").asText().trim();
+                    String username = resolveHeaderCredential(params.path("username").asText(), defaultPostgresUsername);
+                    String password = resolveHeaderCredential(params.path("password").asText(), defaultPostgresPassword);
+                    return jdbcColumnNameList(url, schema, table, username, password, false);
+                } else if ("oracle_input".equals(type)) {
+                    String url = params.path("url").asText().trim();
+                    String username = resolveHeaderCredential(params.path("username").asText(), defaultOracleUsername).toUpperCase();
+                    String password = resolveHeaderCredential(params.path("password").asText(), defaultOraclePassword);
+                    String schema = params.path("schema").asText(username).trim().toUpperCase();
+                    String table = params.path("table").asText().trim().toUpperCase();
+                    return jdbcColumnNameList(url, schema, table, username, password, true);
+                } else if ("hdfs_input".equals(type) || "datagen_input".equals(type) || "kafka_input".equals(type)) {
                     String fc = params.has("fieldsConfig") ? params.get("fieldsConfig").asText() : "[]";
                     return fieldsConfigNameList(fc);
                 }
@@ -644,6 +671,34 @@ convertExcelOutputsIfNeeded(job);
             log.warn("mysql header query error: {}", e.getMessage());
             return null;
         }
+    }
+
+    private List<String> jdbcColumnNameList(String url, String schema, String table,
+                                            String username, String password, boolean uppercase) {
+        if (!schema.matches("[A-Za-z_][A-Za-z0-9_$]*") || !table.matches("[A-Za-z_][A-Za-z0-9_$]*")) {
+            log.warn("JDBC header query rejected invalid schema/table");
+            return null;
+        }
+        String safeSchema = uppercase ? schema.toUpperCase() : schema;
+        String safeTable = uppercase ? table.toUpperCase() : table;
+        String qualified = "\"" + safeSchema + "\".\"" + safeTable + "\"";
+        try (Connection conn = DriverManager.getConnection(url, username, password);
+             Statement st = conn.createStatement();
+             ResultSet rs = st.executeQuery("SELECT * FROM " + qualified + " WHERE 1=0")) {
+            ResultSetMetaData metadata = rs.getMetaData();
+            List<String> names = new ArrayList<>();
+            for (int i = 1; i <= metadata.getColumnCount(); i++) names.add(metadata.getColumnLabel(i));
+            return names.isEmpty() ? null : names;
+        } catch (Exception e) {
+            log.warn("JDBC header query failed: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private String resolveHeaderCredential(String value, String fallback) {
+        String trimmed = value == null ? "" : value.trim();
+        return trimmed.isEmpty() || (trimmed.startsWith("${") && trimmed.endsWith("}"))
+                ? (fallback == null ? "" : fallback) : trimmed;
     }
 
     private void prependSourceHeaderIfNeeded(JsonNode dagNode, String targetNodeId, String delimiter, java.io.File out) {

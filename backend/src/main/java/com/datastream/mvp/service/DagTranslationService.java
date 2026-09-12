@@ -34,6 +34,8 @@ public class DagTranslationService {
     private final ObjectMapper objectMapper;
     private final ExcelPreprocessor excelPreprocessor;
     private final MysqlTableCreator mysqlTableCreator;
+    private final PostgresqlTableCreator postgresqlTableCreator;
+    private final OracleTableCreator oracleTableCreator;
     private final XmlPreprocessor xmlPreprocessor;
     private final JsonPreprocessor jsonPreprocessor;
     private final ParquetPreprocessor parquetPreprocessor;
@@ -59,6 +61,18 @@ public class DagTranslationService {
     @Value("${app.mysql.default-password:}")
     private String defaultMysqlPassword;
 
+    @Value("${app.postgres.default-username:postgres}")
+    private String defaultPostgresUsername;
+
+    @Value("${app.postgres.default-password:}")
+    private String defaultPostgresPassword;
+
+    @Value("${app.oracle.default-username:system}")
+    private String defaultOracleUsername;
+
+    @Value("${app.oracle.default-password:}")
+    private String defaultOraclePassword;
+
     @Value("${app.storage.output-root:../output}")
     private String outputRoot;
 
@@ -83,6 +97,8 @@ public class DagTranslationService {
         List<DagDefinition.DagNode> sortedNodes = topologicalSort(dag);
         Map<String, String> tableAlias = new HashMap<>();
         Map<String, String> nodeSchemas = new HashMap<>();
+        // HDFS 输入的表头过滤条件（nodeId -> WHERE 条件），在边循环生成 SELECT 时应用
+        Map<String, String> hdfsHeaderFilters = new HashMap<>();
 
         for (DagDefinition.DagNode node : sortedNodes) {
             ControlRegistry control = controlService.findByType(node.getType());
@@ -237,8 +253,8 @@ public class DagTranslationService {
             if ("pg_input".equals(node.getType())) {
                 String url = node.getParams() != null && node.getParams().get("url") != null ? node.getParams().get("url").toString().trim() : "";
                 String table = node.getParams() != null && node.getParams().get("table") != null ? node.getParams().get("table").toString().trim() : "";
-                String username = node.getParams() != null && node.getParams().get("username") != null ? node.getParams().get("username").toString().trim() : "";
-                String password = resolveCredential(node.getParams() != null ? node.getParams().get("password") : null, "");
+                String username = resolveCredential(node.getParams() != null ? node.getParams().get("username") : null, defaultPostgresUsername);
+                String password = resolveCredential(node.getParams() != null ? node.getParams().get("password") : null, defaultPostgresPassword);
                 if (url.isEmpty() || table.isEmpty()) {
                     throw new RuntimeException("PostgreSQL 输入缺少 url / table 参数");
                 }
@@ -258,16 +274,21 @@ public class DagTranslationService {
             if ("oracle_input".equals(node.getType())) {
                 String url = node.getParams() != null && node.getParams().get("url") != null ? node.getParams().get("url").toString().trim() : "";
                 String table = node.getParams() != null && node.getParams().get("table") != null ? node.getParams().get("table").toString().trim().toUpperCase() : "";
-                String username = node.getParams() != null && node.getParams().get("username") != null ? node.getParams().get("username").toString().trim().toUpperCase() : "";
-                String password = resolveCredential(node.getParams() != null ? node.getParams().get("password") : null, "");
+                String username = resolveCredential(node.getParams() != null ? node.getParams().get("username") : null, defaultOracleUsername).toUpperCase();
+                String password = resolveCredential(node.getParams() != null ? node.getParams().get("password") : null, defaultOraclePassword);
                 if (url.isEmpty() || table.isEmpty()) {
                     throw new RuntimeException("Oracle 输入缺少 url / table 参数");
                 }
                 if (!url.startsWith("jdbc:oracle:")) {
                     throw new RuntimeException("Oracle 输入 url 必须以 jdbc:oracle: 开头（如 jdbc:oracle:thin:@host:1521/FREE）: " + url);
                 }
-                String fields = inferJdbcFields(url, table, username, password, "Oracle");
-                String rendered = generateJdbcInputDDL(sanitize(node.getId()), url, table, username, password, fields, "oracle.jdbc.OracleDriver");
+                Map<String, Object> oracleParams = new HashMap<>();
+                if (node.getParams() != null) oracleParams.putAll(node.getParams());
+                oracleParams.put("username", username);
+                oracleParams.put("table", table);
+                String qualifiedTable = oracleTableCreator.qualifiedTable(oracleParams);
+                String fields = inferJdbcFields(url, qualifiedTable, username, password, "Oracle");
+                String rendered = generateJdbcInputDDL(sanitize(node.getId()), url, qualifiedTable, username, password, fields, "oracle.jdbc.OracleDriver");
                 nodeSchemas.put(node.getId(), fields);
                 log.info("Oracle input {}: {}.{} -> {} fields", node.getId(), url, table, fields.split("\n").length);
                 flinkSql.append("-- Node: ").append(node.getLabel()).append(" (").append(node.getId()).append(") [Oracle Input]\n");
@@ -287,9 +308,21 @@ public class DagTranslationService {
                 if (!path.startsWith("hdfs://")) {
                     throw new RuntimeException("HDFS 输入 path 必须以 hdfs:// 开头: " + path);
                 }
-                String rendered = generateHdfsInputDDL(sanitize(node.getId()), path, fc, delimiter);
+                if (delimiter.length() != 1) {
+                    throw new RuntimeException("HDFS 输入 delimiter 必须是单个字符");
+                }
+                String hasHeader = node.getParams() != null && node.getParams().get("hasHeader") != null
+                        ? node.getParams().get("hasHeader").toString().trim() : "true";
+                boolean skipHeader = !"false".equalsIgnoreCase(hasHeader);
+                String rendered = generateHdfsInputDDL(sanitize(node.getId()), path, fc, delimiter, skipHeader);
                 String schema = extractFieldsFromDatagenConfig(fc);
+                // 跳表头时全列按 STRING 读，下游 schema 必须同步为 STRING，否则 sink 类型校验失败
+                if (skipHeader) schema = forceStringSchema(fc);
                 if (schema != null) nodeSchemas.put(node.getId(), schema);
+                if (skipHeader) {
+                    String filter = hdfsHeaderFilter(fc);
+                    if (filter != null) hdfsHeaderFilters.put(node.getId(), filter);
+                }
                 log.info("HDFS input {}: {} (schema: {})", node.getId(), path, schema);
                 flinkSql.append("-- Node: ").append(node.getLabel()).append(" (").append(node.getId()).append(") [HDFS Input]\n");
                 flinkSql.append(rendered).append("\n\n");
@@ -312,6 +345,12 @@ public class DagTranslationService {
                     throw new RuntimeException("HDFS 输出缺少上游输入节点连线");
                 }
                 String fields = findIncomingSourceSchema(node.getId(), dag.getEdges(), nodeSchemas);
+                if (fields == null || fields.isBlank()) {
+                    throw new RuntimeException("HDFS 输出无法获取上游字段，请确认输入与转换节点 Schema 完整");
+                }
+                if (delimiter.length() != 1) {
+                    throw new RuntimeException("HDFS 输出 delimiter 必须是单个字符");
+                }
                 String rendered = generateHdfsOutputDDL(sanitize(node.getId()), path, delimiter, fields);
                 log.info("HDFS output {}: {}", node.getId(), path);
                 flinkSql.append("-- Node: ").append(node.getLabel()).append(" (").append(node.getId()).append(") [HDFS Output]\n");
@@ -481,6 +520,60 @@ public class DagTranslationService {
             }
 
 
+            // PostgreSQL Output -> JDBC Sink；按安全策略校验/创建目标表
+            if ("pg_output".equals(node.getType())) {
+                String fields = findIncomingSourceSchema(node.getId(), dag.getEdges(), nodeSchemas);
+                if (fields == null || fields.isBlank()) {
+                    throw new RuntimeException("PostgreSQL 输出无法获取上游字段，请确认节点已正确连线");
+                }
+                Map<String, Object> params = new HashMap<>();
+                if (node.getParams() != null) params.putAll(node.getParams());
+                String url = String.valueOf(params.getOrDefault("url", "")).trim();
+                if (!url.startsWith("jdbc:postgresql://")) {
+                    throw new RuntimeException("PostgreSQL 输出 url 必须以 jdbc:postgresql:// 开头");
+                }
+                String username = resolveCredential(params.get("username"), defaultPostgresUsername);
+                String password = resolveCredential(params.get("password"), defaultPostgresPassword);
+                params.put("username", username);
+                params.put("password", password);
+                int batchSize = parseBoundedInt(params.get("batchSize"), 1000, 1, 10000, "PostgreSQL 输出 batchSize");
+                String qualifiedTable = postgresqlTableCreator.qualifiedTable(params);
+                postgresqlTableCreator.ensureTable(params, fields);
+                String rendered = generateJdbcOutputDDL(sanitize(node.getId()), url, qualifiedTable,
+                        username, password, fields, "org.postgresql.Driver", batchSize);
+                flinkSql.append("-- Node: ").append(node.getLabel()).append(" (").append(node.getId()).append(") [PostgreSQL Output]\n");
+                flinkSql.append(rendered).append("\n\n");
+                tableAlias.put(node.getId(), sanitize(node.getId()));
+                continue;
+            }
+
+            // Oracle Output -> JDBC Sink；按安全策略校验/创建目标表
+            if ("oracle_output".equals(node.getType())) {
+                String fields = findIncomingSourceSchema(node.getId(), dag.getEdges(), nodeSchemas);
+                if (fields == null || fields.isBlank()) {
+                    throw new RuntimeException("Oracle 输出无法获取上游字段，请确认节点已正确连线");
+                }
+                Map<String, Object> params = new HashMap<>();
+                if (node.getParams() != null) params.putAll(node.getParams());
+                String url = String.valueOf(params.getOrDefault("url", "")).trim();
+                if (!url.startsWith("jdbc:oracle:")) {
+                    throw new RuntimeException("Oracle 输出 url 必须以 jdbc:oracle: 开头");
+                }
+                String username = resolveCredential(params.get("username"), defaultOracleUsername).toUpperCase();
+                String password = resolveCredential(params.get("password"), defaultOraclePassword);
+                params.put("username", username);
+                params.put("password", password);
+                int batchSize = parseBoundedInt(params.get("batchSize"), 500, 1, 10000, "Oracle 输出 batchSize");
+                String qualifiedTable = oracleTableCreator.qualifiedTable(params);
+                oracleTableCreator.ensureTable(params, fields);
+                String rendered = generateJdbcOutputDDL(sanitize(node.getId()), url, qualifiedTable,
+                        username, password, fields, "oracle.jdbc.OracleDriver", batchSize);
+                flinkSql.append("-- Node: ").append(node.getLabel()).append(" (").append(node.getId()).append(") [Oracle Output]\n");
+                flinkSql.append(rendered).append("\n\n");
+                tableAlias.put(node.getId(), sanitize(node.getId()));
+                continue;
+            }
+
             if (template == null || template.isBlank()) {
                 if (!"transform".equals(control.getCategory())) {
                     log.warn("Control {} has no Flink template, skipping", node.getType());
@@ -602,14 +695,20 @@ public class DagTranslationService {
                     }
                 }
                 if (upstreamTable == null) upstreamTable = sourceTable;
+                // HDFS 输入含表头时，转换节点的上游同样要过滤
+                String upstreamHeaderFilter = hdfsHeaderFilters.get(edge.getSource()) != null
+                        ? hdfsHeaderFilters.get(edge.getSource()) : hdfsHeaderFilters.get(upstreamTable);
+                String upstreamSource = upstreamHeaderFilter != null
+                        ? "(SELECT * FROM " + upstreamTable + " WHERE " + upstreamHeaderFilter + ")"
+                        : upstreamTable;
                 String ts;
                 Map<String, Object> tp = transformNodeParams.get(edge.getSource());
                 if ("field_filter".equals(transformType)) {
-                    ts = "SELECT " + buildFieldFilterSelect(tp) + " FROM " + upstreamTable;
+                    ts = "SELECT " + buildFieldFilterSelect(tp) + " FROM " + upstreamSource;
                 } else if ("field_rename".equals(transformType)) {
-                    ts = "SELECT " + buildFieldRenameSelect(tp, findIncomingSourceSchema(edge.getSource(), dag.getEdges(), nodeSchemas)) + " FROM " + upstreamTable;
+                    ts = "SELECT " + buildFieldRenameSelect(tp, findIncomingSourceSchema(edge.getSource(), dag.getEdges(), nodeSchemas)) + " FROM " + upstreamSource;
                 } else if ("json_parse".equals(transformType)) {
-                    ts = "SELECT " + buildJsonParseSelect(tp, findIncomingSourceSchema(edge.getSource(), dag.getEdges(), nodeSchemas)) + " FROM " + upstreamTable;
+                    ts = "SELECT " + buildJsonParseSelect(tp, findIncomingSourceSchema(edge.getSource(), dag.getEdges(), nodeSchemas)) + " FROM " + upstreamSource;
                 } else if ("dedupe".equals(transformType)) {
                     List<String> dedupeFields = parseCsvFields(tp != null ? tp.get("dedupeFields") : null);
                     if (dedupeFields.isEmpty()) {
@@ -618,7 +717,7 @@ public class DagTranslationService {
                         String incomingSchema = findIncomingSourceSchema(edge.getSource(), dag.getEdges(), nodeSchemas);
                         List<String> allCols = parseSchemaFieldNames(incomingSchema);
                         if (allCols.isEmpty()) {
-                            ts = "SELECT DISTINCT " + quoteFieldsList(dedupeFields) + " FROM " + upstreamTable;
+                            ts = "SELECT DISTINCT " + quoteFieldsList(dedupeFields) + " FROM " + upstreamSource;
                         } else {
                             String partition = String.join(", ", dedupeFields.stream().map(this::quoteFlinkField).toList());
                             String orderKey = quoteFlinkField(dedupeFields.get(0));
@@ -644,12 +743,21 @@ public class DagTranslationService {
                 continue;
             }
 
-            flinkSql.append("INSERT INTO ").append(targetTable)
-                    .append(" SELECT * FROM ").append(sourceTable).append(";\n");
+            // HDFS 输入若含表头，读入后在 SELECT 层过滤掉表头行
+            String headerFilter = hdfsHeaderFilters.get(edge.getSource());
+            if (headerFilter != null) {
+                flinkSql.append("INSERT INTO ").append(targetTable)
+                        .append(" SELECT * FROM ").append(sourceTable)
+                        .append(" WHERE ").append(headerFilter).append(";\n");
+            } else {
+                flinkSql.append("INSERT INTO ").append(targetTable)
+                        .append(" SELECT * FROM ").append(sourceTable).append(";\n");
+            }
         }
 
-        log.info("Generated Flink SQL:\n{}", flinkSql.toString());
-        return flinkSql.toString();
+        String translatedSql = flinkSql.toString();
+        log.info("Generated Flink SQL:\n{}", redactSqlSecrets(translatedSql));
+        return translatedSql;
     }
 
     /**
@@ -1195,8 +1303,13 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
         return path;
     }
 
-    /** 生成 HDFS 输入 DDL：filesystem connector + CSV format，fieldsConfig 指定 schema（HDFS 无表头推导，需用户声明字段） */
-    private String generateHdfsInputDDL(String tableName, String path, String fieldsConfig, String delimiter) {
+    /**
+     * 生成 HDFS 输入 DDL：filesystem connector + CSV format。
+     * fieldsConfig 指定 schema；hasHeader=true 时按字符串全列读取，由下游过滤表头行
+     * （Flink CSV connector 无 skip-header 选项，只能读入后过滤）。
+     */
+    private String generateHdfsInputDDL(String tableName, String path, String fieldsConfig, String delimiter,
+                                        boolean skipHeader) {
         JsonNode fa = tryParseJsonArray(fieldsConfig);
         StringBuilder ddl = new StringBuilder();
         ddl.append("CREATE TABLE ").append(tableName).append(" (\n");
@@ -1205,6 +1318,8 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
                 JsonNode f = fa.get(i);
                 String fn = f.has("name") ? f.get("name").asText() : "field" + i;
                 String ft = f.has("type") ? f.get("type").asText() : "STRING";
+                // 需要跳过表头时全列按 STRING 读，避免表头文本触发类型解析失败被整行丢弃
+                if (skipHeader) ft = "STRING";
                 ddl.append("  ").append(quoteFlinkField(fn)).append(" ").append(ft);
                 if (i < fa.size() - 1) ddl.append(",");
                 ddl.append("\n");
@@ -1221,6 +1336,30 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
         ddl.append("  'csv.allow-comments' = 'false'\n");
         ddl.append(");\n");
         return ddl.toString();
+    }
+
+    /** HDFS 输入的表头过滤条件：首列等于该列字段名即判定为表头行。 */
+    private String hdfsHeaderFilter(String fieldsConfig) {
+        JsonNode fa = tryParseJsonArray(fieldsConfig);
+        if (fa == null || !fa.isArray() || fa.size() == 0) return null;
+        JsonNode first = fa.get(0);
+        String firstField = first.has("name") ? first.get("name").asText().trim() : "";
+        if (firstField.isEmpty()) return null;
+        return quoteFlinkField(firstField) + " <> '" + firstField.replace("'", "''") + "'";
+    }
+
+    /** 按 fieldsConfig 的字段名生成全 STRING 的 schema（跳表头时使用，保证与读取类型一致）。 */
+    private String forceStringSchema(String fieldsConfig) {
+        JsonNode fa = tryParseJsonArray(fieldsConfig);
+        if (fa == null || !fa.isArray() || fa.size() == 0) return null;
+        StringBuilder sb = new StringBuilder();
+        for (JsonNode f : fa) {
+            String fn = f.has("name") ? f.get("name").asText().trim() : "";
+            if (fn.isEmpty()) continue;
+            if (sb.length() > 0) sb.append(",\n");
+            sb.append("  ").append(quoteFlinkField(fn)).append(" STRING");
+        }
+        return sb.length() == 0 ? null : sb.toString();
     }
 
     /** 生成 HDFS 输出 DDL：filesystem connector，非分区流式写（source 下游为有界时写完即 FINISHED） */
@@ -1363,13 +1502,32 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
     private String resolveCredential(Object value, String envDefault) {
         if (value == null || value.toString().trim().isEmpty()) return envDefault == null ? "" : envDefault;
         String v = value.toString().trim();
-        if ("${MYSQL_USERNAME}".equals(v) || "${MYSQL_PASSWORD}".equals(v)) {
+        if (v.startsWith("${") && v.endsWith("}")) {
             return envDefault == null ? "" : envDefault;
         }
         return v;
     }
 
     private String sanitize(String id) { return id.replaceAll("[^a-zA-Z0-9_]", "_"); }
+
+    private String escapeSqlLiteral(String value) {
+        return value == null ? "" : value.replace("'", "''");
+    }
+
+    private String redactSqlSecrets(String sql) {
+        return sql.replaceAll("(?im)^([ \\t]*'password'[ \\t]*=[ \\t]*').*(',?[ \\t]*)$", "$1******$2");
+    }
+
+    private int parseBoundedInt(Object value, int fallback, int min, int max, String label) {
+        if (value == null || value.toString().isBlank()) return fallback;
+        try {
+            int parsed = Integer.parseInt(value.toString().trim());
+            if (parsed < min || parsed > max) throw new NumberFormatException();
+            return parsed;
+        } catch (NumberFormatException e) {
+            throw new RuntimeException(label + " 必须是 " + min + "-" + max + " 的整数");
+        }
+    }
 
     private List<String> parseCsvFields(Object rawObj) {
         String raw = rawObj != null ? rawObj.toString() : "";
@@ -1575,19 +1733,33 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
         String keyField = params != null && params.get("keyField") != null ? params.get("keyField").toString().trim() : "";
         String targetField = params != null && params.get("targetField") != null ? params.get("targetField").toString().trim() : "extra_info";
         String keyPrefix = params != null && params.get("keyPrefix") != null ? params.get("keyPrefix").toString() : "";
+        String host = params != null && params.get("host") != null ? params.get("host").toString().trim() : "localhost";
+        String port = params != null && params.get("port") != null ? params.get("port").toString().trim() : "6379";
+        String password = params != null && params.get("password") != null ? params.get("password").toString() : "";
         if (keyField.isEmpty()) {
             throw new RuntimeException("Redis 富化: 请填写 keyField（用作 Redis key 的字段名）");
         }
-        StringBuilder sb = new StringBuilder();
-        sb.append("SELECT *, ");
-        if (keyPrefix != null && !keyPrefix.isEmpty()) {
-            sb.append("CONCAT('").append(keyPrefix.replace("'", "''")).append("', CAST(")
-              .append(quoteFlinkField(keyField)).append(" AS STRING))");
-        } else {
-            sb.append("CAST(").append(quoteFlinkField(keyField)).append(" AS STRING)");
+        if (targetField.isEmpty()) {
+            throw new RuntimeException("Redis 富化: 请填写 targetField（扩充字段名）");
         }
-        sb.append(" AS ").append(quoteFlinkField(targetField));
-        return sb.append(" FROM ").append(upstreamTable).toString();
+        if (host.isEmpty()) {
+            throw new RuntimeException("Redis 富化: 请填写 Redis 地址");
+        }
+        int portNumber;
+        try {
+            portNumber = Integer.parseInt(port);
+        } catch (NumberFormatException e) {
+            throw new RuntimeException("Redis 富化: 端口必须是 1-65535 的整数");
+        }
+        if (portNumber < 1 || portNumber > 65535) {
+            throw new RuntimeException("Redis 富化: 端口必须是 1-65535 的整数");
+        }
+        String keyExpression = keyPrefix.isEmpty()
+                ? "CAST(" + quoteFlinkField(keyField) + " AS STRING)"
+                : "CONCAT('" + escapeSqlLiteral(keyPrefix) + "', CAST(" + quoteFlinkField(keyField) + " AS STRING))";
+        return "SELECT *, redis_lookup('" + escapeSqlLiteral(host) + "', '" + portNumber + "', '"
+                + escapeSqlLiteral(password) + "', " + keyExpression + ") AS " + quoteFlinkField(targetField)
+                + " FROM " + upstreamTable;
     }
 
     private String buildJsonParseSelect(Map<String, Object> params, String incomingSchema) {        String srcField = params != null && params.get("sourceField") != null ? params.get("sourceField").toString().trim() : "";
@@ -1668,6 +1840,21 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
         ddl.append("  'scan.fetch-size' = '1000'\n");
         ddl.append(");\n");
         return ddl.toString();
+    }
+
+    private String generateJdbcOutputDDL(String tableName, String url, String targetTable,
+                                         String username, String password, String fields,
+                                         String driver, int batchSize) {
+        return "CREATE TABLE " + tableName + " (\n" + fields + "\n) WITH (\n"
+                + "  'connector' = 'jdbc',\n"
+                + "  'url' = '" + escapeSqlLiteral(url) + "',\n"
+                + "  'table-name' = '" + escapeSqlLiteral(targetTable) + "',\n"
+                + "  'username' = '" + escapeSqlLiteral(username) + "',\n"
+                + "  'password' = '" + escapeSqlLiteral(password) + "',\n"
+                + "  'driver' = '" + driver + "',\n"
+                + "  'sink.buffer-flush.max-rows' = '" + batchSize + "',\n"
+                + "  'sink.buffer-flush.interval' = '1s'\n"
+                + ");\n";
     }
 
     /** 通用 JDBC 字段推导（复用 MySQL 推导逻辑 + 类型映射，限 SELECT * LIMIT 0 元数据） */

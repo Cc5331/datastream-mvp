@@ -19,6 +19,7 @@ public class RedisLookupUdf extends ScalarFunction {
 
     private transient JedisPool pool;
     private transient Cache<String, String> cache;
+    private transient String poolEndpoint;
 
     /** 可选配置：host/port/password 通过 eval 的三参重载由 SQL 传入（默认重载走单参） */
     public String eval(String key) {
@@ -53,6 +54,12 @@ public class RedisLookupUdf extends ScalarFunction {
     }
 
     private synchronized void ensurePool(String host, int port, String password) {
+        String endpoint = host + ":" + port + ":" + (password == null ? "" : password);
+        if (pool != null && !endpoint.equals(poolEndpoint)) {
+            pool.close();
+            pool = null;
+            cache = null;
+        }
         if (pool == null) {
             JedisPoolConfig cfg = new JedisPoolConfig();
             cfg.setMaxTotal(16);
@@ -66,6 +73,7 @@ public class RedisLookupUdf extends ScalarFunction {
                     .expireAfterWrite(Duration.ofSeconds(60))
                     .maximumSize(10_000)
                     .build();
+            poolEndpoint = endpoint;
         }
     }
 
@@ -75,6 +83,8 @@ public class RedisLookupUdf extends ScalarFunction {
             pool.close();
             pool = null;
         }
+        cache = null;
+        poolEndpoint = null;
         super.close();
     }
 }

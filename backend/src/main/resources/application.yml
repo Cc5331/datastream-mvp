@@ -86,6 +86,8 @@ app:
   preview:
     allowed-roots: ${APP_PREVIEW_ALLOWED_ROOTS:../data,../test-resources,../output}
     max-file-bytes: ${APP_PREVIEW_MAX_FILE_BYTES:67108864}
+    allowed-jdbc-hosts: ${APP_PREVIEW_ALLOWED_JDBC_HOSTS:localhost,127.0.0.1,postgres,oracle,mysql}
+    allowed-hdfs-authorities: ${APP_PREVIEW_ALLOWED_HDFS_AUTHORITIES:localhost:9000,namenode:9000}
   storage:
     output-root: ${OUTPUT_ROOT:../output}
 
@@ -93,6 +95,14 @@ app:
     # mysql_input/mysql_output 控件默认用户名与密码（预填 + 预览用），通过环境变量注入，不入库
     default-username: ${MYSQL_USERNAME:root}
     default-password: ${MYSQL_PASSWORD:}
+  postgres:
+    # PostgreSQL 输入/输出默认凭据，仅从环境变量注入
+    default-username: ${POSTGRES_USERNAME:postgres}
+    default-password: ${POSTGRES_PASSWORD:}
+  oracle:
+    # Oracle 输入/输出默认凭据，仅从环境变量注入
+    default-username: ${ORACLE_USERNAME:system}
+    default-password: ${ORACLE_PASSWORD:}
 
   monitor:
     # 告警/健康扫描与 Flink 状态轮询间隔（毫秒），越小告警越及时但也越耗 Flink HTTP
