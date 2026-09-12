@@ -68,10 +68,11 @@ app:
     cors-allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://127.0.0.1:3000}
   hadoop-home: ${HADOOP_HOME:D:\\code\\hadoop}
   ai:
-    provider: ${AI_PROVIDER:openai}
-    api-key: ${OPENAI_API_KEY:${DEEPSEEK_API_KEY:}}
-    base-url: ${OPENAI_BASE_URL:${DEEPSEEK_BASE_URL:https://api.deepseek.com}}
-    model: ${OPENAI_MODEL:${DEEPSEEK_MODEL:deepseek-v4-flash}}
+    # 默认 DeepSeek；切回 OpenAI 时设 AI_PROVIDER=openai 并提供 OPENAI_API_KEY
+    provider: ${AI_PROVIDER:deepseek}
+    api-key: ${DEEPSEEK_API_KEY:${OPENAI_API_KEY:}}
+    base-url: ${DEEPSEEK_BASE_URL:${OPENAI_BASE_URL:https://api.deepseek.com}}
+    model: ${DEEPSEEK_MODEL:${OPENAI_MODEL:deepseek-v4-flash}}
     allowed-models: ${AI_ALLOWED_MODELS:deepseek-v4-flash,deepseek-v4-flash-vision-exp}
     timeout-ms: ${AI_TIMEOUT_MS:60000}
   alert:
