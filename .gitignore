@@ -3,6 +3,9 @@ flink-1.18.1/
 **/target/
 backend/data/
 node_modules/
+.m2-drivers/
+__pycache__/
+*.pyc
 
 # ===== 输出与日志 =====
 output/

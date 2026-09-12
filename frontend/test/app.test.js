@@ -44,6 +44,17 @@ test('吞吐趋势支持独立动态刻度和统计标记', () => {
   assert.match(appJs, /trendChart\.dispose\(\)/);
 });
 
+test('每条吞吐趋势曲线提供独立删除按钮', () => {
+  assert.match(appJs, /async removeMonitorTrend\(jobId\)/);
+  assert.match(appJs, /function removeMonitorTrend\(trend\)/);
+  assert.match(appJs, /function trendActionTop\(trend\)/);
+  assert.match(appJs, /removeMonitorTrend\(trend\.id\)/);
+  assert.match(appJs, /removeMonitorTrend, trendActionTop/);
+  assert.match(html, /class="monitor-trend-actions"/);
+  assert.match(html, /class="trend-delete-btn"/);
+  assert.match(html, /@click="removeMonitorTrend\(trend\)"/);
+});
+
 test('告警中心支持分页、登录轮询和错误反馈', () => {
   assert.match(appJs, /data\.content \|\| \[\]/);
   assert.match(appJs, /function startAlertPolling/);

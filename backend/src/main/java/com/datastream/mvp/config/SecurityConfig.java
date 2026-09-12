@@ -33,7 +33,7 @@ public class SecurityConfig {
             .cors(AbstractHttpConfigurer::disable)
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/api/auth/login", "/api/auth/me", "/error").permitAll()
+                .requestMatchers("/api/auth/login", "/api/auth/register", "/api/auth/me", "/error").permitAll()
                 .requestMatchers("/h2-console/**").permitAll()
                 .anyRequest().authenticated())
             .exceptionHandling(ex -> ex

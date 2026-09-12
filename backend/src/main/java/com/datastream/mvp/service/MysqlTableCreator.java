@@ -68,6 +68,7 @@ public class MysqlTableCreator {
         if (table.isEmpty()) {
             throw new RuntimeException("MySQL 输出缺少表名");
         }
+        String quotedTable = com.datastream.mvp.util.MysqlIdentifier.quoteTable(table);
 
         String db = parseDatabase(url);
         if (db == null || db.isEmpty()) {
@@ -79,7 +80,7 @@ public class MysqlTableCreator {
             throw new RuntimeException("MySQL 输出无法获取字段定义，请确认输入/转换节点已正确连线");
         }
 
-        String ddl = "CREATE TABLE IF NOT EXISTS `" + table + "` (\n  "
+        String ddl = "CREATE TABLE IF NOT EXISTS " + quotedTable + " (\n  "
                 + String.join(",\n  ", columns)
                 + "\n) DEFAULT CHARSET=utf8mb4";
 

@@ -26,6 +26,7 @@ public class AiController {
 
     private final AgentService agentService;
     private final LlmClient llmClient;
+    private final com.datastream.mvp.service.JobService jobService;
 
     public record Nl2PipelineRequest(String prompt, String model) {}
     public record AiConfigRequest(String provider, String baseUrl, String apiKey,
@@ -155,7 +156,14 @@ public class AiController {
     @Audit(action = "AI_DIAGNOSE", targetType = "JOB", targetId = "#jobId")
     public Map<String, Object> diagnose(@PathVariable Long jobId,
                                         @RequestParam(required = false) String model) {
-        return agentService.diagnose(jobId, model);
+        return agentService.diagnose(jobId, model, currentUser());
+    }
+
+    @GetMapping("/diagnose/{jobId}")
+    @PreAuthorize("hasAnyRole('ADMIN','OPERATOR','VIEWER')")
+    public List<com.datastream.mvp.model.DiagnosisReport> diagnosisHistory(@PathVariable Long jobId) {
+        jobService.findByIdForUser(jobId, currentUser());
+        return agentService.listDiagnosis(jobId);
     }
 
     private CurrentUser currentUser() {

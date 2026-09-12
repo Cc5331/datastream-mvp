@@ -94,8 +94,25 @@ public class JobService {
         return create(job);
     }
 
+    /**
+     * 服务端强制推导 source 与 confirmationStatus：忽略客户端传入的确认状态，防止绕过人工确认。
+     * AI 来源 -> PENDING；其余 -> NOT_REQUIRED；非 CONFIRMED 时清空确认人与时间。
+     */
+    private void applySourceConfirmation(JobDefinition job) {
+        if (job.getSource() == null) job.setSource(JobDefinition.JobSource.MANUAL);
+        job.setConfirmationStatus(job.getSource() == JobDefinition.JobSource.AI
+                ? JobDefinition.ConfirmationStatus.PENDING
+                : JobDefinition.ConfirmationStatus.NOT_REQUIRED);
+        if (job.getConfirmationStatus() != JobDefinition.ConfirmationStatus.CONFIRMED) {
+            job.setConfirmedBy(null);
+            job.setConfirmedByName(null);
+            job.setConfirmedAt(null);
+        }
+    }
+
     public JobDefinition create(JobDefinition job) {
         job.setStatus(JobDefinition.JobStatus.DRAFT);
+        applySourceConfirmation(job);
         job.setCreatedAt(LocalDateTime.now());
         job.setUpdatedAt(LocalDateTime.now());
         JobDefinition saved = jobRepo.save(job);
@@ -122,6 +139,9 @@ public class JobService {
         }
         if (update.getWebhookUrl() != null) existing.setWebhookUrl(update.getWebhookUrl());
         if (update.getScheduleMaxRetries() != null) existing.setScheduleMaxRetries(update.getScheduleMaxRetries());
+        // source / confirmationStatus 由服务端维护，忽略客户端传入，防止绕过人工确认
+        if (update.getSource() != null) existing.setSource(update.getSource());
+        applySourceConfirmation(existing);
         existing.setUpdatedAt(LocalDateTime.now());
         JobDefinition saved = jobRepo.save(existing);
         boolean changed = !java.util.Objects.equals(prevDag, saved.getDagJson())
@@ -142,11 +162,31 @@ public class JobService {
         }
     }
 
+    public JobDefinition confirmAiDraft(Long id, CurrentUser currentUser) {
+        JobDefinition job = findByIdForUser(id, currentUser);
+        if (job.getSource() != JobDefinition.JobSource.AI) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "该作业不是 AI 生成草稿");
+        }
+        if (job.getStatus() != JobDefinition.JobStatus.DRAFT) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "只有 DRAFT 状态的 AI 作业可以确认");
+        }
+        job.setConfirmationStatus(JobDefinition.ConfirmationStatus.CONFIRMED);
+        job.setConfirmedBy(currentUser.id());
+        job.setConfirmedByName(currentUser.displayName() == null ? currentUser.username() : currentUser.displayName());
+        job.setConfirmedAt(LocalDateTime.now());
+        job.setUpdatedAt(LocalDateTime.now());
+        return jobRepo.save(job);
+    }
+
     /**
      * 提交作业到 Flink
      */
     public JobDefinition submit(Long id) {
         JobDefinition job = findById(id);
+        if (job.getSource() == JobDefinition.JobSource.AI
+                && job.getConfirmationStatus() != JobDefinition.ConfirmationStatus.CONFIRMED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "AI 生成作业必须先人工确认");
+        }
         try {
             // 解析 DAG JSON
             DagDefinition dag = objectMapper.readValue(job.getDagJson(), DagDefinition.class);
@@ -404,11 +444,12 @@ public class JobService {
                     if ("mysql_output".equals(type) && params != null) {
                         String url = JdbcUrlUtil.normalize(params.has("url") ? params.get("url").asText() : "jdbc:mysql://localhost:3306/flink_demo");
                         String table = params.has("table") ? params.get("table").asText() : "user_data";
+                        String quotedTable = com.datastream.mvp.util.MysqlIdentifier.quoteTable(table);
                         String username = resolveCredential(params.has("username") ? params.get("username").asText() : null, defaultMysqlUsername == null ? "root" : defaultMysqlUsername);
                         String password = resolveCredential(params.has("password") ? params.get("password").asText() : null, defaultMysqlPassword);
                         try (java.sql.Connection conn = java.sql.DriverManager.getConnection(url, username, password);
                              java.sql.Statement stmt = conn.createStatement();
-                             java.sql.ResultSet rs = stmt.executeQuery("SELECT * FROM " + table + " LIMIT 20")) {
+                             java.sql.ResultSet rs = stmt.executeQuery("SELECT * FROM " + quotedTable + " LIMIT 20")) {
                             int colCount = rs.getMetaData().getColumnCount();
                             // Header
                             StringBuilder header = new StringBuilder();
@@ -469,6 +510,8 @@ public class JobService {
                 }
             }
             result.add("No output node found in DAG");
+        } catch (IllegalArgumentException e) {
+            throw e;
         } catch (Exception e) {
             log.warn("Preview failed: {}", e.getMessage());
             result.add("Preview failed: " + e.getMessage());

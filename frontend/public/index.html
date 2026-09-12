@@ -11,43 +11,77 @@
 </head>
 <body>
     <div id="app">
-        <!-- 登录页（独立全屏界面） -->
+        <!-- 企业级认证门户 -->
         <div v-if="!user" class="login-page">
-            <div class="login-hero">
-                <img src="images/login-hero.svg" alt="数据流任务管理系统插画" class="login-hero-img" />
-                <div class="login-hero-caption">
-                    <div class="login-hero-title">可视化数据流编排平台</div>
-                    <div class="login-hero-sub">拖拽画布 · 一键提交 Flink · 作业依赖 · 全链路血缘</div>
+            <section class="login-hero">
+                <div class="login-orb login-orb-one"></div>
+                <div class="login-orb login-orb-two"></div>
+                <div class="login-hero-content">
+                    <div class="login-product-mark"><span class="login-mark-icon">D</span><span>DataStream</span></div>
+                    <div class="login-eyebrow">ENTERPRISE DATA ORCHESTRATION</div>
+                    <h1>让每一条数据流<br><span>清晰、可靠、可掌控</span></h1>
+                    <p class="login-hero-desc">面向企业的数据流任务编排与智能运维平台，从可视化设计到实时监控，一站式管理数据全生命周期。</p>
+                    <div class="login-flow-card">
+                        <div class="login-flow-node node-source"><el-icon><Document /></el-icon><span>多源接入</span><small>CSV · JDBC · Kafka</small></div>
+                        <div class="login-flow-line"><i></i><span>实时传输</span></div>
+                        <div class="login-flow-node node-process"><el-icon><Cpu /></el-icon><span>智能处理</span><small>Flink · AI Agent</small></div>
+                        <div class="login-flow-line"><i></i><span>可信交付</span></div>
+                        <div class="login-flow-node node-target"><el-icon><DataAnalysis /></el-icon><span>统一洞察</span><small>监控 · 血缘 · 告警</small></div>
+                    </div>
+                    <div class="login-capabilities">
+                        <div><strong>29</strong><span>内置数据控件</span></div>
+                        <div><strong>7×24</strong><span>全链路故障感知</span></div>
+                        <div><strong>AI</strong><span>智能生成与诊断</span></div>
+                    </div>
                 </div>
-            </div>
-            <div class="login-panel">
+                <div class="login-hero-foot">Secure · Observable · Scalable</div>
+            </section>
+            <section class="login-panel">
                 <div class="login-panel-inner">
                     <div class="login-brand">
-                        <div class="login-logo">📊</div>
-                        <h2>数据流任务管理系统</h2>
-                        <p>DataStream Task Management · MVP</p>
+                        <div class="login-mobile-mark"><span>D</span></div>
+                        <div class="login-mode-label">{{ authMode === 'login' ? '欢迎回来' : '创建企业账号' }}</div>
+                        <h2>{{ authMode === 'login' ? '登录 DataStream' : '注册 DataStream' }}</h2>
+                        <p>{{ authMode === 'login' ? '使用您的企业账号继续访问工作台' : '注册后将以只读成员身份加入平台' }}</p>
                     </div>
-                    <el-form label-position="top" @submit.prevent="login" class="login-form">
+                    <el-form v-if="authMode === 'login'" label-position="top" @submit.prevent="login" class="login-form">
                         <el-form-item label="用户名">
-                            <el-input v-model="loginUsername" placeholder="请输入用户名" size="large" @keyup.enter="login" :prefix-icon="'User'"></el-input>
+                            <el-input v-model="loginUsername" placeholder="请输入用户名" size="large" autocomplete="username" @keyup.enter="login" :prefix-icon="'User'"></el-input>
                         </el-form-item>
                         <el-form-item label="密码">
-                            <el-input v-model="loginPassword" type="password" placeholder="请输入密码" size="large" show-password @keyup.enter="login" :prefix-icon="'Lock'"></el-input>
+                            <el-input v-model="loginPassword" type="password" placeholder="请输入密码" size="large" autocomplete="current-password" show-password @keyup.enter="login" :prefix-icon="'Lock'"></el-input>
                         </el-form-item>
                         <div v-if="loginError" class="login-error">{{ loginError }}</div>
-                        <el-button type="primary" size="large" class="login-btn" :loading="loginLoading" @click="login">登 录</el-button>
+                        <el-button type="primary" size="large" class="login-btn" :loading="loginLoading" @click="login">登录工作台</el-button>
                     </el-form>
-                    <div class="login-demo">
-                        <span class="login-demo-label">演示账号</span>
-                        <div class="login-demo-accounts">
-                            <code>admin / admin123</code>
-                            <code>operator / operator123</code>
-                            <code>viewer / viewer123</code>
-                        </div>
+                    <el-form v-else label-position="top" @submit.prevent="register" class="login-form register-form">
+                        <el-form-item label="用户名">
+                            <el-input v-model="registerUsername" maxlength="32" placeholder="3–32 位字母、数字或下划线" size="large" autocomplete="username" :prefix-icon="'User'"></el-input>
+                        </el-form-item>
+                        <el-form-item label="显示名称">
+                            <el-input v-model="registerDisplayName" maxlength="50" placeholder="请输入您的姓名或称呼" size="large" :prefix-icon="'Postcard'"></el-input>
+                        </el-form-item>
+                        <el-form-item label="密码">
+                            <el-input v-model="registerPassword" type="password" maxlength="128" placeholder="至少 8 位，包含字母和数字" size="large" autocomplete="new-password" show-password :prefix-icon="'Lock'"></el-input>
+                        </el-form-item>
+                        <el-form-item label="确认密码">
+                            <el-input v-model="registerPasswordConfirm" type="password" maxlength="128" placeholder="请再次输入密码" size="large" autocomplete="new-password" show-password @keyup.enter="register" :prefix-icon="'CircleCheck'"></el-input>
+                        </el-form-item>
+                        <label class="register-agreement"><input v-model="registerAgreed" type="checkbox"> <span>我已阅读并同意平台账号与数据安全规范</span></label>
+                        <div v-if="registerError" class="login-error">{{ registerError }}</div>
+                        <el-button type="primary" size="large" class="login-btn" :loading="registerLoading" @click="register">创建账号</el-button>
+                    </el-form>
+                    <div class="auth-switch">
+                        <span>{{ authMode === 'login' ? '还没有账号？' : '已有企业账号？' }}</span>
+                        <button type="button" @click="switchAuthMode">{{ authMode === 'login' ? '立即注册' : '返回登录' }}</button>
                     </div>
-                    <div class="login-foot">© 2026 数据流任务管理系统 · Spring Boot + Flink + Vue3</div>
+                    <div v-if="authMode === 'login'" class="login-demo">
+                        <span class="login-demo-label">演示环境</span>
+                        <div class="login-demo-accounts"><code>admin / admin123</code><code>operator / operator123</code><code>viewer / viewer123</code></div>
+                    </div>
+                    <div class="login-foot">© 2026 DataStream Enterprise · Spring Boot + Flink + Vue 3</div>
                 </div>
-            </div>
+            </section>
         </div>
         <!-- 顶部导航栏 -->
         <el-container v-if="user" style="height: 100vh">
@@ -699,7 +733,16 @@
                             <span class="monitor-trend-title">📊 吞吐趋势（运行中与最近结束作业 · 行/s）</span>
                             <span v-if="monitorTrendUpdated" class="monitor-refresh-tip">更新于 {{ monitorTrendUpdated }}</span>
                         </div>
-                        <div id="monitorTrendChart" class="monitor-trend-chart"></div>
+                        <div class="monitor-trend-body">
+                            <div id="monitorTrendChart" class="monitor-trend-chart"></div>
+                            <div v-if="monitorTrendMode === 'separate'" class="monitor-trend-actions">
+                                <button v-for="trend in monitorTrends" :key="trend.id"
+                                        class="trend-delete-btn" type="button"
+                                        :title="'移除 ' + trend.name + ' 的趋势曲线'"
+                                        :style="{ top: trendActionTop(trend) + 'px' }"
+                                        @click="removeMonitorTrend(trend)">✕</button>
+                            </div>
+                        </div>
                     </div>
 
                     <div v-if="monitorError" class="monitor-error">

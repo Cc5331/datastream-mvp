@@ -48,6 +48,9 @@ public class FlinkJobStatusChecker {
     @Value("${flink.cluster.port:8081}")
     private int flinkPort;
 
+    @Value("${app.storage.output-root:../output}")
+    private String outputRoot;
+
     private static final Map<String, JobStatus> FLINK_TO_LOCAL_STATUS = new java.util.HashMap<>() {{
         put("CREATED", JobStatus.SUBMITTED);
         put("INITIALIZING", JobStatus.RUNNING);
@@ -678,14 +681,14 @@ convertExcelOutputsIfNeeded(job);
      * Merge Flink filesystem sink part-* files into the user-specified single CSV file.
      */
     private void deleteRecursively(java.io.File f) {
-        if (f == null || !f.exists()) return;
-        if (f.isDirectory()) {
-            java.io.File[] children = f.listFiles();
-            if (children != null) {
-                for (java.io.File c : children) deleteRecursively(c);
+        if (f == null) return;
+        try {
+            if (!com.datastream.mvp.util.ManagedFiles.deleteRecursively(f.toPath(), outputRoot)) {
+                log.warn("Refusing to delete path outside managed output root: {}", f);
             }
+        } catch (java.io.IOException e) {
+            log.warn("Failed to delete managed output path {}: {}", f, e.getMessage());
         }
-        f.delete();
     }
 
     /**

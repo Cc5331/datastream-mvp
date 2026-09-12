@@ -26,6 +26,10 @@ const api = {
     async deleteJob(id) {
         await axios.delete(`${API_BASE}/jobs/${id}`);
     },
+    async confirmJob(id) {
+        const res = await axios.post(`${API_BASE}/jobs/${id}/confirm`);
+        return res.data;
+    },
     async submitJob(id) {
         const res = await axios.post(`${API_BASE}/jobs/${id}/submit`);
         return res.data;
@@ -85,8 +89,16 @@ const api = {
         const res = await axios.get(`${API_BASE}/monitor/trends`);
         return res.data;
     },
+    async removeMonitorTrend(jobId) {
+        const res = await axios.delete(`${API_BASE}/monitor/trends/${jobId}`);
+        return res.data;
+    },
     async login(username, password) {
         const res = await axios.post(`${API_BASE}/auth/login`, { username, password });
+        return res.data;
+    },
+    async register(username, displayName, password) {
+        const res = await axios.post(`${API_BASE}/auth/register`, { username, displayName, password });
         return res.data;
     },
     async me() {
@@ -353,10 +365,18 @@ const app = createApp({
         // ===== 认证状态（JWT + RBAC）=====
         const token = ref(localStorage.getItem('token') || '');
         const user = ref(null);
+        const authMode = ref('login');
         const loginUsername = ref('');
         const loginPassword = ref('');
         const loginError = ref('');
         const loginLoading = ref(false);
+        const registerUsername = ref('');
+        const registerDisplayName = ref('');
+        const registerPassword = ref('');
+        const registerPasswordConfirm = ref('');
+        const registerAgreed = ref(false);
+        const registerError = ref('');
+        const registerLoading = ref(false);
         const onlyMine = ref(false);
         const canEdit = computed(() => !!user.value && user.value.role !== 'VIEWER');
         const canViewAudit = computed(() => !!user.value && (user.value.role === 'ADMIN' || user.value.role === 'OPERATOR'));
@@ -585,6 +605,8 @@ const app = createApp({
                 { type: 'pg_input', name: 'PostgreSQL 输入', category: 'input', description: '从 PostgreSQL 表读取数据（JDBC 自动推导字段）', version: '1.0.0', paramSchema: '{"type":"object","properties":{"url":{"type":"string","title":"JDBC URL","default":"jdbc:postgresql://localhost:5432/dataflow"},"table":{"type":"string","title":"表名","default":"source_table"},"username":{"type":"string","title":"用户名","default":"postgres"},"password":{"type":"string","title":"密码","default":"postgres"}},"required":["url","table"]}' },
                 { type: 'oracle_input', name: 'Oracle 输入', category: 'input', description: '从 Oracle 表读取数据（JDBC 自动推导字段，表名大写）', version: '1.0.0', paramSchema: '{"type":"object","properties":{"url":{"type":"string","title":"JDBC URL","default":"jdbc:oracle:thin:@localhost:1521/FREE"},"table":{"type":"string","title":"表名（大写）","default":"SOURCE_TABLE"},"username":{"type":"string","title":"用户名","default":"system"},"password":{"type":"string","title":"密码","default":"oracle"}},"required":["url","table"]}' },
                 { type: 'redis_lookup', name: 'Redis 富化', category: 'transform', description: '根据字段A查询 Redis 扩充新字段（GET keyPrefix+值）', version: '1.0.0', paramSchema: '{"type":"object","properties":{"host":{"type":"string","title":"Redis 地址","default":"localhost"},"port":{"type":"number","title":"端口","default":6379},"password":{"type":"string","title":"密码（留空无密码）","default":"redis123"},"keyField":{"type":"string","title":"字段A（值作 Redis key）","default":"id"},"keyPrefix":{"type":"string","title":"key 前缀（如 user: → GET user:1）","default":""},"targetField":{"type":"string","title":"扩充字段名","default":"extra_info"}},"required":["keyField","targetField"]}' },
+                { type: 'hdfs_input', name: 'HDFS 输入', category: 'input', description: '读取 HDFS 上的 CSV 文件（hdfs://，字段需声明）', version: '1.0.0', paramSchema: '{"type":"object","properties":{"path":{"type":"string","title":"HDFS 路径","default":"hdfs://localhost:9000/data/input.csv"},"delimiter":{"type":"string","title":"分隔符","default":","},"fieldsConfig":{"type":"string","title":"字段定义（JSON 数组）","default":"[{\"name\":\"id\",\"type\":\"INT\"},{\"name\":\"name\",\"type\":\"STRING\"}]"}},"required":["path","fieldsConfig"]}' },
+                { type: 'hdfs_output', name: 'HDFS 输出', category: 'output', description: '将数据写出到 HDFS CSV 目录（hdfs://，目录内生成 part 文件）', version: '1.0.0', paramSchema: '{"type":"object","properties":{"path":{"type":"string","title":"HDFS 输出目录","default":"hdfs://localhost:9000/output/result"},"delimiter":{"type":"string","title":"分隔符","default":","}},"required":["path"]}' },
                 { type: 'mysql_output', name: 'MySQL 输出', category: 'output', description: '将数据写入 MySQL 表', version: '1.0.0', paramSchema: '{"type":"object","properties":{"url":{"type":"string","title":"JDBC URL","default":"jdbc:mysql://localhost:3306/flink_demo?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai"},"table":{"type":"string","title":"表名","default":"target_table"},"username":{"type":"string","title":"用户名","default":"${MYSQL_USERNAME}"},"password":{"type":"string","title":"密码（留空或 \\${MYSQL_PASSWORD} 取环境变量）","default":"${MYSQL_PASSWORD}"}},"required":["url","table","username"]}' },
                                 { type: 'kafka_input', name: 'Kafka 输入', category: 'input', description: '从 Kafka 主题读取消息流', version: '1.0.0', paramSchema: '{"type":"object","properties":{"topic":{"type":"string","title":"主题","default":"input-topic"},"bootstrapServers":{"type":"string","title":"Bootstrap Servers","default":"localhost:9092"},"fieldsConfig":{"type":"string","title":"字段定义（JSON 数组）","default":"[{\"name\":\"key\",\"type\":\"STRING\"},{\"name\":\"value\",\"type\":\"STRING\"}]"},"autoStop":{"type":"boolean","title":"体验模式：消费完自动停止","default":false},"stopAfterSeconds":{"type":"number","title":"自动停止延迟（秒）","default":30}},"required":["topic","bootstrapServers"]}' },
                 { type: 'kafka_output', name: 'Kafka 输出', category: 'output', description: '将数据写入 Kafka 主题', version: '1.0.0', paramSchema: '{"type":"object","properties":{"topic":{"type":"string","title":"主题","default":"output-topic"},"bootstrapServers":{"type":"string","title":"Bootstrap Servers","default":"localhost:9092"}},"required":["topic","bootstrapServers"]}' },
@@ -630,7 +652,51 @@ const app = createApp({
             });
         });
 
-        // ===== 登录 / 登出 =====
+        // ===== 登录 / 注册 / 登出 =====
+        function switchAuthMode() {
+            authMode.value = authMode.value === 'login' ? 'register' : 'login';
+            loginError.value = '';
+            registerError.value = '';
+        }
+        async function register() {
+            registerError.value = '';
+            const username = registerUsername.value.trim();
+            const displayName = registerDisplayName.value.trim();
+            if (!/^[A-Za-z0-9_]{3,32}$/.test(username)) {
+                registerError.value = '用户名须为 3–32 位字母、数字或下划线';
+                return;
+            }
+            if (!displayName) {
+                registerError.value = '请输入显示名称';
+                return;
+            }
+            if (registerPassword.value.length < 8 || !/[A-Za-z]/.test(registerPassword.value) || !/\d/.test(registerPassword.value)) {
+                registerError.value = '密码至少 8 位，且须同时包含字母和数字';
+                return;
+            }
+            if (registerPassword.value !== registerPasswordConfirm.value) {
+                registerError.value = '两次输入的密码不一致';
+                return;
+            }
+            if (!registerAgreed.value) {
+                registerError.value = '请先同意平台账号与数据安全规范';
+                return;
+            }
+            registerLoading.value = true;
+            try {
+                await api.register(username, displayName, registerPassword.value);
+                loginUsername.value = username;
+                loginPassword.value = '';
+                registerPassword.value = '';
+                registerPasswordConfirm.value = '';
+                authMode.value = 'login';
+                ElMessage.success('账号创建成功，请登录');
+            } catch (err) {
+                registerError.value = err.response?.data?.error || err.response?.data?.message || '注册失败，请稍后重试';
+            } finally {
+                registerLoading.value = false;
+            }
+        }
         async function login() {
             if (!loginUsername.value || !loginPassword.value) {
                 loginError.value = '请输入用户名和密码';
@@ -766,6 +832,17 @@ const app = createApp({
             updateTrendChart();
         }
         const TREND_WINDOW_POINTS = 40;
+        const TREND_ROW_HEIGHT = 220;
+        /**
+         * 趋势删除按钮的垂直位置：与 ECharts separate 模式每行标题对齐。
+         * 仅统计有数据点的曲线，顺序与 updateTrendChart 中渲染的 title 一致。
+         */
+        function trendActionTop(trend) {
+            const visible = monitorTrends.value.filter(t => (t.points || []).length > 0);
+            const index = visible.findIndex(t => t.id === trend.id);
+            if (index < 0 || (trend.points || []).length === 0) return -9999;
+            return index * TREND_ROW_HEIGHT + 26;
+        }
         function trendYAxisScale(series) {
             // 按最近可见窗口计算峰值，避免历史大峰值拉平低吞吐曲线
             const values = series.flatMap(item => {
@@ -803,7 +880,7 @@ const app = createApp({
             }
 
             if (monitorTrendMode.value === 'separate') {
-                const rowHeight = 220;
+                const rowHeight = TREND_ROW_HEIGHT;
                 if (chartEl) chartEl.style.height = Math.max(280, trends.length * rowHeight + 8) + 'px';
                 trendChart.resize();
                 const grids = [], xAxes = [], yAxes = [], titles = [], series = [];
@@ -956,7 +1033,7 @@ const app = createApp({
             const ctrl = new AbortController();
             kafkaStreamController.value = ctrl;
             kafkaStreaming.value = true;
-            kafkaRateTimer.value = setInterval(() => {
+            const rateTimer = setInterval(() => {
                 const delta = kafkaMsgCount.value - kafkaLastCount.value;
                 kafkaLastCount.value = kafkaMsgCount.value;
                 kafkaMsgRate.value = delta;
@@ -971,6 +1048,7 @@ const app = createApp({
                     kafkaChart.value.setOption({ xAxis: { data: times }, series: [{ data: rates }] });
                 }
             }, 1000);
+            kafkaRateTimer.value = rateTimer;
             const url = API_BASE + '/kafka/stream?topic=' + encodeURIComponent(kafkaSelectedTopic.value) + '&from=' + kafkaFromMode.value + '&durationMs=0';
             try {
                 const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token.value }, signal: ctrl.signal });
@@ -995,9 +1073,12 @@ const app = createApp({
             } catch (e) {
                 if (e.name !== 'AbortError') kafkaError.value = 'Kafka 流断开：' + e.message;
             } finally {
-                kafkaStreaming.value = false;
-                kafkaStreamController.value = null;
-                if (kafkaRateTimer.value) { clearInterval(kafkaRateTimer.value); kafkaRateTimer.value = null; }
+                clearInterval(rateTimer);
+                if (kafkaStreamController.value === ctrl) {
+                    kafkaStreaming.value = false;
+                    kafkaStreamController.value = null;
+                    if (kafkaRateTimer.value === rateTimer) kafkaRateTimer.value = null;
+                }
             }
         }
 
@@ -1354,6 +1435,17 @@ const app = createApp({
             }
         }
 
+        async function confirmAiDraftIfNeeded(id) {
+            const job = await api.getJob(id);
+            if (job.source !== 'AI' || job.confirmationStatus === 'CONFIRMED') return;
+            await ElMessageBox.confirm(
+                '该作业由 AI 生成。请确认已检查节点、连线和参数，确认后才可提交运行。',
+                '人工确认 AI 草稿',
+                { type: 'warning', confirmButtonText: '已检查并确认', cancelButtonText: '暂不提交' }
+            );
+            await api.confirmJob(id);
+        }
+
         // 提交作业
         async function submitJob() {
             const checkMsg = validateDagForSubmit();
@@ -1367,6 +1459,7 @@ const app = createApp({
             }
             submitting.value = true;
             try {
+                await confirmAiDraftIfNeeded(currentJobId);
                 await api.submitJob(currentJobId);
                 ElMessage.success('作业已提交到 Flink 集群');
                 await loadJobs();
@@ -1375,6 +1468,7 @@ const app = createApp({
                 jobLogs.value = await api.getLogs(currentJobId);
                 showLogs.value = true;
             } catch (err) {
+                if (err === 'cancel' || err === 'close') return;
                 ElMessage.error('提交失败: ' + (err.response?.data?.message || err.message));
                 if (currentJobId) { jobErrors.value[currentJobId] = err.response?.data?.message || err.message; }
                 try {
@@ -1692,16 +1786,13 @@ const app = createApp({
 
         // 提交作业 (作业列表)
         async function submitJobById(id) {
-            const checkMsg = validateDagForSubmit();
-            if (checkMsg) {
-                ElMessage.warning(checkMsg);
-                return;
-            }
             try {
+                await confirmAiDraftIfNeeded(id);
                 await api.submitJob(id);
                 ElMessage.success('作业已提交');
                 await loadJobs();
             } catch (err) {
+                if (err === 'cancel' || err === 'close') return;
                 ElMessage.error('提交失败: ' + (err.response?.data?.message || err.message));
                 jobErrors.value[id] = err.response?.data?.message || err.message;
             }
@@ -1856,6 +1947,27 @@ const app = createApp({
                 if (err !== 'cancel') {
                     ElMessage.error('删除失败');
                 }
+            }
+        }
+
+        /** 单独移除某条吞吐趋势曲线（不动作业本身） */
+        async function removeMonitorTrend(trend) {
+            try {
+                await ElMessageBox.confirm(
+                    `确定移除「${trend.name}」的吞吐趋势曲线？仅清除曲线数据，作业本身保留。`,
+                    '移除趋势曲线',
+                    { type: 'warning', confirmButtonText: '移除', cancelButtonText: '取消' }
+                );
+            } catch (_) {
+                return;
+            }
+            try {
+                await api.removeMonitorTrend(trend.id);
+                monitorTrends.value = monitorTrends.value.filter(t => t.id !== trend.id);
+                ElMessage.success('已移除趋势曲线');
+                loadTrends();
+            } catch (err) {
+                ElMessage.error('移除失败: ' + (err.response?.data?.message || err.message));
             }
         }
 
@@ -2311,10 +2423,11 @@ const app = createApp({
             scheduleMaxRetries, webhookUrl, scheduleHistory, scheduleHistoryLoading,
             schedulePresets, scheduleNlText, scheduleCronHuman, applySchedulePreset, parseNlSchedule, cronToHuman,
             monitorJobs, monitorLoading, monitorError, monitorAutoRefresh, monitorAutoScale, monitorTrendMode, monitorLastUpdated, monitorStats, refreshMonitor,
-            monitorTrends, monitorTrendUpdated,
+            monitorTrends, monitorTrendUpdated, removeMonitorTrend, trendActionTop,
             fmtNum, bpClass, cpText, fmtDuration, statusTagType,
-            user, canEdit, canViewAudit, loginUsername, loginPassword, loginError, loginLoading,
-            login, logout, onlyMine, helpTab, openHelp,
+            user, canEdit, canViewAudit, authMode, loginUsername, loginPassword, loginError, loginLoading,
+            registerUsername, registerDisplayName, registerPassword, registerPasswordConfirm, registerAgreed, registerError, registerLoading,
+            login, register, switchAuthMode, logout, onlyMine, helpTab, openHelp,
             auditRows, auditTotal, auditPage, auditSize, auditKeyword, auditLoading, loadAudit, onAuditPage,
             depDialogVisible, depJob, depCandidates, depSelected, depLoading, depSaving, openDepDialog, saveDeps,
             workflowJobs, workflowEdges, workflowLoading, workflowError, workflowUpdated, loadWorkflow,

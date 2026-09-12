@@ -8,6 +8,7 @@ import com.datastream.mvp.security.SecurityUtils;
 import com.datastream.mvp.service.AuditService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -28,8 +29,45 @@ public class AuthController {
     private final AuditService auditService;
 
     public record LoginRequest(String username, String password) {}
+    public record RegisterRequest(String username, String displayName, String password) {}
     public record UserView(Long id, String username, String displayName, String role) {}
     public record LoginResponse(String token, UserView user) {}
+
+    @PostMapping("/register")
+    @ResponseStatus(HttpStatus.CREATED)
+    public UserView register(@RequestBody RegisterRequest req, HttpServletRequest httpReq) {
+        String username = req.username() == null ? "" : req.username().trim();
+        String displayName = req.displayName() == null ? "" : req.displayName().trim();
+        String password = req.password() == null ? "" : req.password();
+        if (!username.matches("[A-Za-z0-9_]{3,32}")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "用户名须为 3-32 位字母、数字或下划线");
+        }
+        if (displayName.isEmpty() || displayName.length() > 50) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "显示名称须为 1-50 个字符");
+        }
+        if (password.length() < 8 || password.length() > 128
+                || !password.matches(".*[A-Za-z].*") || !password.matches(".*\\d.*")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "密码须为 8-128 位且同时包含字母和数字");
+        }
+        if (userRepo.existsByUsername(username)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "用户名已存在");
+        }
+
+        AppUser user = new AppUser();
+        user.setUsername(username);
+        user.setDisplayName(displayName);
+        user.setPasswordHash(passwordEncoder.encode(password));
+        user.setRole(AppUser.UserRole.VIEWER);
+        user.setEnabled(true);
+        try {
+            user = userRepo.save(user);
+        } catch (DataIntegrityViolationException ex) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "用户名已存在");
+        }
+        auditService.record(user.getId(), user.getUsername(), "REGISTER", "USER", user.getUsername(),
+                "自助注册成功，默认角色 VIEWER", httpReq.getRemoteAddr());
+        return new UserView(user.getId(), user.getUsername(), user.getDisplayName(), user.getRole().name());
+    }
 
     @PostMapping("/login")
     public LoginResponse login(@RequestBody LoginRequest req, HttpServletRequest httpReq) {

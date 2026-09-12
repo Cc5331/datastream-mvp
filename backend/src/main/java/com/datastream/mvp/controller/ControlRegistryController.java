@@ -4,6 +4,7 @@ import com.datastream.mvp.model.ControlRegistry;
 import com.datastream.mvp.service.ControlRegistryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -37,16 +38,19 @@ public class ControlRegistryController {
     }
 
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public ControlRegistry create(@RequestBody ControlRegistry control) {
         return service.create(control);
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public ControlRegistry update(@PathVariable Long id, @RequestBody ControlRegistry control) {
         return service.update(id, control);
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         service.delete(id);
         return ResponseEntity.ok().build();

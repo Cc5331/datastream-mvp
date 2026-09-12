@@ -32,13 +32,16 @@ public class DataInitializer implements CommandLineRunner {
     @Value("${app.mysql.default-username:root}")
     private String defaultMysqlUsername;
 
-    @Value("${app.security.admin-password:admin123}")
+    @Value("${app.security.bootstrap-users-enabled:false}")
+    private boolean bootstrapUsersEnabled;
+
+    @Value("${app.security.admin-password:}")
     private String adminPassword;
 
-    @Value("${app.security.operator-password:operator123}")
+    @Value("${app.security.operator-password:}")
     private String operatorPassword;
 
-    @Value("${app.security.viewer-password:viewer123}")
+    @Value("${app.security.viewer-password:}")
     private String viewerPassword;
 
     @Value("${app.mysql.default-password:}")
@@ -128,6 +131,20 @@ public class DataInitializer implements CommandLineRunner {
                 "根据字段A查询 Redis 扩充新字段（GET keyPrefix+值）",
                 "{\"type\":\"object\",\"properties\":{\"host\":{\"type\":\"string\",\"title\":\"Redis 地址\",\"default\":\"localhost\"},\"port\":{\"type\":\"number\",\"title\":\"端口\",\"default\":6379},\"password\":{\"type\":\"string\",\"title\":\"密码（留空无密码）\",\"default\":\"redis123\"},\"keyField\":{\"type\":\"string\",\"title\":\"字段A（值作 Redis key）\",\"default\":\"id\"},\"keyPrefix\":{\"type\":\"string\",\"title\":\"key 前缀（如 user: → GET user:1）\",\"default\":\"\"},\"targetField\":{\"type\":\"string\",\"title\":\"扩充字段名\",\"default\":\"extra_info\"}},\"required\":[\"keyField\",\"targetField\"]}",
                 "SELECT *, redis_lookup('${host}', '${port}', '${password}', `${keyField}`) AS `${targetField}` FROM ${id}",
+                "1.0.0", "built-in");
+
+        // HDFS Input（filesystem connector，fieldsConfig 声明 schema）
+        createControl("hdfs_input", "HDFS 输入", "input",
+                "读取 HDFS 上的 CSV 文件（hdfs://，字段需声明）",
+                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"title\":\"HDFS 路径\",\"default\":\"hdfs://localhost:9000/data/input.csv\"},\"delimiter\":{\"type\":\"string\",\"title\":\"分隔符\",\"default\":\",\"},\"fieldsConfig\":{\"type\":\"string\",\"title\":\"字段定义（JSON 数组，HDFS 无法自动推导表头）\",\"default\":\"[{\\\"name\\\":\\\"id\\\",\\\"type\\\":\\\"INT\\\"},{\\\"name\\\":\\\"name\\\",\\\"type\\\":\\\"STRING\\\"}]\"}},\"required\":[\"path\",\"fieldsConfig\"]}",
+                "",
+                "1.0.0", "built-in");
+
+        // HDFS Output（filesystem connector，schema 沿用上游）
+        createControl("hdfs_output", "HDFS 输出", "output",
+                "将数据写出到 HDFS CSV 目录（hdfs://，目录内生成 part 文件）",
+                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"title\":\"HDFS 输出目录\",\"default\":\"hdfs://localhost:9000/output/result\"},\"delimiter\":{\"type\":\"string\",\"title\":\"分隔符\",\"default\":\",\"}},\"required\":[\"path\"]}",
+                "",
                 "1.0.0", "built-in");
 
         // MySQL Output
@@ -247,6 +264,13 @@ public class DataInitializer implements CommandLineRunner {
         if (userRepo.count() > 0) {
             log.info("Users already seeded ({}), skipping", userRepo.count());
             return;
+        }
+        if (!bootstrapUsersEnabled) {
+            log.warn("No users exist and bootstrap user creation is disabled");
+            return;
+        }
+        if (adminPassword.isBlank() || operatorPassword.isBlank() || viewerPassword.isBlank()) {
+            throw new IllegalStateException("启用种子用户时必须配置 ADMIN_PASSWORD、OPERATOR_PASSWORD 和 VIEWER_PASSWORD");
         }
         createUser("admin", adminPassword, "管理员", AppUser.UserRole.ADMIN);
         createUser("operator", operatorPassword, "操作员", AppUser.UserRole.OPERATOR);

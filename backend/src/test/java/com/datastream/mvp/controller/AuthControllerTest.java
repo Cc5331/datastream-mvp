@@ -35,6 +35,50 @@ class AuthControllerTest {
     }
 
     @Test
+    void register_createsEnabledViewerWithEncodedPassword() {
+        when(userRepo.existsByUsername("new_user")).thenReturn(false);
+        when(encoder.encode("secure123")).thenReturn("encoded");
+        when(userRepo.save(any(AppUser.class))).thenAnswer(invocation -> {
+            AppUser saved = invocation.getArgument(0);
+            saved.setId(9L);
+            return saved;
+        });
+
+        AuthController.UserView response = controller.register(
+                new AuthController.RegisterRequest(" new_user ", " 新用户 ", "secure123"), request);
+
+        assertEquals(9L, response.id());
+        assertEquals("new_user", response.username());
+        assertEquals("新用户", response.displayName());
+        assertEquals("VIEWER", response.role());
+        verify(userRepo).save(argThat(user -> user.isEnabled()
+                && user.getRole() == AppUser.UserRole.VIEWER
+                && "encoded".equals(user.getPasswordHash())));
+        verify(auditService).record(9L, "new_user", "REGISTER", "USER", "new_user",
+                "自助注册成功，默认角色 VIEWER", "127.0.0.1");
+    }
+
+    @Test
+    void register_rejectsDuplicateUsername() {
+        when(userRepo.existsByUsername("existing")).thenReturn(true);
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                () -> controller.register(new AuthController.RegisterRequest("existing", "用户", "secure123"), request));
+
+        assertEquals(409, ex.getStatusCode().value());
+        verify(userRepo, never()).save(any());
+    }
+
+    @Test
+    void register_rejectsWeakPassword() {
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                () -> controller.register(new AuthController.RegisterRequest("new_user", "用户", "password"), request));
+
+        assertEquals(400, ex.getStatusCode().value());
+        verifyNoInteractions(encoder);
+    }
+
+    @Test
     void login_returnsTokenForEnabledUser() {
         AppUser user = user();
         when(userRepo.findByUsername("admin")).thenReturn(Optional.of(user));

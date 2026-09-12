@@ -55,15 +55,20 @@ server:
 
 app:
   jwt:
-    secret: ${JWT_SECRET:dataflow-mvp-dev-jwt-secret-key-2026-change-me-0123456789}
+    secret: ${JWT_SECRET:}
     expiration-ms: ${JWT_EXPIRATION_MS:86400000}
+  security:
+    bootstrap-users-enabled: ${BOOTSTRAP_USERS_ENABLED:false}
+    admin-password: ${ADMIN_PASSWORD:}
+    operator-password: ${OPERATOR_PASSWORD:}
+    viewer-password: ${VIEWER_PASSWORD:}
   hadoop-home: ${HADOOP_HOME:D:\\code\\hadoop}
   ai:
     provider: ${AI_PROVIDER:openai}
     api-key: ${OPENAI_API_KEY:${DEEPSEEK_API_KEY:}}
-    base-url: ${OPENAI_BASE_URL:${DEEPSEEK_BASE_URL:https://api.openai.com/v1}}
-    model: ${OPENAI_MODEL:${DEEPSEEK_MODEL:gpt-4.1-mini}}
-    allowed-models: ${AI_ALLOWED_MODELS:gpt-4.1-mini,gpt-4.1,gpt-4o-mini}
+    base-url: ${OPENAI_BASE_URL:${DEEPSEEK_BASE_URL:https://api.deepseek.com}}
+    model: ${OPENAI_MODEL:${DEEPSEEK_MODEL:deepseek-v4-flash}}
+    allowed-models: ${AI_ALLOWED_MODELS:deepseek-v4-flash,deepseek-v4-flash-vision-exp}
     timeout-ms: ${AI_TIMEOUT_MS:60000}
   alert:
     email:
@@ -74,6 +79,12 @@ app:
     retention-days: ${APP_ALERT_RETENTION_DAYS:30}
     retention-max-records: ${APP_ALERT_RETENTION_MAX:5000}
 
+  preview:
+    allowed-roots: ${APP_PREVIEW_ALLOWED_ROOTS:../data,../test-resources,../output}
+    max-file-bytes: ${APP_PREVIEW_MAX_FILE_BYTES:67108864}
+  storage:
+    output-root: ${OUTPUT_ROOT:../output}
+
   mysql:
     # mysql_input/mysql_output 控件默认用户名与密码（预填 + 预览用），通过环境变量注入，不入库
     default-username: ${MYSQL_USERNAME:root}
@@ -83,6 +94,11 @@ app:
     # 告警/健康扫描与 Flink 状态轮询间隔（毫秒），越小告警越及时但也越耗 Flink HTTP
     health-scan-ms: ${APP_MONITOR_HEALTH_SCAN_MS:10000}
     status-poll-ms: ${APP_MONITOR_STATUS_POLL_MS:5000}
+    # 心跳感知：探测间隔（毫秒）与连续失败阈值
+    heartbeat-scan-ms: ${APP_MONITOR_HEARTBEAT_SCAN_MS:10000}
+    heartbeat:
+      cluster-misses: ${APP_MONITOR_HEARTBEAT_CLUSTER_MISSES:3}
+      job-misses: ${APP_MONITOR_HEARTBEAT_JOB_MISSES:3}
 
 spring.servlet.multipart.max-file-size: 50MB
 spring.servlet.multipart.max-request-size: 50MB

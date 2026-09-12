@@ -14,6 +14,8 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -89,6 +91,29 @@ class MonitorServicePersistenceTest {
         ObjectNode item = metricsItem(10, 500);
         // 不应抛异常，内存热路径不受影响
         service.recordTrendPoint(j, item);
+    }
+
+    @Test
+    void removeTrend_clearsBufferAndPersistedRows() {
+        JobDefinition j = job(5L, LocalDateTime.of(2026, 8, 31, 10, 0));
+        service.recordTrendPoint(j, metricsItem(10, 500));
+        when(jobRepo.findAllById(java.util.Set.of(5L))).thenReturn(List.of(j));
+        assertEquals(1, service.trends().size());
+
+        assertTrue(service.removeTrend(5L));
+
+        // 内存缓冲已清空，落库趋势点同步删除
+        verify(trendRepo, times(2)).deleteByJobId(5L);
+        assertFalse(service.removeTrend(5L));
+    }
+
+    @Test
+    void removeTrend_dbFailureStillClearsMemory() {
+        JobDefinition j = job(6L, LocalDateTime.of(2026, 8, 31, 10, 0));
+        service.recordTrendPoint(j, metricsItem(10, 500));
+        doThrow(new RuntimeException("db down")).when(trendRepo).deleteByJobId(6L);
+
+        assertTrue(service.removeTrend(6L));
     }
 
     @Test

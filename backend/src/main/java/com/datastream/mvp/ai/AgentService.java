@@ -3,6 +3,8 @@ package com.datastream.mvp.ai;
 import com.datastream.mvp.model.ControlRegistry;
 import com.datastream.mvp.model.JobDefinition;
 import com.datastream.mvp.model.JobLog;
+import com.datastream.mvp.model.DiagnosisReport;
+import com.datastream.mvp.repository.DiagnosisReportRepository;
 import com.datastream.mvp.repository.JobLogRepository;
 import com.datastream.mvp.security.CurrentUser;
 import com.datastream.mvp.service.ControlRegistryService;
@@ -45,6 +47,8 @@ public class AgentService {
     private final PreviewService previewService;
     private final MonitorService monitorService;
     private final JobLogRepository logRepo;
+    private final DiagnosisReportRepository diagnosisRepo;
+    private final PromptCatalog promptCatalog;
     private final LlmClient llmClient;
     private final ObjectMapper objectMapper;
 
@@ -59,22 +63,13 @@ public class AgentService {
         }
         String fileHints = collectFileHints(prompt);
         String controlDigest = buildControlDigest();
-        String system = "你是一个数据流编排平台的可视化 DAG 生成助手。"
-                + "用户的自然语言需求要翻译成一个可执行的 DAG（有向无环图），严格输出 JSON，不要输出任何额外文字。"
-                + "DAG JSON 格式："
-                + "{\"jobName\":\"作业名\",\"parallelism\":1,\"nodes\":[{\"id\":\"唯一id\",\"type\":\"控件类型\",\"label\":\"显示名\",\"params\":{...},\"x\":100,\"y\":100}],\"edges\":[{\"source\":\"源节点id\",\"target\":\"目标节点id\"}]}"
-                + "硬性约束："
-                + "1) 控件 type 只能从下面注册表中选择，禁止自创类型；"
-                + "2) 每个节点的 params 只能包含注册表中该控件声明的参数名，且值类型要匹配；"
-                + "3) 数据流必须至少一个输入控件（input）到至少一个输出控件（output），可插入转换控件（transform）；"
-                + "4) edges 的 source/target 必须引用已存在的节点 id，且方向从输入到输出；"
-                + "5) 文件路径参数如果用户给了明确路径就直接使用（Windows 反斜杠路径原样保留），没有给就使用注册表中的默认路径；"
-                + "6) 输出文件默认写到 D:\\\\code\\\\比赛\\\\2026省服务外包\\\\output 目录下，文件名要体现语义；"
-                + "7) mysql_input/mysql_output 的 username 填 root，password 填空字符串，url 填 jdbc:mysql://localhost:3306/dataflow?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai，表名按用户语义取；"
-                + "8) 节点 id 用 类型_数字 命名（如 csv_input_1），全图唯一；"
-                + "9) parallelism 默认 1。"
-                + "以下是控件注册表：\n" + controlDigest;
-        String user = "用户需求：\n" + prompt.trim()
+        boolean english = com.datastream.mvp.util.LanguageDetector.isEnglish(prompt.trim());
+        String system = english ? promptCatalog.nl2PipelineEnglish(controlDigest) : promptCatalog.nl2PipelineChinese(controlDigest);
+        String user = english
+                ? "User request:\n" + prompt.trim()
+                + (fileHints.isEmpty() ? "" : "\n\nDetected files (field structure, first 5 rows):\n" + fileHints)
+                + "\n\nReturn the DAG JSON directly."
+                : "用户需求：\n" + prompt.trim()
                 + (fileHints.isEmpty() ? "" : "\n\n已探测到以下文件（含字段结构，仅前 5 行）：\n" + fileHints)
                 + "\n\n请直接返回 DAG JSON。";
 
@@ -174,6 +169,8 @@ public class AgentService {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "DAG 序列化失败: " + e.getMessage());
         }
         job.setParallelism(dag.path("parallelism").asInt(1));
+        job.setSource(JobDefinition.JobSource.AI);
+        job.setConfirmationStatus(JobDefinition.ConfirmationStatus.PENDING);
         job.setDescription("由 AI 助手生成（DRAFT，需人工确认）：" + truncate(originalPrompt.trim(), 200));
         return jobService.create(job, cu);
     }
@@ -239,9 +236,20 @@ public class AgentService {
 
     // ===================== 智能诊断 =====================
 
-    public Map<String, Object> diagnose(Long jobId, String model) {
-        JobDefinition job = jobService.findById(jobId);
+    public Map<String, Object> diagnose(Long jobId, String model, CurrentUser currentUser) {
+        return diagnose(jobId, model, currentUser, "manual");
+    }
+
+    public Map<String, Object> diagnose(Long jobId, String model, CurrentUser currentUser, String trigger) {
+        JobDefinition job = jobService.findByIdForUser(jobId, currentUser);
         ObjectNode packet = buildDiagnosisPacket(job);
+        Map<String, Object> result = doDiagnose(packet, model);
+        persistDiagnosis(job, currentUser, trigger, packet, result);
+        return result;
+    }
+
+    /** 执行诊断：本地规则 -> （本地规则未命中时）LLM 归因；不抛异常时返回可持久化的结果 Map。 */
+    public Map<String, Object> doDiagnose(ObjectNode packet, String model) {
         Map<String, Object> ruleHit = localRuleEngine(packet);
         if (ruleHit != null) return ruleHit;
 
@@ -277,6 +285,50 @@ public class AgentService {
             return result;
         } catch (Exception e) {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "诊断服务不可用: " + e.getMessage());
+        }
+    }
+
+    private void persistDiagnosis(JobDefinition job, CurrentUser currentUser, String trigger,
+                                  ObjectNode packet, Map<String, Object> result) {
+        try {
+            DiagnosisReport report = new DiagnosisReport();
+            report.setJobId(job.getId());
+            report.setOwnerId(job.getOwnerId());
+            report.setJobName(job.getName());
+            report.setTrigger(trigger);
+            report.setSource(String.valueOf(result.get("source")));
+            report.setRootCause(truncate(String.valueOf(result.get("rootCause")), 1000));
+            report.setEvidence(truncate(String.valueOf(result.get("evidence")), 4000));
+            Object suggestions = result.get("suggestions");
+            report.setSuggestions(truncate(suggestions == null ? "[]" : objectMapper.writeValueAsString(suggestions), 4000));
+            Object paramFixes = result.get("paramFixes");
+            report.setParamFixes(paramFixes == null ? "{}" : objectMapper.writeValueAsString(paramFixes));
+            report.setPacket(packet.toString());
+            report.setCreatedAt(java.time.LocalDateTime.now());
+            diagnosisRepo.save(report);
+        } catch (Exception e) {
+            log.warn("persist diagnosis failed for job {}: {}", job.getId(), e.getMessage());
+        }
+    }
+
+    public List<DiagnosisReport> listDiagnosis(Long jobId) {
+        return diagnosisRepo.findByJobIdOrderByCreatedAtDesc(jobId);
+    }
+
+    /**
+     * 故障告警自动触发诊断（系统驱动，无用户上下文）。
+     * 拉取作业、组装脱敏数据包、执行诊断并持久化一份 trigger=<告警事件> 的报告。
+     * 不参与 owner 校验（消息源自监控层，只为告警对应的作业生成报告）。
+     */
+    public void autoDiagnose(Long jobId, String event) {
+        try {
+            JobDefinition job = jobService.findById(jobId);
+            ObjectNode packet = buildDiagnosisPacket(job);
+            Map<String, Object> result = doDiagnose(packet, null);
+            persistDiagnosis(job, null, event, packet, result);
+            log.info("auto diagnosis done for job {} trigger={}", jobId, event);
+        } catch (Exception e) {
+            log.warn("auto diagnosis failed for job {}: {}", jobId, e.getMessage());
         }
     }
 

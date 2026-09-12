@@ -13,6 +13,17 @@ class LlmClientParseJsonTest {
     private final LlmClient client = new LlmClient(mapper);
 
     @Test
+    void createResponsesPayload_serializesInstructionsAsString() {
+        JsonNode payload = client.createResponsesPayload(
+                "只返回 JSON", "生成数据流", "deepseek-v4-flash", "medium", false);
+
+        assertEquals("只返回 JSON", payload.path("instructions").asText());
+        assertEquals(true, payload.path("instructions").isTextual());
+        assertEquals("生成数据流", payload.path("input").asText());
+        assertEquals("medium", payload.path("reasoning").path("effort").asText());
+    }
+
+    @Test
     void parseJson_handlesPureJson() {
         JsonNode result = client.parseJson("{\"jobName\":\"demo\",\"nodes\":[]}");
         assertEquals("demo", result.path("jobName").asText());

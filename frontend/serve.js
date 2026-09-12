@@ -11,6 +11,7 @@ delete process.env.ALL_PROXY;
 delete process.env.all_proxy;
 
 const dir = path.join(__dirname, 'public');
+const publicRoot = fs.realpathSync(dir) + path.sep;
 const mime = {
     '.html': 'text/html; charset=utf-8',
     '.js': 'application/javascript; charset=utf-8',
@@ -52,22 +53,41 @@ http.createServer((req, res) => {
       return;
     }
     // Static file requests: strip query string (=cache-busting ?v=...) before resolving path
-    let urlPath = req.url === '/' ? '/' : (req.url.split('?')[0] || '/');
-    let file = urlPath === '/' ? '/index.html' : urlPath;
-    file = path.join(dir, file);
-    fs.readFile(file, (err, data) => {
-        if (err) {
-            res.writeHead(404);
-            res.end('Not Found');
+    let urlPath;
+    try {
+        urlPath = decodeURIComponent(req.url === '/' ? '/' : (req.url.split('?')[0] || '/'));
+    } catch (_) {
+        res.writeHead(400);
+        res.end('Bad Request');
+        return;
+    }
+    const relativePath = urlPath === '/' ? 'index.html' : urlPath.replace(/^[/\\]+/, '');
+    const file = path.resolve(dir, relativePath);
+    if (!file.startsWith(publicRoot)) {
+        res.writeHead(403);
+        res.end('Forbidden');
+        return;
+    }
+    fs.realpath(file, (realPathErr, realFile) => {
+        if (realPathErr || !realFile.startsWith(publicRoot)) {
+            res.writeHead(realPathErr ? 404 : 403);
+            res.end(realPathErr ? 'Not Found' : 'Forbidden');
             return;
         }
-        const ext = path.extname(file);
-        res.writeHead(200, {
-            'Content-Type': mime[ext] || 'text/plain',
-            'Access-Control-Allow-Origin': '*',
-            'Cache-Control': 'no-store, no-cache, must-revalidate',
-            'Pragma': 'no-cache'
+        fs.readFile(realFile, (err, data) => {
+            if (err) {
+                res.writeHead(404);
+                res.end('Not Found');
+                return;
+            }
+            const ext = path.extname(realFile);
+            res.writeHead(200, {
+                'Content-Type': mime[ext] || 'text/plain',
+                'Access-Control-Allow-Origin': '*',
+                'Cache-Control': 'no-store, no-cache, must-revalidate',
+                'Pragma': 'no-cache'
+            });
+            res.end(data);
         });
-        res.end(data);
     });
 }).listen(PORT, '0.0.0.0', () => console.log('Frontend running on http://localhost:' + PORT));

@@ -528,6 +528,19 @@ public class MonitorService {
         return "RUNNING".equals(status) || "SUBMITTED".equals(status);
     }
 
+    /** 手动移除某作业的趋势曲线：清理内存缓冲并删除落库趋势点 */
+    public boolean removeTrend(Long jobId) {
+        boolean removed = trendBuffer.remove(jobId) != null
+                | trendRunKeys.remove(jobId) != null
+                | lastLiveSnapshot.remove(jobId) != null;
+        try {
+            trendRepo.deleteByJobId(jobId);
+        } catch (Exception e) {
+            log.warn("Failed to drop trend points for job {}: {}", jobId, e.getMessage());
+        }
+        return removed;
+    }
+
     private long lastPointTime(ArrayNode points) {
         return points != null && points.size() > 0 && points.get(points.size() - 1).has("t")
                 ? points.get(points.size() - 1).get("t").asLong() : 0L;

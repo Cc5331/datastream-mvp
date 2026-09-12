@@ -60,6 +60,19 @@ public class JobDefinition {
     private Long ownerId;                       // 创建人 ID（RBAC 资源归属）
     private String ownerName;                   // 创建人名称
 
+    @Enumerated(EnumType.STRING)
+    private JobSource source = JobSource.MANUAL;
+
+    @Enumerated(EnumType.STRING)
+    private ConfirmationStatus confirmationStatus;
+
+    private Long confirmedBy;
+    private String confirmedByName;
+    private LocalDateTime confirmedAt;
+
+    public enum JobSource { MANUAL, AI }
+    public enum ConfirmationStatus { NOT_REQUIRED, PENDING, CONFIRMED }
+
     public enum JobStatus {
         DRAFT, SUBMITTED, RUNNING, COMPLETED, FAILED, CANCELLED, WAITING, BLOCKED
     }

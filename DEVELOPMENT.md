@@ -21,10 +21,10 @@
 
 ### 1.2 当前已实现功能（2026-08 实测可用）
 - **画布**：左侧控件库拖拽控件到画布、端口连线、点选配置参数、Delete 删除、双击删除、保存 / 提交 / 导出 / 导入 JSON、新建画布、清空、Ctrl+S 保存。
-- **控件（17 个内置）**：
-  - 输入：`datagen_input`（模拟数据）、`csv_input`、`excel_input`、`json_input`（JSON Lines 读取）、`kafka_input`、`mysql_input`（**JDBC 读库 + 字段自动推导**）
-  - 输出：`csv_output`、`excel_output`、`json_output`（JSON Lines 写出 + part 自动合并）、`kafka_output`、`mysql_output`（**写入自动建表**）
-  - 转换：`field_concat`（字段拼接）、`xml_json`（XML 与 JSON 互转，需 UDF jar）、`field_filter`（字段过滤）、`field_rename`（字段改名）、`row_filter`（行过滤）、`json_parse`（JSON 字段解析）
+- **控件（29 个内置）**：
+  - 输入：Datagen、CSV、Excel、JSON、XML、Parquet、HDFS、Kafka、MySQL、PostgreSQL、Oracle。
+  - 输出：CSV、Excel、JSON、XML、Parquet、HDFS、Kafka、MySQL。
+  - 转换：字段拼接/过滤/改名、行过滤、JSON 解析、XML↔JSON、Redis 富化、去重、空值校验、条件路由。
 - **已实测链路**：
   - CSV → CSV / Excel / MySQL（自动建表，中文无乱码）
   - Excel → CSV / MySQL（POI 转临时 CSV 接入）
@@ -237,10 +237,9 @@
 5. 前端参数面板无需改（自动按 paramSchema 渲染）。
 6. 跑通一条实测链路（如 9.2），并把结果追加到 1.2。
 
-### 7.2 补齐 MySQL Input（读库，当前最大缺口）
-- 在 translate() 加 mysql_input 分支：用 JDBC connector DDL（url/table/username/password），字段从表结构自动推导（参考 MysqlTableCreator 的反向逻辑：SELECT ... LIMIT 0 或 JDBC DatabaseMetaData 拿列）。
-- 接入 nodeSchemas，让下游输出能拿到字段。
-- 前端 paramSchema 已存在（url/table/username/password），无需新增。
+### 7.2 JDBC 输入（已实现）
+- `mysql_input`、`pg_input`、`oracle_input` 均通过 JDBC connector 读取并自动推导字段。
+- 所有 JDBC 输入必须接入 `nodeSchemas`，表名需按数据库方言校验和引用，凭据使用环境变量。
 
 ### 7.3 新增文件格式转换（如 JSON 输入/输出）
 - 参照 excel_input 的做法：加一个 JsonPreprocessor（输入转临时 CSV）或直接在 translate() 生成对应 connector DDL（如 format=json）。
@@ -394,3 +393,9 @@
 | 2026-09-04 | 告警延迟进一步压缩（提交期失败 0.8s 实测）：此前运行期失败已有事件驱动（FlinkJobStatusChecker 置 FAILED 瞬间 notifyJobFailed），但「提交期失败」（JobService.submit catch 分支置 FAILED）仍要等 HealthMonitor 扫描（最坏 10s）。补齐：JobService.submit 的 catch 中置 FAILED 后同步调用 healthMonitor.notifyJobFailed(job)，并补 completedAt（故障发生时间用于 DB 去重）。端到端实测：创建坏路径 CSV 作业→submit→告警出现仅 **0.8 秒**（原最坏 ~10s）；HealthMonitorTest 回归通过，DB 去重保证轮询器不重复告警 | JobService + JobServiceTest |
 | 2026-09-04 | 修复「重复运行失败作业不再告警」：手动重跑同一坏作业第 2 次起无告警。两个根因：① JobService.submit 失败分支 completedAt 只在首次为 null 时写入，重跑时 completedAt 未刷新 → 去重判断 lastAt>=occurred 误判为同一旧故障；改为每次失败都刷新 completedAt（每次重跑=新故障）；② shouldAlert 对离散事件也先过 15 分钟内存冷却（alertCooldown），冷却期内直接拦截事件驱动的即时告警；改为离散事件（occurrenceTime!=null）跳过内存冷却、仅用 DB 时间比较去重（同一次故障内轮询器/扫描器重复检测仍被 lastAt>=occurred 拦住），持续状态（吞吐/背压/checkpoint）保持内存+DB 双冷却。端到端实测：同一作业连续 3 次错误提交，3 次均在 ~1 秒独立产生 JOB_FAILED 告警；38 项后端测试回归通过 | JobService + HealthMonitor |
 | 2026-09-04 | 第一批多数据源控件（PG/Oracle 输入 + Redis 字段富化）：① pg_input/oracle_input——复用 flink-connector-jdbc（PG/Oracle 方言内置），通用 generateJdbcInputDDL + inferJdbcFields（SELECT * WHERE 1=0 元数据推导，Oracle 表名/用户名自动大写），后端 pom 补 postgresql-42.7.3 + ojdbc11（字段推导用），flink/lib 补同驱动（运行时用）；② redis_lookup 富化控件——udf 工程新增 RedisLookupUdf（ScalarFunction + Jedis 连接池 open() 初始化 + Caffeine TTL 60s 缓存，shade relocation），翻译层按节点注入 CREATE FUNCTION redis_lookup，transform 分支生成 SELECT *, redis_lookup(...) AS targetField，FlinkJobStatusChecker transformTypes/applyTransformHeader 同步追加 targetField；③ 部署修复——flink-conf.yaml rest.port 统一 18081（此前 overrides 重复键残留 8081，Gateway REST 提交连 8081 被拒 Connection refused）、sql-gateway.port 固化 18083（本机 8083 被 ArmouryCrate Bound 占用）。端到端实测：CSV→redis_lookup→CSV COMPLETED（extra_info 列成功富化）；PG students→CSV COMPLETED（字段自动推导）；Oracle DEMO_STUDENTS→CSV COMPLETED；38 项后端测试回归通过 | DagTranslationService + DataInitializer + FlinkJobStatusChecker + RedisLookupUdf（udf）+ pom.xml ×2 + flink-conf.yaml + 前端 app.js |
+| 2026-09-05 | HDFS 输入/输出控件：新增 hdfs_input（filesystem+CSV，fieldsConfig 显式 schema）与 hdfs_output（沿上游 schema 写 HDFS 目录 part 文件），后端注册表与前端降级副本同步；修复输出 schema 按节点别名取值导致含连字符节点退化为 data STRING；本机 Flink 部署 Hadoop uber JAR，并通过 HADOOP_CONF_DIR/hdfs-site.xml 启用 dfs.client.use.datanode.hostname，使宿主机 Flink 可访问 Docker DataNode。真实端到端验证：hdfs://localhost:9000/data/students.csv 查询返回 2 行；VALUES→hdfs://localhost:9000/output/result 生成 part 文件且内容正确 | DagTranslationService + DataInitializer + DagTranslationServiceTest + 前端 app.js + Flink/HDFS 本地配置 |
+| 2026-09-05 | 修复资源告警邮件反复发送：日志确认 Windows 内存长期在 88%~97% 且阈值为 90%，原逻辑在持续超限时每 15 分钟重复发送 RESOURCE_HIGH，并在略低于 90% 时立即恢复，形成临界值抖动。改为同一活跃故障只告警一次；恢复需 CPU/内存/磁盘全部低于各自阈值 5 个百分点并连续保持 2 分钟，避免 89%/91% 往返触发；增加确定性回归测试覆盖持续超限不重发、临界值不恢复、稳定恢复闭环 | HealthMonitor + HealthMonitorTest |
+| 2026-09-07 | P0-P2 安全与工程治理：静态资源路径限制在 public；控件写接口仅 ADMIN；文件预览限制目录/大小；JWT 与种子账号改为显式环境配置；输出临时目录删除限制在 OUTPUT_ROOT；MySQL 预览表名校验；AI 诊断补 owner 校验；修复列表提交错误画布校验与 Kafka 流重启竞态；插件源码去 BOM 并设 UTF-8/Java17；新增根聚合 POM，CI 执行全模块验证；Docker 排除旧 MySQL 驱动 | serve.js + security/config/service/controller + app.js + Maven/CI/Docker + docs |
+| 2026-09-08 | 企业验收补齐（P0：5 项 + P1：3 项）。① 用户管理 CRUD：仅 ADMIN 的 /api/users 列表/创建/改/重置密码/删除，BCrypt、用户名密码校验、防删当前账号、保留至少一个启用管理员、操作审计；② AI 草稿确认模型：JobDefinition 增 source(MANUAL/AI)、confirmationStatus(NOT_REQUIRED/PENDING/CONFIRMED)、confirmedBy/ByName/At；服务端强制推导确认状态（忽略客户端伪造，防绕过），未确认 AI 草稿禁止提交/上线，POST /api/jobs/{id}/confirm 记录确认人，前端提交 AI 草稿先确认；③ 独立心跳检测：HeartbeatMonitor 监测 JobManager/TaskManager 存活与 RUNNING 作业从集群消失，CLUSTER_HEARTBEAT_LOST / JOB_HEARTBEAT_LOST + 恢复闭环，DB 冷却去重；④ 诊断报告持久化：DiagnosisReport 实体 + /api/ai/diagnose/{jobId}(GET) 历史查询；⑤ 故障自动诊断闭环：AlertService 发布 AlertTriggeredEvent，@Async AutoDiagnosisListener 自动调用 AgentService.autoDiagnose 生成 trigger=事件 的报告（无循环依赖）；⑥ 双语 NL2Pipeline：LanguageDetector 语言检测 + 英文提示词；⑦ Prompt 模板管理：ai-prompts/nl2pipeline.{zh,en}.txt 外部资源 + {{registry}} 注入；⑧ 20 万条验收脚本 acceptance_200k.py（全覆盖/完整性/耗时吞吐报告）；后端 66 测试全绿，Maven Reactor 5/5 | UserController/UserService/JobDefinition/JobService/HeartbeatMonitor/DiagnosisReport/AutoDiagnosisListener/AlertService/AgentService/PromptCatalog/LanguageDetector/acceptance_200k.py + docs |
+| 2026-09-10 | 企业认证门户升级：登录封面重设计为深色数据编排品牌页（能力指标、动态数据链路、响应式布局）；登录/注册双模式切换；新增公开 POST /api/auth/register，自助注册执行用户名/显示名/密码强度校验、BCrypt 哈希、重复账号冲突保护，账号固定为启用 VIEWER 并记录 REGISTER 审计；前后端认证测试通过 | AuthController / SecurityConfig / 前端 index.html + app.js + style.css |
+| 2026-09-10 | 监控页吞吐趋势支持逐条移除：独立刻度模式下每条作业曲线右侧新增删除按钮，仅清理该作业趋势（内存缓冲 + 落库趋势点），不影响作业本身；后端新增 MonitorService.removeTrend 与 DELETE /api/monitor/trends/{jobId}，删除失败只降级内存清理不阻断热路径；后端 71 测试、前端 8 测试全绿 | MonitorService / MonitorController / 前端 index.html + app.js + style.css |

@@ -8,6 +8,7 @@ import com.datastream.mvp.repository.JobDefinitionRepository;
 import com.datastream.mvp.repository.JobLogRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -58,6 +59,29 @@ class HealthMonitorTest {
         monitor.notifyJobFailed(failedJob());
 
         verify(alertService, never()).sendAlert(any(), any(), any(), any());
+    }
+
+    @Test
+    void resourceHigh_alertsOnceUntilStableRecovery() {
+        AlertRecordRepository alertRepo = mock(AlertRecordRepository.class);
+        AlertService alertService = mock(AlertService.class);
+        HealthMonitor monitor = new HealthMonitor(mock(JobDefinitionRepository.class), mock(JobLogRepository.class), alertRepo, alertService, new ObjectMapper());
+        ReflectionTestUtils.setField(monitor, "resourceCpuThreshold", 90.0);
+        ReflectionTestUtils.setField(monitor, "resourceMemThreshold", 90.0);
+        ReflectionTestUtils.setField(monitor, "resourceDiskThreshold", 90.0);
+        when(alertRepo.findFirstByJobIdAndEventOrderByCreatedAtDesc(0L, "RESOURCE_HIGH"))
+                .thenReturn(Optional.empty());
+        long start = 1_000_000L;
+
+        monitor.processResourceSample(10, 95, 20, "C:\\", start);
+        monitor.processResourceSample(10, 95, 20, "C:\\", start + 120_000);
+        monitor.processResourceSample(10, 96, 20, "C:\\", start + 1_200_000);
+        monitor.processResourceSample(10, 89, 20, "C:\\", start + 1_210_000);
+        monitor.processResourceSample(10, 84, 20, "C:\\", start + 1_220_000);
+        monitor.processResourceSample(10, 84, 20, "C:\\", start + 1_340_000);
+
+        verify(alertService, times(1)).sendAlert(isNull(), eq("WARN"), eq("RESOURCE_HIGH"), contains("内存=95%"));
+        verify(alertService, times(1)).sendAlert(isNull(), eq("INFO"), eq("ALERT_RESOLVED"), contains("已恢复正常"));
     }
 
     @Test

@@ -25,6 +25,7 @@ public interface AlertRecordRepository extends JpaRepository<AlertRecord, Long> 
     long countByOwnerIdAndReadFlagFalse(Long ownerId);
     Optional<AlertRecord> findByIdAndOwnerId(Long id, Long ownerId);
     Optional<AlertRecord> findFirstByJobIdAndEventOrderByCreatedAtDesc(Long jobId, String event);
+    Optional<AlertRecord> findFirstByEventOrderByCreatedAtDesc(String event);
 
     @Modifying
     @Transactional

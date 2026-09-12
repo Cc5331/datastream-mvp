@@ -3,6 +3,7 @@ package com.datastream.mvp.security;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -21,6 +22,13 @@ public class JwtUtil {
 
     @Value("${app.jwt.expiration-ms:86400000}")
     private long expirationMs;
+
+    @PostConstruct
+    void validateConfiguration() {
+        if (secret == null || secret.getBytes(StandardCharsets.UTF_8).length < 32) {
+            throw new IllegalStateException("JWT_SECRET 必须配置且至少为 32 字节");
+        }
+    }
 
     private SecretKey key() {
         return Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));

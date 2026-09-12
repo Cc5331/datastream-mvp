@@ -11,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
@@ -35,6 +36,7 @@ public class AlertService {
     private final JobLogRepository logRepo;
     private final AlertRecordRepository alertRepo;
     private final ObjectProvider<JavaMailSender> mailSenderProvider;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Value("${app.alert.email.host:}")
     private String mailHost;
@@ -75,6 +77,17 @@ public class AlertService {
         // INFO 级（如恢复通知）不发邮件，只落库 + webhook
         if (!"INFO".equalsIgnoreCase(lvl)) {
             sendEmail(buildAlertMailSubject(event, lvl, job), buildAlertMailBody(job, lvl, event, message));
+            // 真实故障告警 -> 异步触发自动智能诊断（仅作业级）
+            publishAutoDiagnosis(job, lvl, event, message);
+        }
+    }
+
+    private void publishAutoDiagnosis(JobDefinition job, String level, String event, String message) {
+        if (job == null) return;
+        try {
+            eventPublisher.publishEvent(AlertTriggeredEvent.from(job, level, event, message));
+        } catch (Exception e) {
+            log.warn("publish auto diagnosis event failed for job {}: {}", job.getId(), e.getMessage());
         }
     }
 

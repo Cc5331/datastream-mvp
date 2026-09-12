@@ -13,12 +13,16 @@ import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.io.BufferedReader;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -37,16 +41,25 @@ public class PreviewService {
     private final ObjectMapper objectMapper;
     private final XmlPreprocessor xmlPreprocessor;
 
+    @Value("${app.preview.allowed-roots:../data,../test-resources,../output}")
+    private String allowedRoots;
+
+    @Value("${app.preview.max-file-bytes:67108864}")
+    private long maxFileBytes;
+
     public Map<String, Object> previewFile(String path, int limit) {
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("path", path);
-        java.io.File f = new java.io.File(path);
+        java.io.File f = resolveAllowedFile(path).toFile();
+        result.put("path", f.getAbsolutePath());
         if (!f.exists() || !f.isFile()) {
             result.put("message", "文件不存在: " + path);
             return result;
         }
+        if (f.length() > maxFileBytes) {
+            throw new IllegalArgumentException("文件过大，无法预览（最大 " + maxFileBytes + " 字节）");
+        }
         int n = (limit <= 0) ? 20 : Math.min(limit, 100);
-        String lower = path.toLowerCase();
+        String lower = f.getName().toLowerCase();
         try {
             if (lower.endsWith(".csv") || lower.endsWith(".txt")) return previewCsv(f, n);
             if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) return previewExcel(f, n);
@@ -207,14 +220,12 @@ public class PreviewService {
     private Map<String, Object> previewText(java.io.File f, int n) {
         Map<String, Object> result = baseResult(f);
         List<String> rows = new ArrayList<>();
-        try {
-            java.util.List<String> lines = Files.readAllLines(f.toPath(), StandardCharsets.UTF_8);
-            int rowCount = 0;
-            for (String line : lines) {
-                if (rowCount >= n) { result.put("truncated", true); break; }
+        try (BufferedReader reader = Files.newBufferedReader(f.toPath(), StandardCharsets.UTF_8)) {
+            String line;
+            while (rows.size() < n && (line = reader.readLine()) != null) {
                 rows.add(line);
-                rowCount++;
             }
+            if (reader.readLine() != null) result.put("truncated", true);
         } catch (Exception e) {
             result.put("message", "读取失败: " + e.getMessage());
             return result;
@@ -226,6 +237,38 @@ public class PreviewService {
         result.put("columns", columns);
         result.put("rows", table);
         return result;
+    }
+
+    private Path resolveAllowedFile(String rawPath) {
+        if (rawPath == null || rawPath.isBlank()) {
+            throw new IllegalArgumentException("文件路径不能为空");
+        }
+        Path candidate = Path.of(rawPath.trim()).toAbsolutePath().normalize();
+        try {
+            Path realCandidate = candidate.toRealPath();
+            boolean allowed = Arrays.stream(allowedRoots.split(","))
+                    .map(String::trim)
+                    .filter(root -> !root.isEmpty())
+                    .map(root -> Path.of(root).toAbsolutePath().normalize())
+                    .filter(Files::exists)
+                    .map(root -> {
+                        try {
+                            return root.toRealPath();
+                        } catch (java.io.IOException e) {
+                            return null;
+                        }
+                    })
+                    .filter(java.util.Objects::nonNull)
+                    .anyMatch(realCandidate::startsWith);
+            if (!allowed) {
+                throw new IllegalArgumentException("文件路径不在允许的预览目录中");
+            }
+            return realCandidate;
+        } catch (java.nio.file.NoSuchFileException e) {
+            return candidate;
+        } catch (java.io.IOException e) {
+            throw new IllegalArgumentException("无法解析文件路径", e);
+        }
     }
 
     private Map<String, Object> baseResult(java.io.File f) {

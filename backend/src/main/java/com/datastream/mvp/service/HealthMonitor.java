@@ -73,6 +73,7 @@ public class HealthMonitor {
     private final Map<Long, java.util.Set<String>> activeFailures = new java.util.concurrent.ConcurrentHashMap<>();
     /** 资源超阈值起始时间（system -> 时间戳），持续超阈值才告警 */
     private volatile long resourceHighSince = 0;
+    private volatile long resourceNormalSince = 0;
     /** 已扫描过的日志时间戳下限（jobId -> 扫描时间），避免重复告警同一批历史日志 */
     private final Map<Long, LocalDateTime> logScanWatermark = new ConcurrentHashMap<>();
     private static final long COOLDOWN_MS = 15 * 60 * 1000L;
@@ -80,6 +81,9 @@ public class HealthMonitor {
     private static final long BACKPRESSURE_ALERT_MS = 60 * 1000L;
     /** 资源持续超阈值告警窗口（默认 2 分钟） */
     private static final long RESOURCE_HIGH_ALERT_MS = 2 * 60 * 1000L;
+    /** 资源恢复需连续低于阈值 5 个百分点并保持 2 分钟，避免临界值抖动反复告警。 */
+    private static final long RESOURCE_RECOVERY_MS = 2 * 60 * 1000L;
+    private static final double RESOURCE_RECOVERY_MARGIN = 5.0;
 
     @Scheduled(fixedRateString = "${app.monitor.health-scan-ms:10000}")
     public void supervise() {
@@ -150,30 +154,50 @@ public class HealthMonitor {
                 if (pct > diskPct) { diskPct = pct; diskLabel = fs.getMount(); }
             }
             double cpuPct = Math.max(0, Math.min(100, cpuLoad));
-            boolean high = cpuPct >= resourceCpuThreshold || memPct >= resourceMemThreshold || diskPct >= resourceDiskThreshold;
-            if (high) {
-                long since = resourceHighSince == 0 ? System.currentTimeMillis() : resourceHighSince;
-                resourceHighSince = since;
-                if (System.currentTimeMillis() - since >= RESOURCE_HIGH_ALERT_MS
-                        && shouldAlert(0L, "RESOURCE_HIGH", null)) {
-                    String detail = String.format("服务器资源持续 %d 分钟超阈值：%s", RESOURCE_HIGH_ALERT_MS / 60000,
-                            String.format("CPU=%.0f%%(阈值%.0f%%) 内存=%.0f%%(阈值%.0f%%) 磁盘%s=%.0f%%(阈值%.0f%%)",
-                                    cpuPct, resourceCpuThreshold, memPct, resourceMemThreshold, diskLabel, diskPct, resourceDiskThreshold));
-                    alertService.sendAlert(null, "WARN", "RESOURCE_HIGH", detail);
-                    markAlerted(0L, "RESOURCE_HIGH");
-                    activeFailures.computeIfAbsent(0L, k -> java.util.concurrent.ConcurrentHashMap.newKeySet()).add("RESOURCE_HIGH");
-                }
-            } else {
-                resourceHighSince = 0;
-                // 资源恢复：RESOLVED 闭环（system 级，job 为 null 走系统告警）
-                java.util.Set<String> sys = activeFailures.get(0L);
-                if (sys != null && sys.remove("RESOURCE_HIGH")) {
-                    alertService.sendAlert((JobDefinition) null, "INFO", "ALERT_RESOLVED",
-                            "服务器资源已恢复正常（CPU=" + String.format("%.0f%%", cpuPct) + " 内存=" + String.format("%.0f%%", memPct) + " 磁盘=" + String.format("%.0f%%", diskPct) + "）");
-                }
-            }
+            processResourceSample(cpuPct, memPct, diskPct, diskLabel, System.currentTimeMillis());
         } catch (Exception e) {
             log.debug("system resource check failed: {}", e.getMessage());
+        }
+    }
+
+    void processResourceSample(double cpuPct, double memPct, double diskPct, String diskLabel, long now) {
+        java.util.Set<String> systemFailures = activeFailures.computeIfAbsent(0L,
+                k -> java.util.concurrent.ConcurrentHashMap.newKeySet());
+        boolean high = cpuPct >= resourceCpuThreshold || memPct >= resourceMemThreshold || diskPct >= resourceDiskThreshold;
+        if (high) {
+            resourceNormalSince = 0;
+            if (resourceHighSince == 0) resourceHighSince = now;
+            if (now - resourceHighSince >= RESOURCE_HIGH_ALERT_MS
+                    && !systemFailures.contains("RESOURCE_HIGH")
+                    && shouldAlert(0L, "RESOURCE_HIGH", null)) {
+                String detail = String.format("服务器资源持续 %d 分钟超阈值：CPU=%.0f%%(阈值%.0f%%) 内存=%.0f%%(阈值%.0f%%) 磁盘%s=%.0f%%(阈值%.0f%%)",
+                        RESOURCE_HIGH_ALERT_MS / 60000, cpuPct, resourceCpuThreshold, memPct, resourceMemThreshold,
+                        diskLabel, diskPct, resourceDiskThreshold);
+                alertService.sendAlert(null, "WARN", "RESOURCE_HIGH", detail);
+                markAlerted(0L, "RESOURCE_HIGH");
+                systemFailures.add("RESOURCE_HIGH");
+            }
+            return;
+        }
+
+        resourceHighSince = 0;
+        if (!systemFailures.contains("RESOURCE_HIGH")) {
+            resourceNormalSince = 0;
+            return;
+        }
+        boolean clearlyRecovered = cpuPct < resourceCpuThreshold - RESOURCE_RECOVERY_MARGIN
+                && memPct < resourceMemThreshold - RESOURCE_RECOVERY_MARGIN
+                && diskPct < resourceDiskThreshold - RESOURCE_RECOVERY_MARGIN;
+        if (!clearlyRecovered) {
+            resourceNormalSince = 0;
+            return;
+        }
+        if (resourceNormalSince == 0) resourceNormalSince = now;
+        if (now - resourceNormalSince >= RESOURCE_RECOVERY_MS && systemFailures.remove("RESOURCE_HIGH")) {
+            resourceNormalSince = 0;
+            alertService.sendAlert((JobDefinition) null, "INFO", "ALERT_RESOLVED",
+                    "服务器资源已恢复正常（CPU=" + String.format("%.0f%%", cpuPct) + " 内存="
+                            + String.format("%.0f%%", memPct) + " 磁盘=" + String.format("%.0f%%", diskPct) + "）");
         }
     }
 

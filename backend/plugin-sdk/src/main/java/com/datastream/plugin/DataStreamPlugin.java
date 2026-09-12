@@ -1,4 +1,4 @@
-﻿package com.datastream.plugin;
+package com.datastream.plugin;
 
 /**
  * 控件插件 SPI 接口（独立 SDK 包）

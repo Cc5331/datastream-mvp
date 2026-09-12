@@ -64,6 +64,8 @@ class DagTranslationServiceTest {
         when(controlService.findByType("json_output")).thenReturn(control("json_output", "output",
                 "CREATE TABLE ${id} (\n  data STRING\n) WITH (\n  'connector' = 'filesystem',\n  'path' = '${path}',\n  'format' = 'json'\n);"));
         when(controlService.findByType("datagen_input")).thenReturn(control("datagen_input", "input", ""));
+        when(controlService.findByType("hdfs_input")).thenReturn(control("hdfs_input", "input", ""));
+        when(controlService.findByType("hdfs_output")).thenReturn(control("hdfs_output", "output", ""));
         when(controlService.findByType("field_concat")).thenReturn(control("field_concat", "transform",
                 "SELECT *, CONCAT(${fields}) AS `${newFieldName}` FROM ${id}"));
         when(controlService.findByType("xml_json")).thenReturn(control("xml_json", "transform",
@@ -187,6 +189,42 @@ class DagTranslationServiceTest {
         assertTrue(sql.contains("CREATE TABLE json_output_1"), "应生成 JSON 输出表");
         assertTrue(sql.contains("out.json.tmp"), "JSON 输出路径应重写为 .tmp");
         assertTrue(sql.contains("INSERT INTO json_output_1"), "应生成 INSERT");
+    }
+
+    @Test
+    void hdfsInputToOutput_generatesFilesystemTablesAndPropagatesSchema() {
+        Map<String, Object> in = new HashMap<>();
+        in.put("path", "hdfs://localhost:9000/data/students.csv");
+        in.put("delimiter", ",");
+        in.put("fieldsConfig", "[{\"name\":\"id\",\"type\":\"INT\"},{\"name\":\"name\",\"type\":\"STRING\"}]");
+        Map<String, Object> out = new HashMap<>();
+        out.put("path", "hdfs://localhost:9000/output/result");
+        out.put("delimiter", "|");
+        List<DagDefinition.DagNode> nodes = List.of(
+                node("hdfs-input-1", "hdfs_input", in),
+                node("hdfs-output-1", "hdfs_output", out));
+        List<DagDefinition.DagEdge> edges = List.of(edge("e1", "hdfs-input-1", "hdfs-output-1"));
+
+        String sql = service.translate(dag("hdfs", 1, nodes, edges));
+
+        assertTrue(sql.contains("CREATE TABLE hdfs_input_1"), "HDFS 输入表名应安全转换: " + sql);
+        assertTrue(sql.contains("'path' = 'hdfs://localhost:9000/data/students.csv'"), "应保留 HDFS 输入路径");
+        assertTrue(sql.contains("CREATE TABLE hdfs_output_1"), "应生成 HDFS 输出表");
+        assertTrue(sql.contains("`id` INT"), "输入 schema 应传播到输出表: " + sql);
+        assertTrue(sql.contains("'csv.delimiter' = '|'"), "应使用输出分隔符");
+        assertTrue(sql.contains("INSERT INTO hdfs_output_1 SELECT * FROM hdfs_input_1;"), "应生成 HDFS 写入语句: " + sql);
+    }
+
+    @Test
+    void hdfsInputWithoutFieldsConfig_throws() {
+        Map<String, Object> in = new HashMap<>();
+        in.put("path", "hdfs://localhost:9000/data/students.csv");
+        List<DagDefinition.DagNode> nodes = List.of(node("hdfs_1", "hdfs_input", in));
+
+        RuntimeException ex = assertThrows(RuntimeException.class,
+                () -> service.translate(dag("hdfs-invalid", 1, nodes, List.of())));
+
+        assertTrue(ex.getMessage().contains("fieldsConfig"), "异常信息应指出缺少字段定义: " + ex.getMessage());
     }
 
     @Test

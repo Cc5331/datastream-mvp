@@ -59,6 +59,9 @@ public class DagTranslationService {
     @Value("${app.mysql.default-password:}")
     private String defaultMysqlPassword;
 
+    @Value("${app.storage.output-root:../output}")
+    private String outputRoot;
+
     public String translate(DagDefinition dag) {
         cleanOutputTempDirs(dag);
         StringBuilder flinkSql = new StringBuilder();
@@ -77,7 +80,6 @@ public class DagTranslationService {
         if (hasRedisLookup) {
             flinkSql.append("CREATE FUNCTION IF NOT EXISTS redis_lookup AS 'com.datastream.udf.RedisLookupUdf' LANGUAGE JAVA;\n\n");
         }
-
         List<DagDefinition.DagNode> sortedNodes = topologicalSort(dag);
         Map<String, String> tableAlias = new HashMap<>();
         Map<String, String> nodeSchemas = new HashMap<>();
@@ -269,6 +271,50 @@ public class DagTranslationService {
                 nodeSchemas.put(node.getId(), fields);
                 log.info("Oracle input {}: {}.{} -> {} fields", node.getId(), url, table, fields.split("\n").length);
                 flinkSql.append("-- Node: ").append(node.getLabel()).append(" (").append(node.getId()).append(") [Oracle Input]\n");
+                flinkSql.append(rendered).append("\n\n");
+                tableAlias.put(node.getId(), sanitize(node.getId()));
+                continue;
+            }
+
+            // HDFS Input -> 内置 filesystem connector 读 hdfs:// 路径，fieldsConfig 指定 schema
+            if ("hdfs_input".equals(node.getType())) {
+                String path = node.getParams() != null && node.getParams().get("path") != null ? node.getParams().get("path").toString().trim() : "";
+                String fc = node.getParams() != null && node.getParams().get("fieldsConfig") != null ? node.getParams().get("fieldsConfig").toString() : "[]";
+                String delimiter = node.getParams() != null && node.getParams().get("delimiter") != null ? node.getParams().get("delimiter").toString().trim() : ",";
+                if (path.isEmpty()) {
+                    throw new RuntimeException("HDFS 输入缺少 path 参数（如 hdfs://localhost:9000/data/students.csv）");
+                }
+                if (!path.startsWith("hdfs://")) {
+                    throw new RuntimeException("HDFS 输入 path 必须以 hdfs:// 开头: " + path);
+                }
+                String rendered = generateHdfsInputDDL(sanitize(node.getId()), path, fc, delimiter);
+                String schema = extractFieldsFromDatagenConfig(fc);
+                if (schema != null) nodeSchemas.put(node.getId(), schema);
+                log.info("HDFS input {}: {} (schema: {})", node.getId(), path, schema);
+                flinkSql.append("-- Node: ").append(node.getLabel()).append(" (").append(node.getId()).append(") [HDFS Input]\n");
+                flinkSql.append(rendered).append("\n\n");
+                tableAlias.put(node.getId(), sanitize(node.getId()));
+                continue;
+            }
+
+            // HDFS Output -> 内置 filesystem connector 写 hdfs:// 目录并生成 part 文件
+            if ("hdfs_output".equals(node.getType())) {
+                String path = node.getParams() != null && node.getParams().get("path") != null ? node.getParams().get("path").toString().trim() : "";
+                String delimiter = node.getParams() != null && node.getParams().get("delimiter") != null ? node.getParams().get("delimiter").toString().trim() : ",";
+                if (path.isEmpty()) {
+                    throw new RuntimeException("HDFS 输出缺少 path 参数（如 hdfs://localhost:9000/output/result）");
+                }
+                if (!path.startsWith("hdfs://")) {
+                    throw new RuntimeException("HDFS 输出 path 必须以 hdfs:// 开头: " + path);
+                }
+                String upstream = findIncomingSourceTable(node.getId(), dag.getEdges(), tableAlias);
+                if (upstream == null) {
+                    throw new RuntimeException("HDFS 输出缺少上游输入节点连线");
+                }
+                String fields = findIncomingSourceSchema(node.getId(), dag.getEdges(), nodeSchemas);
+                String rendered = generateHdfsOutputDDL(sanitize(node.getId()), path, delimiter, fields);
+                log.info("HDFS output {}: {}", node.getId(), path);
+                flinkSql.append("-- Node: ").append(node.getLabel()).append(" (").append(node.getId()).append(") [HDFS Output]\n");
                 flinkSql.append(rendered).append("\n\n");
                 tableAlias.put(node.getId(), sanitize(node.getId()));
                 continue;
@@ -642,14 +688,14 @@ public class DagTranslationService {
     }
 
     private void deleteRecursively(java.io.File f) {
-        if (f == null || !f.exists()) return;
-        if (f.isDirectory()) {
-            java.io.File[] children = f.listFiles();
-            if (children != null) {
-                for (java.io.File c : children) deleteRecursively(c);
+        if (f == null) return;
+        try {
+            if (!com.datastream.mvp.util.ManagedFiles.deleteRecursively(f.toPath(), outputRoot)) {
+                log.warn("Refusing to delete path outside managed output root: {}", f);
             }
+        } catch (java.io.IOException e) {
+            log.warn("Failed to delete managed output path {}: {}", f, e.getMessage());
         }
-        f.delete();
     }
 
     public String submitToFlink(String flinkSql, int parallelism) {
@@ -1147,6 +1193,51 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
             return mapped;
         }
         return path;
+    }
+
+    /** 生成 HDFS 输入 DDL：filesystem connector + CSV format，fieldsConfig 指定 schema（HDFS 无表头推导，需用户声明字段） */
+    private String generateHdfsInputDDL(String tableName, String path, String fieldsConfig, String delimiter) {
+        JsonNode fa = tryParseJsonArray(fieldsConfig);
+        StringBuilder ddl = new StringBuilder();
+        ddl.append("CREATE TABLE ").append(tableName).append(" (\n");
+        if (fa != null && fa.isArray() && fa.size() > 0) {
+            for (int i = 0; i < fa.size(); i++) {
+                JsonNode f = fa.get(i);
+                String fn = f.has("name") ? f.get("name").asText() : "field" + i;
+                String ft = f.has("type") ? f.get("type").asText() : "STRING";
+                ddl.append("  ").append(quoteFlinkField(fn)).append(" ").append(ft);
+                if (i < fa.size() - 1) ddl.append(",");
+                ddl.append("\n");
+            }
+        } else {
+            throw new RuntimeException("HDFS 输入需要 fieldsConfig 声明字段（HDFS 文件无法自动推导表头），如 [{\"name\":\"id\",\"type\":\"INT\"}]");
+        }
+        ddl.append(") WITH (\n");
+        ddl.append("  'connector' = 'filesystem',\n");
+        ddl.append("  'path' = '").append(path.replace("'", "''")).append("',\n");
+        ddl.append("  'format' = 'csv',\n");
+        ddl.append("  'csv.delimiter' = '").append(delimiter.replace("'", "''")).append("',\n");
+        ddl.append("  'csv.ignore-parse-errors' = 'true',\n");
+        ddl.append("  'csv.allow-comments' = 'false'\n");
+        ddl.append(");\n");
+        return ddl.toString();
+    }
+
+    /** 生成 HDFS 输出 DDL：filesystem connector，非分区流式写（source 下游为有界时写完即 FINISHED） */
+    private String generateHdfsOutputDDL(String tableName, String path, String delimiter, String fields) {
+        StringBuilder ddl = new StringBuilder();
+        ddl.append("CREATE TABLE ").append(tableName).append(" (\n");
+        ddl.append(fields).append("\n");
+        ddl.append(") WITH (\n");
+        ddl.append("  'connector' = 'filesystem',\n");
+        ddl.append("  'path' = '").append(path.replace("'", "''")).append("',\n");
+        ddl.append("  'format' = 'csv',\n");
+        ddl.append("  'csv.delimiter' = '").append(delimiter.replace("'", "''")).append("',\n");
+        ddl.append("  'sink.rolling-policy.rollover-interval' = '15 min',\n");
+        ddl.append("  'sink.rolling-policy.check-interval' = '1 min',\n");
+        ddl.append("  'sink.parallelism' = '1'\n");
+        ddl.append(");\n");
+        return ddl.toString();
     }
 
     private String findIncomingSourceTable(String nodeId, List<DagDefinition.DagEdge> edges, Map<String, String> tableAlias) {

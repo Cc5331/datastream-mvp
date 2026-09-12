@@ -1,4 +1,4 @@
-﻿package com.datastream.plugin.example;
+package com.datastream.plugin.example;
 
 import com.datastream.plugin.DataStreamPlugin;
 

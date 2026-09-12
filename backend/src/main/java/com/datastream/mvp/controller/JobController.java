@@ -68,6 +68,13 @@ public class JobController {
         return ResponseEntity.ok().build();
     }
 
+    @PostMapping("/{id}/confirm")
+    @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
+    @Audit(action = "JOB_CONFIRM_AI_DRAFT", targetType = "JOB", targetId = "#id")
+    public JobDefinition confirmAiDraft(@PathVariable Long id) {
+        return jobService.confirmAiDraft(id, currentUser());
+    }
+
     @PostMapping("/{id}/submit")
     @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
     @Audit(action = "JOB_SUBMIT", targetType = "JOB", targetId = "#id")

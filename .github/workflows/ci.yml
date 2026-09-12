@@ -16,9 +16,8 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Run backend tests
-        working-directory: backend
-        run: mvn -B test
+      - name: Verify all Maven modules
+        run: mvn -B verify
 
   frontend-check:
     name: Frontend static check
@@ -29,9 +28,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '18'
-      - name: Install dependencies
+      - name: Run frontend checks
         working-directory: frontend
-        run: npm install
-      - name: Run frontend check
-        working-directory: frontend
-        run: npm run check
+        run: npm run check && npm test

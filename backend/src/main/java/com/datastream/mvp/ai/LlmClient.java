@@ -512,14 +512,8 @@ public class LlmClient {
             String base = requestBaseUrl.trim().replaceAll("/+$", "");
             String resBody;
             if ("responses".equalsIgnoreCase(wireApi)) {
-                ObjectNode payload = objectMapper.createObjectNode();
-                payload.put("model", selectedModel);
-                payload.put("store", storeResponses);
-                payload.put("input", userContent);
-                ObjectNode instruction = payload.putObject("instructions");
-                instruction.put("type", "text");
-                instruction.put("text", systemPrompt);
-                payload.put("reasoning", objectMapper.createObjectNode().put("effort", reasoningEffort));
+                ObjectNode payload = createResponsesPayload(
+                        systemPrompt, userContent, selectedModel, reasoningEffort, storeResponses);
 
                 HttpRequest request = HttpRequest.newBuilder()
                         .uri(URI.create(base + "/responses"))
@@ -595,6 +589,17 @@ public class LlmClient {
         } catch (Exception e) {
             throw new IllegalStateException("LLM 调用失败: " + e.getMessage(), e);
         }
+    }
+
+    ObjectNode createResponsesPayload(String systemPrompt, String userContent, String selectedModel,
+                                      String reasoningEffort, boolean storeResponses) {
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("model", selectedModel);
+        payload.put("store", storeResponses);
+        payload.put("input", userContent);
+        payload.put("instructions", systemPrompt);
+        payload.set("reasoning", objectMapper.createObjectNode().put("effort", reasoningEffort));
+        return payload;
     }
 
     JsonNode parseJson(String text) {

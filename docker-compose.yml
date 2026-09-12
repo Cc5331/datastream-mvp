@@ -147,6 +147,13 @@ services:
       FLINK_SQL_GATEWAY_PORT: "8083"
       FLINK_HOME: /opt/flink
       PLUGIN_DIR: /app/plugins
+      JWT_SECRET: ${JWT_SECRET:?请在 .env 中设置至少 32 字节的 JWT_SECRET}
+      BOOTSTRAP_USERS_ENABLED: ${BOOTSTRAP_USERS_ENABLED:-false}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      OPERATOR_PASSWORD: ${OPERATOR_PASSWORD:-}
+      VIEWER_PASSWORD: ${VIEWER_PASSWORD:-}
+      APP_PREVIEW_ALLOWED_ROOTS: /data,/output
+      OUTPUT_ROOT: /output
       AI_PROVIDER: ${AI_PROVIDER:-openai}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
