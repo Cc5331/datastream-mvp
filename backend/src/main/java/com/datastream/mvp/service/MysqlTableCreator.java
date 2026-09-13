@@ -132,7 +132,7 @@ public class MysqlTableCreator {
         String t = flinkType.toUpperCase();
         if (t.startsWith("DECIMAL")) return "DECIMAL" + t.substring("DECIMAL".length());
         if (t.startsWith("TIMESTAMP")) return "DATETIME(3)";
-        if (t.startsWith("BINARY") || t.startsWith("VARBINARY")) return "VARBINARY(255)";
+        if (t.startsWith("BINARY") || t.startsWith("VARBINARY") || t.startsWith("BYTES")) return "VARBINARY(4096)";
         switch (t) {
             case "INT": return "INT";
             case "BIGINT": return "BIGINT";
@@ -141,7 +141,8 @@ public class MysqlTableCreator {
             case "FLOAT": return "FLOAT";
             case "DOUBLE": return "DOUBLE";
             case "BOOLEAN": return "TINYINT(1)";
-            case "STRING": return "VARCHAR(255)";
+            // 上游 STRING 长度不可知，用 TEXT 避免长文本/JSON/中文被静默截断
+            case "STRING": return "TEXT";
             case "DATE": return "DATE";
             case "TIME": return "TIME";
             default: return "TEXT";

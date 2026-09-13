@@ -283,9 +283,19 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}
       ORACLE_USERNAME: ${ORACLE_USERNAME:-dataflow}
       ORACLE_PASSWORD: ${ORACLE_PASSWORD:?请在 .env 中设置 ORACLE_PASSWORD}
-      APP_PREVIEW_ALLOWED_ROOTS: /data,/output
+      # MySQL 控件默认凭据（预览/提交时由后端解析），容器内连 compose 的 mysql 服务
+      MYSQL_USERNAME: ${MYSQL_USERNAME:-root}
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请在 .env 中设置 MYSQL_ROOT_PASSWORD}
+      MYSQL_URL: "jdbc:mysql://mysql:3306/datastream?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai"
+      POSTGRES_URL: "jdbc:postgresql://postgres:5432/${POSTGRES_DB:-dataflow}"
+      ORACLE_URL: "jdbc:oracle:thin:@oracle:1521/FREEPDB1"
+      APP_DATA_ROOT: /data
+      APP_TEST_RESOURCES_ROOT: /test-resources
+      APP_PREVIEW_ALLOWED_ROOTS: /data,/test-resources,/output
       APP_PREVIEW_ALLOWED_JDBC_HOSTS: postgres,oracle,mysql
       APP_PREVIEW_ALLOWED_HDFS_AUTHORITIES: namenode:9000
+      # 容器为 Linux，Hadoop 不需要 winutils；置空避免回落到 application.yml 的 Windows 默认路径
+      HADOOP_HOME: ""
       HADOOP_CONF_DIR: /opt/hadoop-conf
       OUTPUT_ROOT: /output
       # 默认使用 DeepSeek；切回 OpenAI 时设 AI_PROVIDER=openai 并配置 OPENAI_* 变量

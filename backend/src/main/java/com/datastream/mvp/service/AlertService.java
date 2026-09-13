@@ -6,14 +6,9 @@ import com.datastream.mvp.model.JobLog;
 import com.datastream.mvp.repository.AlertRecordRepository;
 import com.datastream.mvp.repository.JobLogRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import jakarta.mail.internet.MimeMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
@@ -24,7 +19,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 
 /**
- * 告警服务：webhook 通知 + 告警记录落库 + 邮件通知（QQ 邮箱 SMTP）。
+ * 告警服务：webhook 通知 + 告警记录落库 + 邮件通知（异步，见 AlertMailDispatcher）。
  * SMTP 未配置时自动降级为日志记录，不影响主流程。
  */
 @Slf4j
@@ -35,17 +30,8 @@ public class AlertService {
     private final ObjectMapper objectMapper;
     private final JobLogRepository logRepo;
     private final AlertRecordRepository alertRepo;
-    private final ObjectProvider<JavaMailSender> mailSenderProvider;
+    private final AlertMailDispatcher mailDispatcher;
     private final ApplicationEventPublisher eventPublisher;
-
-    @Value("${app.alert.email.host:}")
-    private String mailHost;
-
-    @Value("${app.alert.email.username:}")
-    private String mailUsername;
-
-    @Value("${app.alert.email.to:}")
-    private String mailTo;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
@@ -76,7 +62,8 @@ public class AlertService {
         if (job != null) sendWebhook(job, lvl, event, message);
         // INFO 级（如恢复通知）不发邮件，只落库 + webhook
         if (!"INFO".equalsIgnoreCase(lvl)) {
-            sendEmail(buildAlertMailSubject(event, lvl, job), buildAlertMailBody(job, lvl, event, message));
+            // 异步发送，避免 SMTP 超时阻塞定时扫描线程
+            mailDispatcher.send(buildAlertMailSubject(event, lvl, job), buildAlertMailBody(job, lvl, event, message));
             // 真实故障告警 -> 异步触发自动智能诊断（仅作业级）
             publishAutoDiagnosis(job, lvl, event, message);
         }
@@ -231,33 +218,6 @@ public class AlertService {
             logRepo.save(entry);
         } catch (Exception e) {
             log.warn("Webhook result log save failed for job {}: {}", jobId, e.getMessage());
-        }
-    }
-
-    /**
-     * 邮件通知：SMTP 未配置时记录“邮件日志”兜底，保证演示可观测。
-     */
-    public void sendEmail(String subject, String body) {
-        if (mailHost == null || mailHost.isBlank() || mailTo == null || mailTo.isBlank()) {
-            log.info("[MAIL-FALLBACK] 未配置 SMTP（SMTP_HOST/SMTP_TO），跳过发送。主题: {}", subject);
-            return;
-        }
-        try {
-            JavaMailSender sender = mailSenderProvider.getIfAvailable();
-            if (sender == null) {
-                log.info("[MAIL-FALLBACK] JavaMailSender 不可用（spring.mail.host 未配置），主题: {}", subject);
-                return;
-            }
-            MimeMessage msg = sender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(msg, true, "UTF-8");
-            helper.setFrom(mailUsername == null || mailUsername.isBlank() ? mailTo : mailUsername);
-            helper.setTo(mailTo.split("[,;]"));
-            helper.setSubject(subject);
-            helper.setText(body, true);
-            sender.send(msg);
-            log.info("[MAIL] 告警邮件已发送至 {}: {}", mailTo, subject);
-        } catch (Exception e) {
-            log.warn("[MAIL] 邮件发送失败（不影响主流程）: {}", e.getMessage());
         }
     }
 }

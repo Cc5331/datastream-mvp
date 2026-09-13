@@ -454,6 +454,14 @@ public class PreviewService {
         return result;
     }
 
+    /**
+     * 校验并规范化文件路径，仅允许 app.preview.allowed-roots 内的文件。
+     * 供其它预览入口（如作业输出预览）复用，避免出现绕过白名单的读文件路径。
+     */
+    public Path assertAllowedRead(String rawPath) {
+        return resolveAllowedFile(rawPath);
+    }
+
     private Path resolveAllowedFile(String rawPath) {
         if (rawPath == null || rawPath.isBlank()) {
             throw new IllegalArgumentException("文件路径不能为空");

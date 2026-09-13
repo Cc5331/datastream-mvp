@@ -40,7 +40,7 @@
 ### 1.3 未实现 / TODO（后续完善方向）
 - 控件插件热加载：PluginLoaderService 已能扫描 `backend/plugins` 注册外部插件，但 MVP 仍以内置注册表为准，尚未做插件的端到端验证与 UI 管理。
 - 性能基准脚本已能真实提交 Flink 作业并产出报告（test-results/benchmark_report.md），但未纳入 CI。
-- 测试空白区：FlinkJobStatusChecker、MysqlTableCreator、Kafka/Parquet/HDFS 链路、调度与用户隔离（详见第 10 节）。
+- 测试空白区：MysqlTableCreator 仍无独立测试（README 主推的自动建表功能）；FlinkJobStatusChecker 仅有常量断言，状态认领/回写分支无回归保护；previewFile 的 allowed-roots 与防穿越逻辑无测试（安全高风险）。详见第 10 节。
 
 ---
 
@@ -77,16 +77,16 @@
     │   │   ├── plugin/                 # 控件插件 SPI + PluginLoaderService（已启用，扫 backend/plugins）
     │   │   ├── repository/             # JPA Repository × 11
     │   │   ├── security/               # JwtUtil / JwtAuthFilter / CurrentUser / SecurityUtils
-    │   │   ├── service/                # 27 个，核心见 6.1
+    │   │   ├── service/                # 30 个，核心见 6.1
     │   │   └── util/                   # JdbcUrlUtil / ManagedFiles / MysqlIdentifier / LanguageDetector
     │   ├── src/main/resources/         # application.yml / application-mysql.yml / application-linux.yml + ai-prompts/(中英提示词模板)
-    │   ├── src/test/java/              # 18 个测试类 / 71 个用例
+    │   ├── src/test/java/              # 22 个测试类 / 87 个用例
     │   └── data/                       # H2 元数据库 mvpdb.mv.db + ai_providers.json + .ai_config_key（本机密钥，均已被 .gitignore 覆盖）
     ├── frontend/
     │   ├── serve.js                    # 静态服务 + /api 反代（无缓存头，路径穿越防护）
     │   ├── test/app.test.js            # 前端 9 个用例（含控件注册表前后端一致性校验）
     │   └── public/
-    │       ├── index.html              # 单页应用（10 个视图）
+    │       ├── index.html              # 单页应用（9 个视图）
     │       ├── css/style.css
     │       ├── js/app.js               # 全部前端逻辑（2451 行，Vue3 + X6）
     │       └── vendor/                 # Vue/ElementPlus/X6/ECharts 本地化依赖
@@ -160,7 +160,7 @@
     mysql -u root -p flink_demo -e "SHOW TABLES;"     # 密码见 .env / MYSQL_PASSWORD
 
 ### 4.5 构建与测试（改完必跑，见第 9 节）
-    mvn -B -f pom.xml test          # 根聚合：全 5 模块；后端 71 个用例（2026-09-11 实测全绿）
+    mvn -B -f pom.xml test          # 根聚合：全 5 模块；后端 87 个用例（2026-09-13 实测全绿）
     cd frontend; node --test test/app.test.js   # 前端 9 个用例（含控件注册表前后端一致性校验）
 
 ---
@@ -474,3 +474,4 @@
 ① 清理——128 个作业中 E2E 调试产物每类保留 1 个（删 72 个）、删除 10 个零散调试作业与 1 个 SUBMITTED 残留，保留 36 个演示矩阵 + 7 个 E2E 能力证据 + 「故障演示-错误路径」「LLM诊断演示」；清理前全量备份至 `backend/_job_backup_20260912_120233.json`（已被 .gitignore 覆盖）② 新增 5 个多数据源演示作业（演示 PostgreSQL→CSV / CSV→PostgreSQL / PostgreSQL→HDFS / HDFS→CSV / CSV→Redis富化→CSV），命名与既有演示矩阵一致、含画布坐标，全部真实 Flink 提交 COMPLETED；最终 50 个作业（43 COMPLETED）③ 排障记录：Flink TaskManager 会缓存 NameNode 的旧容器 IP，HDFS 重建后必须同时重建 Flink 集群，否则报 `Connection refused namenode:9000` | backend/_job_backup_*.json + 演示作业数据 |
 `app.ai.provider` 与 Compose 默认由 openai 改为 **deepseek**（DEEPSEEK_API_KEY/BASE_URL/MODEL 优先，OPENAI_* 降级为可选），模型白名单默认 `deepseek-v4-flash,deepseek-v4-flash-vision-exp`；修复「provider=openai 导致 apiKey 取空的 OPENAI_API_KEY，落盘密钥解密失败后无环境变量可回退 → configured=false」问题——补齐 .env 的 AI_PROVIDER 并归档失效的 ai_providers.json，使环境变量接管；实测 /api/ai/test 返回连接成功，/api/ai/diagnose/{jobId} 对失败作业返回准确根因与 3 条可操作建议 | application.yml / docker-compose.yml / .env.example / .env（不入库） |
 | 2026-09-12 | 多数据源交叉 E2E 验收 **7/7 通过**（test-resources/multisource_e2e.py，真实 Flink 提交）：PostgreSQL→CSV(3行) / CSV→PostgreSQL(3000行+自动建表) / PostgreSQL→HDFS(part 文件) / HDFS→CSV(表头正确过滤) / CSV→Redis Lookup→CSV(取到真实 Redis 值「华东重点订单」) / CSV→字段过滤→PostgreSQL(3000行,列=sale_id/region/amount) / PostgreSQL→HDFS 链路。验收暴露并修复 5 个真实缺陷：① hdfs_input 把 CSV 表头当数据行读入——新增 hasHeader 参数，按 STRING 全列读取+SQL 层 `WHERE 首列 <> 字段名` 过滤表头，且 nodeSchemas 同步为 STRING 避免 sink 类型校验失败；② Flink 容器未挂载 test-resources，作业读不到输入数据——compose 为 JM/TM/SG/Backend 增加挂载（须可写，表头剥离要生成 .nohdr）；③ HDFS 容器权限——hdfs-site.xml 关闭 dfs.permissions.enabled（演示环境）；④ HDFS 集群重建后 DataNode 集群 ID 不匹配——清卷重建；⑤ 脚本 `.bat` 与 `docker exec` 路径/子命令格式修正（hdfs dfs 子命令需 `-` 前缀）。另将手动 HDFS 容器替换为 compose 管理的 namenode/datanode（apache/hadoop:3.3.6，含持久卷与健康检查） | test-resources/multisource_e2e.py + DagTranslationService + DataInitializer + docker-compose.yml + docker/hadoop-conf/ + 前端 app.js + docs |
+| 2026-09-13 | **全项目对抗性缺陷审查与 P0/P1 修复**（审查 4 个维度：并发与资源、安全边界、DAG 翻译正确性、配置部署与文档）。**P0**：① 6 个 `@Scheduled` 任务共用 Spring 默认单线程调度器，MonitorService 每 2s 逐作业发 Flink HTTP 会把 HealthMonitor(10s)/状态轮询(5s)/心跳(10s)/调度(30s) 全部饿死 → 新增 `spring.task.scheduling.pool.size`(默认 4) 与 `spring.task.execution.pool`，并把告警邮件抽到独立有界线程池 `alertTaskExecutor`（`AlertMailDispatcher` @Async），避免 SMTP 不可达时每个告警阻塞扫描线程 10s；② 控件默认路径写死 Windows 盘符（容器内不存在），且输入分支不做容器映射（`json_input`/`xml_input`/`parquet_input`/`excel_input` 依赖 `File.isFile()` 直接报“文件不存在”）→ 新增 `app.paths.data-root`/`test-resources-root` 与 `app.storage.output-root` 在种子时解析为绝对路径，输入分支补 `resolveRuntimePath(path,"/data")`，MySQL/PG/Oracle 默认 JDBC URL 也改为可注入（`MYSQL_URL`/`POSTGRES_URL`/`ORACLE_URL`，容器内指向服务名）；③ `GET /api/jobs/{id}/preview` 直接按 DAG 里的 path 读文件，绕过 allowed-roots 白名单，可读回 `.env`（含 JWT_SECRET → 可伪造 ADMIN token）→ 改为复用 `PreviewService.assertAllowedRead`；④ `MonitorController` 的 overview/trends/removeTrend 无角色与 owner 校验，任意登录用户（含自助注册 VIEWER）可读全站运行数据、删他人趋势 → overview/trends 按当前用户过滤（ADMIN 全量），删除加 `@PreAuthorize` + owner 校验。**P1**：⑤ `renderTemplate` 对所有参数原样替换 → 统一 `escapeSqlLiteral`，并补齐 CSV/Kafka/datagen/excel/parquet/xml 分支的 path/topic/bootstrap/delimiter 转义；⑥ `extractFieldsFromDdlTemplate` 取第一个 `)`，`DECIMAL(10,2)` 被截成非法 schema → 改为括号配对；`replaceDataStringInDDL` 加 `Matcher.quoteReplacement`；⑦ JDBC `precision=0` 生成 `DECIMAL(1,0)` → 改 `DECIMAL(38,18)`；MySQL `STRING→VARCHAR(255)` 截断长文本/中文 → 改 `TEXT`、`BINARY→VARBINARY(4096)`；⑧ SQL Gateway 逐语句失败只 `log.warn + continue` 导致缺表 INSERT 仍被标“已提交” → 改为抛出并带语句序号；`flinkSql.split(";")` 在密码/路径含分号时截断语句 → 改为引号感知的 `splitSqlStatements`；⑨ `submitToFlink` 在集群在线但提交全失败时返回假 `flink-job-UUID`，前端显示“提交成功” → 提交路径改为返回 `SubmitResult` 三态（真实 Job ID / 集群已接受但未取到 ID / 明确失败）：明确失败时抛错让作业落 FAILED，已接受但未取到 ID 时仍保留占位 ID 交状态轮询认领（避免慢启动作业被误标 FAILED）；⑩ mock 占位 ID 认领：同一轮多个占位作业会认领同一个真实作业、且可能认领提交前启动的旧作业 → 候选消费后移除 + 只认领 start-time 不早于提交时刻(30s 容差)的作业；⑪ 作业删除后 `trendBuffer`/`lastLiveSnapshot` 与 HealthMonitor 六个去重 Map 不清理 → `JobService.delete` 联动 `MonitorService.removeTrend` + 新增 `HealthMonitor.forgetJob`；⑫ compose 缺 `MYSQL_USERNAME`/`MYSQL_PASSWORD`/`HADOOP_HOME`，预览白名单丢 `/test-resources` → 全部补齐，容器内 `HADOOP_HOME` 置空避免回落 Windows 默认值。**文档**：修正测试数(18 类/71 用例→22 类/87 用例)、Service 数(27→30)、视图数(10→9)、容器数(7→12，Oracle 另为 profile)、测试空白区描述。后端 **87 测试全绿** | DagTranslationService / JobService / MonitorService / MonitorController / HealthMonitor / FlinkJobStatusChecker / AlertService / AlertMailDispatcher(新) / AsyncExecutorConfig(新) / DataInitializer / PreviewService / MysqlTableCreator / application.yml / docker-compose.yml / .env.example / JobServiceTest / DEVELOPMENT.md / README.md |

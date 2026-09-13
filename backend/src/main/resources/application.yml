@@ -1,6 +1,19 @@
 spring:
   application:
     name: mvp-backend
+  # 定时任务线程池：默认 1 线程会让 6 个 @Scheduled 任务（趋势采集 2s / 状态轮询 5s /
+  # 健康与心跳扫描 10s / 调度 30s）相互排队，作业多时告警与调度严重延迟
+  task:
+    scheduling:
+      pool:
+        size: ${APP_SCHEDULING_POOL_SIZE:4}
+      thread-name-prefix: mvp-sched-
+    execution:
+      pool:
+        core-size: ${APP_ASYNC_CORE_SIZE:4}
+        max-size: ${APP_ASYNC_MAX_SIZE:8}
+        queue-capacity: ${APP_ASYNC_QUEUE_CAPACITY:500}
+      thread-name-prefix: mvp-async-
   mail:
     host: ${SMTP_HOST:}
     port: ${SMTP_PORT:465}
@@ -89,6 +102,11 @@ app:
     max-file-bytes: ${APP_PREVIEW_MAX_FILE_BYTES:67108864}
     allowed-jdbc-hosts: ${APP_PREVIEW_ALLOWED_JDBC_HOSTS:localhost,127.0.0.1,postgres,oracle,mysql}
     allowed-hdfs-authorities: ${APP_PREVIEW_ALLOWED_HDFS_AUTHORITIES:localhost:9000,namenode:9000}
+  paths:
+    # 控件默认路径根目录：本机为相对 backend 工作目录的相对路径，容器由 compose 注入
+    # APP_DATA_ROOT=/data、APP_TEST_RESOURCES_ROOT=/test-resources
+    data-root: ${APP_DATA_ROOT:../data}
+    test-resources-root: ${APP_TEST_RESOURCES_ROOT:../test-resources}
   storage:
     output-root: ${OUTPUT_ROOT:../output}
 
@@ -96,14 +114,18 @@ app:
     # mysql_input/mysql_output 控件默认用户名与密码（预填 + 预览用），通过环境变量注入，不入库
     default-username: ${MYSQL_USERNAME:root}
     default-password: ${MYSQL_PASSWORD:}
+    # 控件默认 JDBC URL：本机 localhost:3306，容器内由 compose 注入 mysql:3306/datastream
+    default-url: ${MYSQL_URL:jdbc:mysql://localhost:3306/flink_demo?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai}
   postgres:
     # PostgreSQL 输入/输出默认凭据，仅从环境变量注入
     default-username: ${POSTGRES_USERNAME:postgres}
     default-password: ${POSTGRES_PASSWORD:}
+    default-url: ${POSTGRES_URL:jdbc:postgresql://localhost:5432/dataflow}
   oracle:
     # Oracle 输入/输出默认凭据，仅从环境变量注入
     default-username: ${ORACLE_USERNAME:system}
     default-password: ${ORACLE_PASSWORD:}
+    default-url: ${ORACLE_URL:jdbc:oracle:thin:@localhost:1521/FREEPDB1}
 
   kafka:
     # Kafka 可视化（/api/kafka/*）连接地址；本机运行用 localhost:29092，容器内用 kafka:9092

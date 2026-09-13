@@ -4,6 +4,7 @@ import com.datastream.mvp.model.JobDefinition;
 import com.datastream.mvp.model.TrendPoint;
 import com.datastream.mvp.repository.JobDefinitionRepository;
 import com.datastream.mvp.repository.TrendPointRepository;
+import com.datastream.mvp.security.CurrentUser;
 import jakarta.annotation.PostConstruct;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -11,8 +12,10 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -64,11 +67,20 @@ public class MonitorService {
     private final Map<Long, ObjectNode> lastLiveSnapshot = new ConcurrentHashMap<>();
 
     public List<ObjectNode> overview() {
+        return overview(null);
+    }
+
+    /**
+     * 监控总览。cu 为 null 时不做归属过滤（仅供系统级 AI 诊断聚合使用）；
+     * 传入当前用户时，非管理员只能看到自己（或历史遗留无归属）的作业。
+     */
+    public List<ObjectNode> overview(CurrentUser cu) {
         List<ObjectNode> result = new ArrayList<>();
         Set<Long> seen = new HashSet<>();
         List<JobDefinition> active = jobRepo.findByStatusIn(List.of(
                 JobDefinition.JobStatus.SUBMITTED, JobDefinition.JobStatus.RUNNING));
         for (JobDefinition job : active) {
+            if (!canSee(job, cu)) continue;
             String fid = job.getFlinkJobId();
             if (fid == null || isMockFlinkId(fid)) continue;
             ObjectNode item = buildJobMetrics(job, fid, true);
@@ -87,6 +99,7 @@ public class MonitorService {
         for (JobDefinition job : recent) {
             if (added >= RECENT_LIMIT) break;
             if (seen.contains(job.getId())) continue;
+            if (!canSee(job, cu)) continue;
             JobDefinition.JobStatus st = job.getStatus();
             if (st != JobDefinition.JobStatus.COMPLETED
                     && st != JobDefinition.JobStatus.FAILED
@@ -476,6 +489,14 @@ public class MonitorService {
      * 运行中与最近结束的作业都返回：作业结束后保留趋势曲线，直到下一次重新运行才重置。
      */
     public List<ObjectNode> trends() {
+        return trends(null);
+    }
+
+    /**
+     * 吞吐/背压时间序列。cu 为 null 时不过滤归属；否则非管理员只返回自己作业的曲线。
+     * 注意：残留缓冲的清理必须基于全量 jobMap，不能按归属过滤，否则会误删他人曲线。
+     */
+    public List<ObjectNode> trends(CurrentUser cu) {
         List<ObjectNode> result = new ArrayList<>();
         if (trendBuffer.isEmpty()) return result;
         List<JobDefinition> jobs = jobRepo.findAllById(trendBuffer.keySet());
@@ -501,6 +522,7 @@ public class MonitorService {
         for (Map.Entry<Long, Deque<ObjectNode>> e : trendBuffer.entrySet()) {
             JobDefinition job = jobMap.get(e.getKey());
             if (job == null) continue;
+            if (!canSee(job, cu)) continue;
             ObjectNode item = objectMapper.createObjectNode();
             item.put("id", job.getId());
             item.put("name", job.getName());
@@ -539,6 +561,24 @@ public class MonitorService {
             log.warn("Failed to drop trend points for job {}: {}", jobId, e.getMessage());
         }
         return removed;
+    }
+
+    /** 校验过的趋势删除：先确认作业存在且当前用户有权限，再清理。 */
+    public boolean removeTrendForUser(Long jobId, CurrentUser cu) {
+        if (cu == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "未登录");
+        JobDefinition job = jobRepo.findById(jobId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "作业不存在: " + jobId));
+        if (!canSee(job, cu)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "无权操作该作业的趋势数据");
+        }
+        return removeTrend(jobId);
+    }
+
+    /** 归属判定：ADMIN 全量；其余用户仅限自己创建的作业（历史无归属数据放行）。 */
+    private boolean canSee(JobDefinition job, CurrentUser cu) {
+        if (cu == null) return true;
+        if (cu.isAdmin()) return true;
+        return job.getOwnerId() == null || job.getOwnerId().equals(cu.id());
     }
 
     private long lastPointTime(ArrayNode points) {

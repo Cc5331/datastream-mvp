@@ -159,6 +159,8 @@ public class DagTranslationService {
                 if (path.isEmpty()) {
                     throw new RuntimeException("Excel 输入缺少 path 参数");
                 }
+                // 兼容历史作业保存的宿主绝对路径（容器内映射到 /data）
+                path = resolveRuntimePath(path, "/data");
                 if (!new java.io.File(path).isFile()) {
                     throw new RuntimeException("Excel 输入文件不存在: " + path);
                 }
@@ -186,6 +188,7 @@ public class DagTranslationService {
                 if (path.isEmpty()) {
                     throw new RuntimeException("Parquet 输入缺少 path 参数");
                 }
+                path = resolveRuntimePath(path, "/data");
                 if (!new java.io.File(path).isFile()) {
                     throw new RuntimeException("Parquet 输入文件不存在: " + path);
                 }
@@ -215,6 +218,7 @@ public class DagTranslationService {
                 if (path.isEmpty()) {
                     throw new RuntimeException("XML 输入缺少 path 参数");
                 }
+                path = resolveRuntimePath(path, "/data");
                 if (!new java.io.File(path).isFile()) {
                     throw new RuntimeException("XML 输入文件不存在: " + path);
                 }
@@ -365,7 +369,11 @@ public class DagTranslationService {
                         // JSON Input -> 支持 array 数组（转临时 CSV 自动 schema）与 lines（JSON Lines，fieldsConfig 指定 schema）
             if ("json_input".equals(node.getType())) {
                 String path = node.getParams() != null && node.getParams().get("path") != null ? node.getParams().get("path").toString().trim() : "";
-                if (path.isEmpty() || !new java.io.File(path).isFile()) {
+                if (path.isEmpty()) {
+                    throw new RuntimeException("JSON 输入缺少 path 参数（auto/lines/array 模式均需要本地文件）");
+                }
+                path = resolveRuntimePath(path, "/data");
+                if (!new java.io.File(path).isFile()) {
                     throw new RuntimeException("JSON 输入文件不存在: " + path);
                 }
                 String mode = node.getParams() != null && node.getParams().get("mode") != null ? node.getParams().get("mode").toString().trim() : "auto";
@@ -421,7 +429,7 @@ public class DagTranslationService {
                 }
                 excelDdl.append(") WITH (\n");
                 excelDdl.append("  'connector' = 'filesystem',\n");
-                excelDdl.append("  'path' = '").append(tempCsvPath).append("',\n");
+                excelDdl.append("  'path' = '").append(escapeSqlLiteral(tempCsvPath)).append("',\n");
                 excelDdl.append("  'format' = 'csv',\n");
                 excelDdl.append("  'csv.delimiter' = '").append(delimiter).append("',\n");
                 excelDdl.append("  'sink.parallelism' = '1'\n");
@@ -452,7 +460,7 @@ public class DagTranslationService {
                 }
                 parquetDdl.append(") WITH (\n");
                 parquetDdl.append("  'connector' = 'filesystem',\n");
-                parquetDdl.append("  'path' = '").append(tempCsvPath).append("',\n");
+                parquetDdl.append("  'path' = '").append(escapeSqlLiteral(tempCsvPath)).append("',\n");
                 parquetDdl.append("  'format' = 'csv',\n");
                 parquetDdl.append("  'csv.delimiter' = '").append(delimiter).append("',\n");
                 parquetDdl.append("  'sink.parallelism' = '1'\n");
@@ -484,7 +492,7 @@ public class DagTranslationService {
                 }
                 xmlDdl.append(") WITH (\n");
                 xmlDdl.append("  'connector' = 'filesystem',\n");
-                xmlDdl.append("  'path' = '").append(tempCsvPath).append("',\n");
+                xmlDdl.append("  'path' = '").append(escapeSqlLiteral(tempCsvPath)).append("',\n");
                 xmlDdl.append("  'format' = 'csv',\n");
                 xmlDdl.append("  'csv.delimiter' = '").append(delimiter).append("',\n");
                 xmlDdl.append("  'sink.parallelism' = '1'\n");
@@ -589,7 +597,7 @@ public class DagTranslationService {
                 String schema = extractFieldsFromDdlTemplate(template);
                 if (schema != null) { nodeSchemas.put(node.getId(), schema); }
                 flinkSql.append("-- Node: ").append(node.getLabel()).append(" (").append(node.getId()).append(")\n");
-                flinkSql.append(renderTemplate(template, node.getParams(), node.getId())).append("\n\n");
+                flinkSql.append(renderTemplate(template, mapLocalInputPath(node.getParams()), node.getId())).append("\n\n");
             } else if ("output".equals(control.getCategory())) {
                 String sourceFields = findIncomingSourceSchema(node.getId(), dag.getEdges(), nodeSchemas);
                 String rendered;
@@ -809,22 +817,79 @@ public class DagTranslationService {
         }
     }
 
+    /**
+     * 按分号切分多条 SQL 语句，忽略单引号字符串内部的 ';'。
+     * 路径/密码/topic 里出现分号时，朴素 split(";") 会把一条语句从中间切断。
+     */
+    private java.util.List<String> splitSqlStatements(String sql) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        StringBuilder cur = new StringBuilder();
+        boolean inQuote = false;
+        for (int i = 0; i < sql.length(); i++) {
+            char c = sql.charAt(i);
+            if (c == '\'') {
+                // SQL 中的 '' 表示转义后的单引号，不改变引用状态
+                if (inQuote && i + 1 < sql.length() && sql.charAt(i + 1) == '\'') {
+                    cur.append("''");
+                    i++;
+                    continue;
+                }
+                inQuote = !inQuote;
+                cur.append(c);
+                continue;
+            }
+            if (c == ';' && !inQuote) {
+                out.add(cur.toString());
+                cur.setLength(0);
+                continue;
+            }
+            cur.append(c);
+        }
+        if (cur.length() > 0) out.add(cur.toString());
+        return out;
+    }
+
+    /** 提交结果：真实 Job ID / 集群是否已接受语句 / 失败原因，三者互斥用于区分「成功」「待认领」「失败」。 */
+    private static final class SubmitResult {
+        final String jobId;
+        final boolean accepted;
+        final String error;
+
+        private SubmitResult(String jobId, boolean accepted, String error) {
+            this.jobId = jobId;
+            this.accepted = accepted;
+            this.error = error;
+        }
+
+        static SubmitResult ok(String jobId) { return new SubmitResult(jobId, false, null); }
+        static SubmitResult acceptedNoId() { return new SubmitResult(null, true, null); }
+        static SubmitResult failed(String error) { return new SubmitResult(null, false, error); }
+    }
+
     public String submitToFlink(String flinkSql, int parallelism) {
-        String jobId = null;
         if (checkFlinkCluster()) {
+            SubmitResult result;
             try {
                 log.info("Flink cluster available, submitting SQL via Gateway...");
-                jobId = submitViaSqlClient(flinkSql, parallelism);
+                result = submitViaSqlClient(flinkSql, parallelism);
             } catch (Exception e) {
-                log.warn("SQL Gateway submission failed: {}. Will poll for jobs.", e.getMessage());
+                // 集群在线时提交失败要显式失败：否则作业会被标成 SUBMITTED，前端显示“提交成功”
+                log.warn("Flink submission failed: {}", e.getMessage());
+                throw new RuntimeException("Flink 提交失败：" + e.getMessage(), e);
             }
-        } else {
-            log.info("Flink cluster not available at {}:{}", flinkHost, flinkPort);
+            if (result.jobId != null) return result.jobId;
+            if (result.accepted) {
+                // 语句已被集群接受（作业很可能正在运行），只是本次没取到 Job ID：
+                // 保留占位 ID，交给 FlinkJobStatusChecker 按提交时间窗口认领，避免误判 FAILED
+                String placeholder = "flink-job-" + UUID.randomUUID().toString();
+                log.warn("Flink 已接受 SQL 但未取到 Job ID，使用占位 ID 待状态轮询认领: {}", placeholder);
+                return placeholder;
+            }
+            throw new RuntimeException("Flink 提交失败：" + (result.error == null ? "未产生 Flink 作业" : result.error));
         }
-        // Use real job ID if submitViaSqlClient found one; otherwise use fallback mock
-        if (jobId != null && !jobId.startsWith("flink-job-")) return jobId;
+        // 离线演示模式：集群不可达时用占位 ID，前端仍可演示编辑/保存，上线会被 isFlinkClusterAvailable 拦截
         String mockJobId = "flink-job-" + UUID.randomUUID().toString();
-        log.info("No real Flink job ID captured, using fallback ID: {}", mockJobId);
+        log.warn("Flink cluster not available at {}:{}, using offline placeholder ID: {}", flinkHost, flinkPort, mockJobId);
         return mockJobId;
     }
 
@@ -888,7 +953,7 @@ public class DagTranslationService {
     }
 
 
-        private String submitViaSqlClient(String flinkSql, int parallelism) throws Exception {
+        private SubmitResult submitViaSqlClient(String flinkSql, int parallelism) throws Exception {
         Path tempSqlFile = Files.createTempFile("flink-job-", ".sql");
         Files.writeString(tempSqlFile, flinkSql, StandardCharsets.UTF_8);
         log.info("SQL written to: {}", tempSqlFile.toAbsolutePath());
@@ -898,21 +963,28 @@ public class DagTranslationService {
         // 提交时刻下界：只认领此时间之后启动的作业，避免误认领归档后重现的旧作业
         this.baselineTime = System.currentTimeMillis();
 
-        String jobId = trySqlGateway(flinkSql, parallelism);
-        if (jobId != null) { log.info("Job via SQL Gateway: {}", jobId); Files.deleteIfExists(tempSqlFile); return jobId; }
+        SubmitResult gatewayResult = trySqlGateway(flinkSql, parallelism);
+        if (gatewayResult.jobId != null || gatewayResult.accepted) {
+            if (gatewayResult.jobId != null) log.info("Job via SQL Gateway: {}", gatewayResult.jobId);
+            Files.deleteIfExists(tempSqlFile);
+            return gatewayResult;
+        }
 
         log.info("SQL Gateway down, trying sql-client.sh...");
-        jobId = trySqlClientScript(tempSqlFile);
-        if (jobId != null) { log.info("Job via sql-client.sh: {}", jobId); Files.deleteIfExists(tempSqlFile); return jobId; }
+        String jobId = trySqlClientScript(tempSqlFile);
+        if (jobId != null) { log.info("Job via sql-client.sh: {}", jobId); Files.deleteIfExists(tempSqlFile); return SubmitResult.ok(jobId); }
 
         log.info("Polling for new Flink jobs (using pre-submission baseline)...");
         jobId = submitViaFlinkRestApi(flinkSql, initialBeforeIds);
         Files.deleteIfExists(tempSqlFile);
-        if (jobId == null) { jobId = "flink-job-" + UUID.randomUUID().toString(); log.info("Using fallback ID: {}", jobId); }
-        return jobId;
+        if (jobId != null) return SubmitResult.ok(jobId);
+        log.warn("No new Flink job detected after submission");
+        return SubmitResult.failed(gatewayResult.error != null
+                ? gatewayResult.error
+                : "三条提交路径（SQL Gateway / sql-client / REST 轮询）均未产生 Flink 作业");
     }
 
-    private String trySqlGateway(String flinkSql, int parallelism) {
+    private SubmitResult trySqlGateway(String flinkSql, int parallelism) {
         try {
             String gatewayHost = (sqlGatewayHost == null || sqlGatewayHost.isEmpty()) ? flinkHost : sqlGatewayHost;
             String gatewayUrl = "http://" + gatewayHost + ":" + sqlGatewayPort;
@@ -925,20 +997,22 @@ public class DagTranslationService {
             JsonNode sj = objectMapper.readTree(sr);
             if (!sj.has("sessionHandle")) {
                 log.warn("Gateway session create failed, response: " + sr);
-                return null;
+                return SubmitResult.failed("SQL Gateway 会话创建失败: " + sr);
             }
             String sh = sj.get("sessionHandle").asText();
             log.info("Gateway session created: " + sh);
 
-            String[] stmts = flinkSql.split(";");
+            java.util.List<String> stmts = splitSqlStatements(flinkSql);
             var beforeIds = getCurrentJobIds(hc);
             String jid = null;
+            // 是否已有 INSERT 语句被集群接受（用于区分「待认领」与「彻底失败」）
+            boolean insertAccepted = false;
 
-            for (int i = 0; i < stmts.length; i++) {
-                String stmtRaw = stmts[i].replaceAll("(?m)^--.*\n?", "").trim();
+            for (int i = 0; i < stmts.size(); i++) {
+                String stmtRaw = stmts.get(i).replaceAll("(?m)^--.*\n?", "").trim();
                 if (stmtRaw.isEmpty()) continue;
 
-                log.info("Gateway stmt " + (i+1) + "/" + stmts.length + ": " + stmtRaw.substring(0, Math.min(80, stmtRaw.length())));
+                log.info("Gateway stmt " + (i+1) + "/" + stmts.size() + ": " + stmtRaw.substring(0, Math.min(80, stmtRaw.length())));
                 String body = objectMapper.createObjectNode().put("statement", stmtRaw + ";").toString();
                 String resp = hc.send(java.net.http.HttpRequest.newBuilder()
                     .uri(java.net.URI.create(gatewayUrl + "/v1/sessions/" + sh + "/statements"))
@@ -947,8 +1021,11 @@ public class DagTranslationService {
                     java.net.http.HttpResponse.BodyHandlers.ofString()).body();
                 JsonNode rj = objectMapper.readTree(resp);
                 if (rj.has("errors")) {
-                    log.warn("Gateway stmt " + (i+1) + " failed: " + rj.get("errors"));
-                    continue;
+                    // 生成 DDL/DML 报错必须立即失败：继续往下跑只会让 INSERT 因缺表而失败，
+                    // 却把作业标成“已提交”，错误被推迟到状态轮询才暴露
+                    String err = "Flink SQL 第 " + (i+1) + " 条语句执行失败: " + rj.get("errors");
+                    log.warn(err);
+                    throw new RuntimeException(err);
                 }
                 if (rj.has("operationHandle")) {
                     String oh = rj.get("operationHandle").asText();
@@ -967,6 +1044,7 @@ public class DagTranslationService {
                         if (op.isEmpty() || op.trim().isEmpty()) {
                             log.debug("Gateway stmt " + (i+1) + " empty response - operation completed");
                             if (isInsert) {
+                                insertAccepted = true;
                                 for (int j = 0; j < 20; j++) {
                                     String n = findNewFlinkJob(hc, beforeIds);
                                     if (n != null) { jid = n; break; }
@@ -998,6 +1076,7 @@ public class DagTranslationService {
                         if (_isDone) {
                             log.info("Gateway stmt " + (i+1) + " completed (status=" + os + ")");
                             if (isInsert) {
+                                insertAccepted = true;
                                 if (oj.has("result") && oj.get("result").has("jobId")) {
                                     jid = oj.get("result").get("jobId").asText();
                                     log.info("Gateway returned jobId from result: " + jid);
@@ -1028,10 +1107,12 @@ public class DagTranslationService {
             try { hc.send(java.net.http.HttpRequest.newBuilder()
                 .uri(java.net.URI.create(gatewayUrl + "/v1/sessions/" + sh))
                 .DELETE().build(), java.net.http.HttpResponse.BodyHandlers.discarding()); } catch (Exception ign) {}
-            return jid;
+            if (jid != null) return SubmitResult.ok(jid);
+            if (insertAccepted) return SubmitResult.acceptedNoId();
+            return SubmitResult.failed("SQL Gateway 未接受任何 INSERT 语句（DDL 可能未生成 INSERT）");
         } catch (Exception e) {
             log.warn("Gateway failed: " + e.getMessage());
-            return null;
+            return SubmitResult.failed("SQL Gateway 调用失败: " + e.getMessage());
         }
     }
     private String trySqlClientScript(Path sqlFile) {
@@ -1298,6 +1379,22 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
     }
 
     /**
+     * 输入节点的本地文件路径映射：历史作业里保存的宿主绝对路径在容器内映射到 /data。
+     * 非本地路径（hdfs:// 等）与不存在的映射保持原值。
+     */
+    private Map<String, Object> mapLocalInputPath(Map<String, Object> params) {
+        if (params == null) return null;
+        Object raw = params.get("path");
+        if (raw == null) return params;
+        String path = raw.toString().trim();
+        String mapped = resolveRuntimePath(path, "/data");
+        if (mapped.equals(path)) return params;
+        Map<String, Object> copy = new HashMap<>(params);
+        copy.put("path", mapped);
+        return copy;
+    }
+
+    /**
      * Docker 中兼容历史作业保存的 Windows 绝对路径。
      * 输入文件映射到 /data，输出文件映射到 /output；本机存在的路径保持不变。
      */
@@ -1469,17 +1566,32 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
 
     private String extractFieldsFromDdlTemplate(String template) {
         try {
-            int ps = template.indexOf('('); int pe = template.indexOf(')');
-            if (ps > 0 && pe > ps) { String cols = template.substring(ps+1, pe).trim(); if (!cols.isEmpty()) return cols; }
+            int ps = template.indexOf('(');
+            if (ps < 0) return null;
+            // 不能直接取第一个 ')'：DECIMAL(10,2) 这类带括号的类型会被截断成非法 schema
+            int depth = 0;
+            for (int i = ps; i < template.length(); i++) {
+                char c = template.charAt(i);
+                if (c == '(') depth++;
+                else if (c == ')') {
+                    depth--;
+                    if (depth == 0) {
+                        String cols = template.substring(ps + 1, i).trim();
+                        return cols.isEmpty() ? null : cols;
+                    }
+                }
+            }
         } catch (Exception e) { log.warn("Failed to extract fields from DDL template: {}", e.getMessage()); }
         return null;
     }
 
         private String replaceDataStringInDDL(String template, String newFields) {
         // Replace "data STRING" with actual source schema
-        String result = template.replaceAll("(?m)^[ \\t]*data\\s+STRING[ \\t]*(,?)[ \\t]*$", newFields + "$1");
+        // quoteReplacement：字段名含 $ 或 \ 时不会触发非法分组引用
+        String replacement = java.util.regex.Matcher.quoteReplacement(newFields);
+        String result = template.replaceAll("(?m)^[ \\t]*data\\s+STRING[ \\t]*(,?)[ \\t]*$", replacement + "$1");
         if (result.equals(template)) {
-            result = template.replaceAll("data\\s+STRING", newFields);
+            result = template.replaceAll("data\\s+STRING", replacement);
         }
         return result;
     }
@@ -1506,7 +1618,10 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
         result = result.replace("${id}", sanitize(nodeId));
         if (params != null) {
             for (Map.Entry<String, Object> entry : params.entrySet()) {
-                result = result.replace("${" + entry.getKey() + "}", entry.getValue() != null ? entry.getValue().toString() : "");
+                // 参数会落进 CREATE TABLE 的字符串字面量（path/url/topic/password 等），
+                // 必须转义单引号，否则密码或路径含 ' 会闭合字面量导致语法错误/注入
+                String value = entry.getValue() != null ? escapeSqlLiteral(entry.getValue().toString()) : "";
+                result = result.replace("${" + entry.getKey() + "}", value);
             }
         }
         return result;
@@ -1937,7 +2052,11 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
             case java.sql.Types.REAL: return "FLOAT";
             case java.sql.Types.DOUBLE: return "DOUBLE";
             case java.sql.Types.DECIMAL:
-            case java.sql.Types.NUMERIC: return "DECIMAL(" + Math.max(precision, 1) + "," + Math.max(scale, 0) + ")";
+            case java.sql.Types.NUMERIC:
+                // Oracle 无精度 NUMBER / PG 无约束 numeric 的 precision 常为 0，
+                // 直接用 max(precision,1) 会生成 DECIMAL(1,0) 导致数值被截断
+                if (precision <= 0) return "DECIMAL(38,18)";
+                return "DECIMAL(" + precision + "," + Math.max(scale, 0) + ")";
             case java.sql.Types.BIT:
             case java.sql.Types.BOOLEAN: return "BOOLEAN";
             case java.sql.Types.CHAR:
@@ -2078,9 +2197,9 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
         }
         ddl.append(") WITH (\n");
         ddl.append("  'connector' = 'filesystem',\n");
-        ddl.append("  'path' = '").append(path).append("',\n");
+        ddl.append("  'path' = '").append(escapeSqlLiteral(path)).append("',\n");
         ddl.append("  'format' = 'csv',\n");
-        ddl.append("  'csv.delimiter' = '").append(delimiter).append("',\n");
+        ddl.append("  'csv.delimiter' = '").append(escapeSqlLiteral(delimiter)).append("',\n");
         ddl.append("  'csv.ignore-parse-errors' = 'true',\n");
         ddl.append("  'csv.allow-comments' = 'true'\n");
         ddl.append(");\n");
@@ -2113,7 +2232,7 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
         }
         ddl.append(") WITH (\n");
         ddl.append("  'connector' = 'datagen',\n");
-        ddl.append("  'rows-per-second' = '").append(rowsPerSecond).append("'");
+        ddl.append("  'rows-per-second' = '").append(escapeSqlLiteral(rowsPerSecond)).append("'");
         if (fa != null && fa.isArray()) {
             for (int i = 0; i < fa.size(); i++) {
                 JsonNode f = fa.get(i);
@@ -2159,8 +2278,8 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
         }
         ddl.append(") WITH (\n");
         ddl.append("  'connector' = 'kafka',\n");
-        ddl.append("  'topic' = '").append(topic).append("',\n");
-        ddl.append("  'properties.bootstrap.servers' = '").append(bootstrapServers).append("',\n");
+        ddl.append("  'topic' = '").append(escapeSqlLiteral(topic)).append("',\n");
+        ddl.append("  'properties.bootstrap.servers' = '").append(escapeSqlLiteral(bootstrapServers)).append("',\n");
         ddl.append("  'properties.group.id' = 'flink-group-").append(tableName).append("',\n");
         ddl.append("  'scan.startup.mode' = 'earliest-offset',\n");
         ddl.append("  'format' = 'json',\n");
@@ -2183,8 +2302,8 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
         }
         ddl.append(") WITH (\n");
         ddl.append("  'connector' = 'kafka',\n");
-        ddl.append("  'topic' = '").append(topic).append("',\n");
-        ddl.append("  'properties.bootstrap.servers' = '").append(bootstrapServers).append("',\n");
+        ddl.append("  'topic' = '").append(escapeSqlLiteral(topic)).append("',\n");
+        ddl.append("  'properties.bootstrap.servers' = '").append(escapeSqlLiteral(bootstrapServers)).append("',\n");
         ddl.append("  'format' = 'json'\n");
         ddl.append(");\n");
 

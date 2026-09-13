@@ -85,6 +85,20 @@ public class HealthMonitor {
     private static final long RESOURCE_RECOVERY_MS = 2 * 60 * 1000L;
     private static final double RESOURCE_RECOVERY_MARGIN = 5.0;
 
+    /**
+     * 作业被删除时清理其内存状态，避免这些去重 Map 随历史作业无限增长。
+     * 系统级键（alertCooldown 的 "system:EVENT"）不受影响。
+     */
+    public void forgetJob(Long jobId) {
+        if (jobId == null) return;
+        zeroThroughputSince.remove(jobId);
+        backpressureSince.remove(jobId);
+        lastCheckpointFailure.remove(jobId);
+        logScanWatermark.remove(jobId);
+        activeFailures.remove(jobId);
+        alertCooldown.keySet().removeIf(k -> k.startsWith(jobId + ":"));
+    }
+
     @Scheduled(fixedRateString = "${app.monitor.health-scan-ms:10000}")
     public void supervise() {
         // 系统资源感知（全局，独立于作业）

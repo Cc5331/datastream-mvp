@@ -102,7 +102,7 @@ start-all.bat
 ### 方式三：Docker 全容器化
 
 ```bat
-start-docker.bat        :: 一键构建并启动 7 个容器
+start-docker.bat        :: 一键构建并启动 12 个容器（MySQL / PostgreSQL / Redis / Kafka / HDFS×2 / Flink×3 / 后端 / 前端；Oracle 为可选 profile）
 docker compose ps       :: 查看状态，全部应为 healthy
 ```
 
@@ -189,7 +189,7 @@ mvn spring-boot:run -Dspring-boot.run.profiles=mysql
 start-docker.bat
 ```
 
-脚本自动完成：① 同步本机 UDF / 连接器 jar 到 `docker/flink/lib/`；② 构建后端、前端、Flink 三个镜像；③ 启动全部 7 个容器并等待健康检查通过。
+脚本自动完成：① 同步本机 UDF / 连接器 jar 到 `docker/flink/lib/`；② 构建后端、前端、Flink 三个镜像；③ 启动全部 12 个容器并等待健康检查通过（Oracle 需 `--profile oracle` 另启）。
 
 也可手动执行：
 

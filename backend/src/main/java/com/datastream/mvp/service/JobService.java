@@ -43,7 +43,9 @@ public class JobService {
     private final ExcelPreprocessor excelPreprocessor;
     private final FlinkJobStatusChecker flinkJobStatusChecker;
     private final com.datastream.mvp.service.HealthMonitor healthMonitor;
+    private final MonitorService monitorService;
     private final JobDependencyRepository dependencyRepo;
+    private final PreviewService previewService;
 
     @Value("${app.mysql.default-username:root}")
     private String defaultMysqlUsername;
@@ -157,6 +159,17 @@ public class JobService {
             versionRepo.deleteByJobId(id);
             dependencyRepo.deleteByUpstreamJobIdOrDownstreamJobId(id, id);
             jobRepo.deleteById(id);
+            // 同步清理内存态：趋势缓冲 + 告警去重/心跳计数，否则作业删除后这些 Map 只增不减
+            try {
+                monitorService.removeTrend(id);
+            } catch (Exception e) {
+                log.warn("Failed to drop trend state for deleted job {}: {}", id, e.getMessage());
+            }
+            try {
+                healthMonitor.forgetJob(id);
+            } catch (Exception e) {
+                log.warn("Failed to drop monitor state for deleted job {}: {}", id, e.getMessage());
+            }
         } else {
             throw new RuntimeException("Job not found: id=" + id);
         }
@@ -482,7 +495,9 @@ public class JobService {
                         com.fasterxml.jackson.databind.JsonNode csvParams = n.get("params");
                         if (csvParams != null && csvParams.has("path")) {
                             String path = csvParams.get("path").asText();
-                            java.nio.file.Path outputPath = java.nio.file.Paths.get(path);
+                            // 与 /api/preview/file 共用同一份 allowed-roots 白名单，
+                            // 否则 DAG 中可填入任意路径（如 .env）导致敏感文件被读回
+                            java.nio.file.Path outputPath = previewService.assertAllowedRead(path);
                             if (java.nio.file.Files.exists(outputPath) && java.nio.file.Files.isRegularFile(outputPath)) {
                                 java.util.List<String> lines = java.nio.file.Files.readAllLines(outputPath);
                                 int limit = Math.min(20, lines.size());

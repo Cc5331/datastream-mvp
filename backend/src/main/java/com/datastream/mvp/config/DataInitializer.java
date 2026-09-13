@@ -47,6 +47,27 @@ public class DataInitializer implements CommandLineRunner {
     @Value("${app.mysql.default-password:}")
     private String defaultMysqlPassword;
 
+    @Value("${app.mysql.default-url:jdbc:mysql://localhost:3306/flink_demo?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai}")
+    private String defaultMysqlUrl;
+
+    @Value("${app.postgres.default-url:jdbc:postgresql://localhost:5432/dataflow}")
+    private String defaultPostgresUrl;
+
+    @Value("${app.oracle.default-url:jdbc:oracle:thin:@localhost:1521/FREEPDB1}")
+    private String defaultOracleUrl;
+
+    // 控件默认路径根目录：本机用相对路径（application.yml 默认 ../data 等），
+    // 容器由 compose 注入 /data、/test-resources、/output。种子时统一转成绝对路径，
+    // 避免默认值写死成某一环境的路径（Windows 盘符在容器内不存在，反之亦然）。
+    @Value("${app.paths.data-root:../data}")
+    private String dataRoot;
+
+    @Value("${app.paths.test-resources-root:../test-resources}")
+    private String testResourcesRoot;
+
+    @Value("${app.storage.output-root:../output}")
+    private String outputRoot;
+
     @Override
     public void run(String... args) {
         if (controlRepo.count() > 0) {
@@ -66,42 +87,42 @@ public class DataInitializer implements CommandLineRunner {
         // CSV Input
         createControl("csv_input", "CSV Input", "input",
                 "Read CSV",
-                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"title\":\"文件路径\",\"default\":\"/data/test.csv\"},\"delimiter\":{\"type\":\"string\",\"title\":\"分隔符\",\"default\":\",\"},\"hasHeader\":{\"type\":\"boolean\",\"title\":\"包含表头\",\"default\":true}},\"required\":[\"path\"]}",
+                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"title\":\"文件路径\",\"default\":\"" + jsonPath(testPath("data/sales.csv")) + "\"},\"delimiter\":{\"type\":\"string\",\"title\":\"分隔符\",\"default\":\",\"},\"hasHeader\":{\"type\":\"boolean\",\"title\":\"包含表头\",\"default\":true}},\"required\":[\"path\"]}",
                 "CREATE TABLE ${id} (\n  data STRING\n) WITH (\n  'connector' = 'filesystem',\n  'path' = '${path}',\n  'format' = 'csv',\n  'csv.delimiter' = ',',\n  'csv.ignore-parse-errors' = 'true'\n);",
                 "1.0.0", "built-in");
 
         // CSV Output
         createControl("csv_output", "CSV Output", "output",
                 "Write CSV",
-                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"title\":\"Path\",\"default\":\"D:\\\\code\\\\比赛\\\\2026省服务外包\\\\output\\\\output.csv\"},\"delimiter\":{\"type\":\"string\",\"title\":\"Delimiter\",\"default\":\",\"},\"sheetName\":{\"type\":\"string\",\"title\":\"工作表名（默认 Data，多输出写同一文件时可区分 sheet）\",\"default\":\"Data\"}},\"required\":[\"path\"]}",
+                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"title\":\"Path\",\"default\":\"" + jsonPath(outPath("output.csv")) + "\"},\"delimiter\":{\"type\":\"string\",\"title\":\"Delimiter\",\"default\":\",\"},\"sheetName\":{\"type\":\"string\",\"title\":\"工作表名（默认 Data，多输出写同一文件时可区分 sheet）\",\"default\":\"Data\"}},\"required\":[\"path\"]}",
                 "CREATE TABLE ${id} (\n  data STRING\n) WITH (\n  'connector' = 'filesystem',\n  'path' = '${path}',\n  'format' = 'csv',\n  'csv.delimiter' = '${delimiter}',\n  'sink.parallelism' = '1'\n);",
                 "1.0.0", "built-in");
 
         // Excel Input
         createControl("excel_input", "Excel Input", "input",
                 "Read Excel (xlsx)",
-                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"title\":\"Path\",\"default\":\"/data/test.xlsx\"},\"delimiter\":{\"type\":\"string\",\"title\":\"Delimiter\",\"default\":\",\"},\"hasHeader\":{\"type\":\"boolean\",\"title\":\"First row is header\",\"default\":true},\"sheetName\":{\"type\":\"string\",\"title\":\"工作表名（留空取第一个）\",\"default\":\"\"}},\"required\":[\"path\"]}",
+                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"title\":\"Path\",\"default\":\"" + jsonPath(testPath("data/sample_data.xlsx")) + "\"},\"delimiter\":{\"type\":\"string\",\"title\":\"Delimiter\",\"default\":\",\"},\"hasHeader\":{\"type\":\"boolean\",\"title\":\"First row is header\",\"default\":true},\"sheetName\":{\"type\":\"string\",\"title\":\"工作表名（留空取第一个）\",\"default\":\"\"}},\"required\":[\"path\"]}",
                 "",
                 "1.0.0", "built-in");
 
         // Excel Output
         createControl("excel_output", "Excel Output", "output",
                 "Excel (CSV->xlsx)",
-                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"title\":\"Excel path\",\"default\":\"D:\\\\code\\\\比赛\\\\2026省服务外包\\\\output\\\\output.xlsx\"},\"delimiter\":{\"type\":\"string\",\"title\":\"Delimiter\",\"default\":\",\"},\"sheetName\":{\"type\":\"string\",\"title\":\"工作表名（默认 Data，多输出写同一文件时可区分 sheet）\",\"default\":\"Data\"}},\"required\":[\"path\"]}",
+                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"title\":\"Excel path\",\"default\":\"" + jsonPath(outPath("output.xlsx")) + "\"},\"delimiter\":{\"type\":\"string\",\"title\":\"Delimiter\",\"default\":\",\"},\"sheetName\":{\"type\":\"string\",\"title\":\"工作表名（默认 Data，多输出写同一文件时可区分 sheet）\",\"default\":\"Data\"}},\"required\":[\"path\"]}",
                 "CREATE TABLE ${id} (\n  data STRING\n) WITH (\n  'connector' = 'filesystem',\n  'path' = '${path}',\n  'format' = 'csv',\n  'csv.delimiter' = '${delimiter}',\n  'sink.parallelism' = '1'\n);",
                 "1.0.0", "built-in");
 
         // Parquet Input
         createControl("parquet_input", "Parquet Input", "input",
                 "Read Parquet",
-                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"title\":\"Parquet 文件路径\",\"default\":\"D:\\\\code\\\\比赛\\\\2026省服务外包\\\\output\\\\input.parquet\"},\"delimiter\":{\"type\":\"string\",\"title\":\"分隔符\",\"default\":\",\"}},\"required\":[\"path\"]}",
+                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"title\":\"Parquet 文件路径\",\"default\":\"" + jsonPath(outPath("input.parquet")) + "\"},\"delimiter\":{\"type\":\"string\",\"title\":\"分隔符\",\"default\":\",\"}},\"required\":[\"path\"]}",
                 "",
                 "1.0.0", "built-in");
 
         // Parquet Output
         createControl("parquet_output", "Parquet Output", "output",
                 "Parquet (CSV->parquet)",
-                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"title\":\"Parquet 文件路径\",\"default\":\"D:\\\\code\\\\比赛\\\\2026省服务外包\\\\output\\\\output.parquet\"},\"delimiter\":{\"type\":\"string\",\"title\":\"分隔符\",\"default\":\",\"}},\"required\":[\"path\"]}",
+                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"title\":\"Parquet 文件路径\",\"default\":\"" + jsonPath(outPath("output.parquet")) + "\"},\"delimiter\":{\"type\":\"string\",\"title\":\"分隔符\",\"default\":\",\"}},\"required\":[\"path\"]}",
                 "CREATE TABLE ${id} (\n  data STRING\n) WITH (\n  'connector' = 'filesystem',\n  'path' = '${path}',\n  'format' = 'csv',\n  'csv.delimiter' = '${delimiter}',\n  'sink.parallelism' = '1'\n);",
                 "1.0.0", "built-in");
 
@@ -115,28 +136,28 @@ public class DataInitializer implements CommandLineRunner {
         // PostgreSQL Input
         createControl("pg_input", "PostgreSQL Input", "input",
                 "Read PostgreSQL (JDBC 自动推导字段)",
-                jdbcParamSchema("jdbc:postgresql://localhost:5432/dataflow", "postgres", "POSTGRES_PASSWORD", "postgres"),
+                jdbcParamSchema(defaultPostgresUrl, "postgres", "POSTGRES_PASSWORD", "postgres"),
                 "",
                 "1.0.0", "built-in");
 
         // PostgreSQL Output
         createControl("pg_output", "PostgreSQL Output", "output",
                 "Write PostgreSQL（可选安全自动建表）",
-                jdbcOutputParamSchema("jdbc:postgresql://localhost:5432/dataflow", "public", "postgres", "POSTGRES"),
+                jdbcOutputParamSchema(defaultPostgresUrl, "public", "postgres", "POSTGRES"),
                 "",
                 "1.0.0", "built-in");
 
         // Oracle Input
         createControl("oracle_input", "Oracle Input", "input",
                 "Read Oracle (JDBC 自动推导字段)",
-                "{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\",\"title\":\"JDBC URL\",\"default\":\"jdbc:oracle:thin:@localhost:1521/FREEPDB1\"},\"schema\":{\"type\":\"string\",\"title\":\"Schema\",\"default\":\"DATAFLOW\"},\"table\":{\"type\":\"string\",\"title\":\"Table\",\"default\":\"SOURCE_TABLE\"},\"username\":{\"type\":\"string\",\"title\":\"User\",\"default\":\"${ORACLE_USERNAME}\"},\"password\":{\"type\":\"string\",\"title\":\"Password\",\"default\":\"${ORACLE_PASSWORD}\"}},\"required\":[\"url\",\"table\"]}",
+                "{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\",\"title\":\"JDBC URL\",\"default\":\"" + defaultOracleUrl + "\"},\"schema\":{\"type\":\"string\",\"title\":\"Schema\",\"default\":\"DATAFLOW\"},\"table\":{\"type\":\"string\",\"title\":\"Table\",\"default\":\"SOURCE_TABLE\"},\"username\":{\"type\":\"string\",\"title\":\"User\",\"default\":\"${ORACLE_USERNAME}\"},\"password\":{\"type\":\"string\",\"title\":\"Password\",\"default\":\"${ORACLE_PASSWORD}\"}},\"required\":[\"url\",\"table\"]}",
                 "",
                 "1.0.0", "built-in");
 
         // Oracle Output
         createControl("oracle_output", "Oracle Output", "output",
                 "Write Oracle（可选安全自动建表）",
-                jdbcOutputParamSchema("jdbc:oracle:thin:@localhost:1521/FREEPDB1", "DATAFLOW", "dataflow", "ORACLE"),
+                jdbcOutputParamSchema(defaultOracleUrl, "DATAFLOW", "dataflow", "ORACLE"),
                 "",
                 "1.0.0", "built-in");
 
@@ -239,28 +260,28 @@ public class DataInitializer implements CommandLineRunner {
         // JSON 输入
         createControl("json_input", "JSON 输入", "input",
                 "读取 JSON 文件（auto 自动识别 / lines 逐行 / array 数组）",
-                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"title\":\"文件路径\",\"default\":\"D:\\\\code\\\\比赛\\\\2026省服务外包\\\\test-resources\\\\data\\\\sample.json\"},\"mode\":{\"type\":\"string\",\"title\":\"文件模式\",\"enum\":[\"auto\",\"lines\",\"array\"],\"default\":\"auto\"},\"delimiter\":{\"type\":\"string\",\"title\":\"分隔符\",\"default\":\",\"},\"encoding\":{\"type\":\"string\",\"title\":\"文件编码\",\"default\":\"UTF-8\"},\"fieldsConfig\":{\"type\":\"string\",\"title\":\"字段定义（JSON 数组，lines 模式用）\",\"default\":\"[{\\\"name\\\":\\\"id\\\",\\\"type\\\":\\\"INT\\\"},{\\\"name\\\":\\\"name\\\",\\\"type\\\":\\\"STRING\\\"}]\"}},\"required\":[\"path\"]}",
+                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"title\":\"文件路径\",\"default\":\"" + jsonPath(testPath("data/sample.json")) + "\"},\"mode\":{\"type\":\"string\",\"title\":\"文件模式\",\"enum\":[\"auto\",\"lines\",\"array\"],\"default\":\"auto\"},\"delimiter\":{\"type\":\"string\",\"title\":\"分隔符\",\"default\":\",\"},\"encoding\":{\"type\":\"string\",\"title\":\"文件编码\",\"default\":\"UTF-8\"},\"fieldsConfig\":{\"type\":\"string\",\"title\":\"字段定义（JSON 数组，lines 模式用）\",\"default\":\"[{\\\"name\\\":\\\"id\\\",\\\"type\\\":\\\"INT\\\"},{\\\"name\\\":\\\"name\\\",\\\"type\\\":\\\"STRING\\\"}]\"}},\"required\":[\"path\"]}",
                 "",
                 "1.0.0", "built-in");
 
         // JSON 输出
         createControl("json_output", "JSON 输出", "output",
                 "将数据写入 JSON 文件（lines 逐行 / array 数组）",
-                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"title\":\"输出路径（.json）\",\"default\":\"D:\\\\code\\\\比赛\\\\2026省服务外包\\\\output\\\\output.json\"},\"mode\":{\"type\":\"string\",\"title\":\"输出模式\",\"enum\":[\"lines\",\"array\"],\"default\":\"lines\"}},\"required\":[\"path\"]}",
+                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"title\":\"输出路径（.json）\",\"default\":\"" + jsonPath(outPath("output.json")) + "\"},\"mode\":{\"type\":\"string\",\"title\":\"输出模式\",\"enum\":[\"lines\",\"array\"],\"default\":\"lines\"}},\"required\":[\"path\"]}",
                 "CREATE TABLE ${id} (\n  data STRING\n) WITH (\n  'connector' = 'filesystem',\n  'path' = '${path}',\n  'format' = 'json',\n  'sink.parallelism' = '1'\n);",
                 "1.0.0", "built-in");
 
         // XML Input
         createControl("xml_input", "XML 输入", "input",
                 "读取 XML 文件（记录列表结构，嵌套子结构保留为 JSON）",
-                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"title\":\"文件路径\",\"default\":\"D:\\\\code\\\\比赛\\\\2026省服务外包\\\\test-resources\\\\data\\\\orders.xml\"},\"rowTag\":{\"type\":\"string\",\"title\":\"行元素名（留空自动探测）\",\"default\":\"\"},\"delimiter\":{\"type\":\"string\",\"title\":\"分隔符\",\"default\":\",\"},\"encoding\":{\"type\":\"string\",\"title\":\"文件编码\",\"default\":\"UTF-8\"}},\"required\":[\"path\"]}",
+                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"title\":\"文件路径\",\"default\":\"" + jsonPath(testPath("data/orders.xml")) + "\"},\"rowTag\":{\"type\":\"string\",\"title\":\"行元素名（留空自动探测）\",\"default\":\"\"},\"delimiter\":{\"type\":\"string\",\"title\":\"分隔符\",\"default\":\",\"},\"encoding\":{\"type\":\"string\",\"title\":\"文件编码\",\"default\":\"UTF-8\"}},\"required\":[\"path\"]}",
                 "",
                 "1.0.0", "built-in");
 
         // XML Output
         createControl("xml_output", "XML 输出", "output",
                 "将数据写出为 XML 文件（rootTag/rowTag 包裹）",
-                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"title\":\"输出路径（.xml）\",\"default\":\"D:\\\\code\\\\比赛\\\\2026省服务外包\\\\output\\\\output.xml\"},\"rootTag\":{\"type\":\"string\",\"title\":\"根元素名\",\"default\":\"root\"},\"rowTag\":{\"type\":\"string\",\"title\":\"行元素名\",\"default\":\"record\"},\"encoding\":{\"type\":\"string\",\"title\":\"输出编码\",\"default\":\"UTF-8\"}},\"required\":[\"path\"]}",
+                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"title\":\"输出路径（.xml）\",\"default\":\"" + jsonPath(outPath("output.xml")) + "\"},\"rootTag\":{\"type\":\"string\",\"title\":\"根元素名\",\"default\":\"root\"},\"rowTag\":{\"type\":\"string\",\"title\":\"行元素名\",\"default\":\"record\"},\"encoding\":{\"type\":\"string\",\"title\":\"输出编码\",\"default\":\"UTF-8\"}},\"required\":[\"path\"]}",
                 "CREATE TABLE ${id} (\n  data STRING\n) WITH (\n  'connector' = 'filesystem',\n  'path' = '${path}',\n  'format' = 'csv',\n  'sink.parallelism' = '1'\n);",
                 "1.0.0", "built-in");
 
@@ -350,7 +371,8 @@ public class DataInitializer implements CommandLineRunner {
      */
     private String mysqlParamSchema() {
         // 默认值使用占位符（不预填真实密码），提交时由后端解析为环境变量 MYSQL_USERNAME / MYSQL_PASSWORD
-        return "{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\",\"title\":\"JDBC URL\",\"default\":\"jdbc:mysql://localhost:3306/flink_demo?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai\"},\"table\":{\"type\":\"string\",\"title\":\"Table\",\"default\":\"output_table\"},\"username\":{\"type\":\"string\",\"title\":\"User\",\"default\":\"${MYSQL_USERNAME}\"},\"password\":{\"type\":\"string\",\"title\":\"Password\",\"default\":\"${MYSQL_PASSWORD}\"}},\"required\":[\"url\",\"table\",\"username\"]}";
+        // URL 由 app.mysql.default-url 注入：本机 localhost:3306，容器内 mysql:3306
+        return "{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\",\"title\":\"JDBC URL\",\"default\":\"" + defaultMysqlUrl + "\"},\"table\":{\"type\":\"string\",\"title\":\"Table\",\"default\":\"output_table\"},\"username\":{\"type\":\"string\",\"title\":\"User\",\"default\":\"${MYSQL_USERNAME}\"},\"password\":{\"type\":\"string\",\"title\":\"Password\",\"default\":\"${MYSQL_PASSWORD}\"}},\"required\":[\"url\",\"table\",\"username\"]}";
     }
 
     /**
@@ -388,5 +410,26 @@ public class DataInitializer implements CommandLineRunner {
         c.setCreatedAt(LocalDateTime.now());
         c.setUpdatedAt(LocalDateTime.now());
         controlRepo.save(c);
+    }
+
+    // ---------- 默认路径生成 ----------
+
+    /** 输出文件默认路径（宿主机/容器各自解析为绝对路径） */
+    private String outPath(String fileName) {
+        return absoluteUnder(outputRoot, fileName);
+    }
+
+    /** 测试数据默认路径（test-resources 下的相对路径） */
+    private String testPath(String relative) {
+        return absoluteUnder(testResourcesRoot, relative);
+    }
+
+    private String absoluteUnder(String root, String relative) {
+        return java.nio.file.Paths.get(root).toAbsolutePath().normalize().resolve(relative).toString();
+    }
+
+    /** 转义为可嵌入 JSON 字符串字面量的路径（Windows 反斜杠需双写） */
+    private String jsonPath(String absolutePath) {
+        return absolutePath.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 }

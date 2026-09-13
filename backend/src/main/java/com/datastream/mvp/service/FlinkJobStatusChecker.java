@@ -130,25 +130,32 @@ public class FlinkJobStatusChecker {
                 if (needsResolution && !newJobCandidates.isEmpty()) {
                     long jobSubmitTime = job.getSubmittedAt() != null ?
                         job.getSubmittedAt().atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli() : 0;
+                    // 允许的时钟偏差：Flink start-time 略早于后端记录的提交时刻
+                    final long skewMs = 30_000L;
                     String bestJid = null;
-                    long bestDiff = Long.MAX_VALUE;
+                    long bestStart = Long.MAX_VALUE;
                     for (java.util.Map.Entry<String, Long> entry : newJobCandidates.entrySet()) {
-                        long diff = Math.abs(entry.getValue() - jobSubmitTime);
-                        if (diff < bestDiff) {
-                            bestDiff = diff;
+                        // 只认领「提交之后才启动」的作业；start-time 缺失(0)时退化为仅按时间差判断
+                        long start = entry.getValue();
+                        if (start > 0 && start < jobSubmitTime - skewMs) continue;
+                        long diff = Math.abs(start - jobSubmitTime);
+                        if (diff < bestStart) {
+                            bestStart = diff;
                             bestJid = entry.getKey();
                         }
                     }
                     // 仅在时间足够接近时才认领；否则会误把十分钟前的历史作业当成本次提交的作业，
                     // 导致作业状态被旧作业的错误状态覆盖（如被误判为 CANCELLED）
-                    if (bestJid != null && bestDiff <= MOCK_RESOLVE_MAX_DIFF_MS) {
-                        log.info("Resolved mock Flink job ID {} -> real Flink job ID {} (diff={}ms)", job.getId(), bestJid, bestDiff);
+                    if (bestJid != null && bestStart <= MOCK_RESOLVE_MAX_DIFF_MS) {
+                        log.info("Resolved mock Flink job ID {} -> real Flink job ID {} (diff={}ms)", job.getId(), bestJid, bestStart);
                         job.setFlinkJobId(bestJid);
                         flinkJobId = bestJid;
                         jobRepo.save(job);
+                        // 候选被消费后必须移除：否则同轮多个占位作业会认领到同一个真实作业
+                        newJobCandidates.remove(bestJid);
                     } else if (bestJid != null) {
                         log.warn("Skip mock ID resolution for job {}: nearest Flink job {} diff={}ms exceeds {}ms window",
-                                job.getId(), bestJid, bestDiff, MOCK_RESOLVE_MAX_DIFF_MS);
+                                job.getId(), bestJid, bestStart, MOCK_RESOLVE_MAX_DIFF_MS);
                     }
                 }
 
