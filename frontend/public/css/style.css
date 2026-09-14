@@ -558,3 +558,19 @@ kbd {
 @media (max-width: 1180px) { .login-hero-content { width: calc(100% - 64px); }.login-flow-node { width: 120px; }.login-capabilities { gap: 25px; } }
 @media (max-width: 900px) { .login-page { background: #f8fafc; }.login-hero { display: none; }.login-panel { width: 100%; flex: 1; box-shadow: none; }.login-panel-inner { max-width: 390px; }.login-mobile-mark { display: block; margin-bottom: 22px; }.login-mobile-mark span { width: 43px; height: 43px; border-radius: 12px; } }
 @media (max-height: 760px) { .login-product-mark { margin-bottom: 34px; }.login-hero-desc { margin: 15px 0 22px; }.login-capabilities { margin-top: 18px; }.login-panel-inner { padding-top: 24px; padding-bottom: 24px; }.login-brand { margin-bottom: 18px; }.login-demo { display: none; } }
+
+/* ===== 首期企业门户 ===== */
+.portal-view, .audit-view { height: 100%; overflow: auto; padding: 24px; }
+.page-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:20px; }
+.page-heading h2 { margin:0; font-size:22px; color:#0f172a; }.page-heading p { margin:5px 0 0; color:#64748b; font-size:13px; }
+.enterprise-card { background:#fff; border:1px solid var(--border); border-radius:14px; box-shadow:var(--shadow-sm); padding:18px; }
+.metric-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:14px; margin-bottom:18px; }
+.metric-tile { display:flex; flex-direction:column; gap:8px; }.metric-tile span { color:#64748b; font-size:12px; }.metric-tile strong { font-size:25px; color:#1d4ed8; }.metric-tile.danger strong { color:#dc2626; }.health-ok { color:#059669!important; }
+.portal-columns { display:grid; grid-template-columns:minmax(0,2fr) minmax(260px,1fr); gap:16px; }.card-title,.section-title { font-size:15px; font-weight:700; margin-bottom:14px; }
+.quick-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }.quick-grid button { padding:18px 10px; border:1px solid #dbeafe; border-radius:10px; background:#eff6ff; color:#1d4ed8; cursor:pointer; }.quick-grid button:hover { background:#dbeafe; }
+.filter-row { display:flex; gap:10px; }.card-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:14px; margin-bottom:24px; }.card-grid article p { color:#64748b; min-height:40px; font-size:13px; line-height:1.6; }.template-card footer { display:flex; justify-content:flex-end; margin-top:18px; }
+.audit-filter { display:grid; grid-template-columns:repeat(6,minmax(120px,1fr)); gap:10px; align-items:center; margin-bottom:14px; }.audit-filter .el-date-editor { grid-column:span 2; width:100%; }
+.dag-preview { display:flex; align-items:center; flex-wrap:wrap; gap:10px; padding:24px; margin-top:16px; background:#f8fafc; border-radius:12px; }.dag-preview span { display:flex; align-items:center; gap:10px; }.dag-preview b { padding:12px; border:1px solid #bfdbfe; border-radius:8px; background:#fff; }.dag-preview i { font-style:normal; color:#94a3b8; }
+.preflight-list { display:flex; flex-direction:column; gap:8px; margin-top:14px; }.preflight-error,.preflight-warning { padding:10px 12px; border-radius:8px; font-size:13px; }.preflight-error { background:#fef2f2; color:#b91c1c; }.preflight-warning { background:#fffbeb; color:#b45309; }
+@media (max-width:1200px) { .app-header { padding:0 10px!important; }.app-header .header-left h1 { font-size:15px!important; }.user-name,.version-badge { display:none; }.portal-columns { grid-template-columns:1fr; }.audit-filter { grid-template-columns:repeat(3,1fr); } }
+@media (max-width:760px) { .portal-view,.audit-view { padding:14px; }.page-heading { align-items:flex-start; flex-direction:column; }.filter-row { width:100%; flex-wrap:wrap; }.metric-grid,.card-grid { grid-template-columns:1fr; }.audit-filter { grid-template-columns:1fr; }.audit-filter .el-date-editor { grid-column:span 1; }.header-left { display:none!important; } }

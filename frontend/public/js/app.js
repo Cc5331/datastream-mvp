@@ -206,6 +206,30 @@ const api = {
     async getKafkaTopics() {
         const res = await axios.get(API_BASE + '/kafka/topics');
         return res.data;
+    },
+    async getWorkbench() {
+        const res = await axios.get(API_BASE + '/dashboard/workbench');
+        return res.data;
+    },
+    async getAdminOverview() {
+        const res = await axios.get(API_BASE + '/dashboard/admin-overview');
+        return res.data;
+    },
+    async getDataSourceCatalog() {
+        const res = await axios.get(API_BASE + '/data-sources/catalog');
+        return res.data;
+    },
+    async getJobTimeline(jobId, scope = 'ALL') {
+        const res = await axios.get(`${API_BASE}/jobs/${jobId}/timeline`, { params: { scope } });
+        return res.data;
+    },
+    async getPreflight(jobId) {
+        const res = await axios.get(`${API_BASE}/jobs/${jobId}/preflight`);
+        return res.data;
+    },
+    async getClusterHealth() {
+        const res = await axios.get(API_BASE + '/cluster/health');
+        return res.data;
     }
 };
 
@@ -249,6 +273,13 @@ const SAMPLE_DAGS = {
     }
 };
 
+// 模板中心在 SAMPLE_DAGS 的合法 DAG 上叠加展示元数据，不改变 DAG 契约。
+const BUILTIN_TEMPLATES = [
+    { key: 'datagen2csv', category: '实时采集', title: '模拟数据写入 CSV', description: '快速搭建 Datagen 到 CSV 的流式采集链路', tags: ['Datagen', 'CSV'] },
+    { key: 'datagen2json', category: '实时采集', title: '模拟数据写入 JSON', description: '生成结构化测试数据并输出 JSON Lines', tags: ['Datagen', 'JSON'] },
+    { key: 'csv2csv_filter', category: '批量处理', title: 'CSV 字段筛选', description: '读取 CSV、保留指定字段并写入新文件', tags: ['CSV', '字段过滤'] }
+].map(meta => ({ ...meta, dag: SAMPLE_DAGS[meta.key] }));
+
 // ===== Vue App =====
 const { createApp, ref, reactive, computed, onMounted, onUnmounted, watch, nextTick, toRaw } = Vue;
 const { ElMessage, ElMessageBox } = ElementPlus;
@@ -256,7 +287,7 @@ const { ElMessage, ElMessageBox } = ElementPlus;
 const app = createApp({
     setup() {
         // 状态
-        const currentView = ref('canvas');
+        const currentView = ref('workbench');
         const controls = ref([]);
         const jobs = ref([]);
         const selectedJobs = ref([]);
@@ -326,6 +357,35 @@ const app = createApp({
         let monitorTimer = null;
         let trendTimer = null;
         let alertTimer = null;
+        let clusterTimer = null;
+
+        // ===== 首期门户视图 =====
+        const workbench = ref({ statusCounts: {}, unreadAlerts: 0, recentJobs: [] });
+        const workbenchLoading = ref(false);
+        const templates = ref(BUILTIN_TEMPLATES);
+        const templateKeyword = ref('');
+        const templateCategory = ref('');
+        const templatePreviewVisible = ref(false);
+        const templatePreview = ref(null);
+        const filteredTemplates = computed(() => templates.value.filter(item => {
+            const keyword = templateKeyword.value.trim().toLowerCase();
+            return (!templateCategory.value || item.category === templateCategory.value)
+                && (!keyword || [item.title, item.description, item.category, ...(item.tags || [])].join(' ').toLowerCase().includes(keyword));
+        }));
+        const dataSourceCatalog = ref({ connectors: [], assets: [] });
+        const dataSourcesLoading = ref(false);
+        const adminOverview = ref({});
+        const adminOverviewLoading = ref(false);
+        const clusterHealth = ref({});
+        const clusterLoading = ref(false);
+        const clusterLastUpdated = ref('');
+        const timelineVisible = ref(false);
+        const timelineLoading = ref(false);
+        const timelineScope = ref('ALL');
+        const timelineJob = ref(null);
+        const timelineEvents = ref([]);
+        const preflightVisible = ref(false);
+        const preflightResult = ref({ errors: [], warnings: [] });
 
         // ===== AI 助手 / 告警中心 =====
         const aiPrompt = ref('');
@@ -718,7 +778,7 @@ const app = createApp({
                 user.value = data.user;
                 localStorage.setItem('token', data.token);
                 ElMessage.success('欢迎，' + (data.user.displayName || data.user.username));
-                currentView.value = 'canvas';
+                currentView.value = 'workbench';
                 await loadControls();
                 await loadJobs();
                 startAlertPolling();
@@ -741,11 +801,86 @@ const app = createApp({
             token.value = '';
             user.value = null;
             localStorage.removeItem('token');
-            currentView.value = 'canvas';
+            currentView.value = 'workbench';
             jobs.value = [];
             controls.value = [];
             if (graph) { try { graph.dispose(); } catch (_) {} graph = null; }
             ElMessage.info('已退出登录');
+        }
+
+        async function loadWorkbench() {
+            workbenchLoading.value = true;
+            try { workbench.value = await api.getWorkbench(); }
+            catch (err) { ElMessage.error('工作台加载失败: ' + (err.response?.data?.message || err.message)); }
+            finally { workbenchLoading.value = false; }
+        }
+        function openTemplatePreview(item) { templatePreview.value = item; templatePreviewVisible.value = true; }
+        function cloneTemplateDag(item) {
+            const dag = JSON.parse(JSON.stringify(item.dag));
+            const stamp = Date.now().toString(36);
+            const idMap = new Map();
+            dag.nodes.forEach((node, index) => { const id = `tpl_${stamp}_n${index + 1}`; idMap.set(node.id, id); node.id = id; });
+            dag.edges.forEach((edge, index) => {
+                edge.id = `tpl_${stamp}_e${index + 1}`;
+                edge.source = idMap.get(edge.source);
+                edge.target = idMap.get(edge.target);
+                delete edge.sourcePort;
+                delete edge.targetPort;
+            });
+            return dag;
+        }
+        async function useTemplate(item) {
+            const dag = cloneTemplateDag(item);
+            currentJobId = null;
+            currentJobName.value = '';
+            jobName.value = dag.jobName;
+            parallelism.value = dag.parallelism || 1;
+            currentView.value = 'canvas';
+            templatePreviewVisible.value = false;
+            await loadDagToCanvas(dag);
+        }
+        async function loadDataSources() {
+            dataSourcesLoading.value = true;
+            try { dataSourceCatalog.value = await api.getDataSourceCatalog(); }
+            catch (err) { ElMessage.error('数据源中心加载失败: ' + (err.response?.data?.message || err.message)); }
+            finally { dataSourcesLoading.value = false; }
+        }
+        async function loadAdminOverview() {
+            if (user.value?.role !== 'ADMIN') return;
+            adminOverviewLoading.value = true;
+            try { adminOverview.value = await api.getAdminOverview(); }
+            catch (err) { ElMessage.error('管理总览加载失败: ' + (err.response?.data?.message || err.message)); }
+            finally { adminOverviewLoading.value = false; }
+        }
+        async function loadClusterHealth() {
+            clusterLoading.value = true;
+            try { clusterHealth.value = await api.getClusterHealth(); clusterLastUpdated.value = new Date().toLocaleTimeString('zh-CN'); }
+            catch (err) { ElMessage.error('集群健康加载失败: ' + (err.response?.data?.message || err.message)); }
+            finally { clusterLoading.value = false; }
+        }
+        function startClusterPolling() { stopClusterPolling(); loadClusterHealth(); clusterTimer = setInterval(loadClusterHealth, 15000); }
+        function stopClusterPolling() { if (clusterTimer) { clearInterval(clusterTimer); clusterTimer = null; } }
+        async function loadTimeline() {
+            if (!timelineJob.value) return;
+            timelineLoading.value = true;
+            try {
+                const data = await api.getJobTimeline(timelineJob.value.id, timelineScope.value);
+                timelineEvents.value = Array.isArray(data) ? data : (data.events || data.content || []);
+            } catch (err) { ElMessage.error('运行时间线加载失败: ' + (err.response?.data?.message || err.message)); }
+            finally { timelineLoading.value = false; }
+        }
+        function openTimeline(row) { timelineJob.value = row; timelineScope.value = 'ALL'; timelineVisible.value = true; loadTimeline(); }
+        function eventTagType(level) { return level === 'ERROR' ? 'danger' : level === 'WARN' ? 'warning' : level === 'INFO' ? 'success' : 'info'; }
+        async function runPreflight(id) {
+            const result = await api.getPreflight(id);
+            preflightResult.value = { errors: result.errors || [], warnings: result.warnings || [] };
+            preflightVisible.value = true;
+            await nextTick();
+            if (preflightResult.value.errors.length) throw new Error('提交前检查发现错误，请修复后重试');
+            if (preflightResult.value.warnings.length) {
+                await ElMessageBox.confirm('提交前检查存在警告，是否继续提交？', 'Preflight 检查', { type: 'warning' });
+            }
+            return result;
         }
 
         // ===== 操作审计 =====
@@ -754,12 +889,19 @@ const app = createApp({
         const auditPage = ref(0);
         const auditSize = ref(20);
         const auditKeyword = ref('');
+        const auditFilters = reactive({ username: '', action: '', targetType: '', targetId: '', ip: '', range: [] });
         const auditLoading = ref(false);
         async function loadAudit(page = auditPage.value) {
             if (!canViewAudit.value) return;
             auditLoading.value = true;
             try {
-                const data = await api.getAudit({ page, size: auditSize.value, keyword: auditKeyword.value || undefined });
+                const data = await api.getAudit({
+                    page, size: auditSize.value, keyword: auditKeyword.value || undefined,
+                    username: auditFilters.username || undefined, action: auditFilters.action || undefined,
+                    targetType: auditFilters.targetType || undefined, targetId: auditFilters.targetId || undefined,
+                    ip: auditFilters.ip || undefined,
+                    from: auditFilters.range?.[0] || undefined, to: auditFilters.range?.[1] || undefined
+                });
                 auditRows.value = data.content || [];
                 auditTotal.value = data.total || 0;
                 auditPage.value = data.page || 0;
@@ -772,6 +914,11 @@ const app = createApp({
             }
         }
         function onAuditPage(p) { loadAudit(p - 1); }
+        function resetAuditFilters() {
+            auditKeyword.value = '';
+            Object.assign(auditFilters, { username: '', action: '', targetType: '', targetId: '', ip: '', range: [] });
+            loadAudit(0);
+        }
 
         // 打开帮助中心并定位到指定标签
         function openHelp(tab) {
@@ -1468,6 +1615,7 @@ const app = createApp({
             submitting.value = true;
             try {
                 await confirmAiDraftIfNeeded(currentJobId);
+                await runPreflight(currentJobId);
                 await api.submitJob(currentJobId);
                 ElMessage.success('作业已提交到 Flink 集群');
                 await loadJobs();
@@ -1804,6 +1952,7 @@ const app = createApp({
         async function submitJobById(id) {
             try {
                 await confirmAiDraftIfNeeded(id);
+                await runPreflight(id);
                 await api.submitJob(id);
                 ElMessage.success('作业已提交');
                 await loadJobs();
@@ -2379,8 +2528,13 @@ const app = createApp({
                 trendChart = null;
             }
             if (v !== 'kafka') stopKafkaStream();
+            if (v !== 'cluster') stopClusterPolling();
 
-            if (v === 'monitor') { loadMonitor(); startMonitorPolling(); nextTick(initTrendChart); }
+            if (v === 'workbench') { loadWorkbench(); }
+            else if (v === 'data-sources') { loadDataSources(); }
+            else if (v === 'admin-overview') { loadAdminOverview(); }
+            else if (v === 'cluster') { startClusterPolling(); }
+            else if (v === 'monitor') { loadMonitor(); startMonitorPolling(); nextTick(initTrendChart); }
             else if (v === 'kafka') { loadKafkaTopics(); nextTick(initKafkaChart); }
             else if (v === 'audit') { loadAudit(); }
             else if (v === 'workflow') { loadWorkflow(); }
@@ -2405,6 +2559,7 @@ const app = createApp({
             if (user.value) {
                 await loadControls();
                 await loadJobs();
+                await loadWorkbench();
                 startAlertPolling();
                 // 登录态下延迟初始化画布
                 setTimeout(() => {
@@ -2418,11 +2573,19 @@ const app = createApp({
 
         onUnmounted(() => {
             stopAlertPolling();
+            stopMonitorPolling();
+            stopClusterPolling();
+            stopKafkaStream();
             document.removeEventListener('keydown', handleKeydown);
         });
 
         return {
             currentView, controls, jobs, selectedJobs, batchOperating, jobSearch, jobStatusFilter, filteredJobs, jobName, parallelism, currentJobName,
+            workbench, workbenchLoading, loadWorkbench, templates, filteredTemplates, templateKeyword, templateCategory, templatePreviewVisible, templatePreview, openTemplatePreview, useTemplate,
+            dataSourceCatalog, dataSourcesLoading, loadDataSources, adminOverview, adminOverviewLoading, loadAdminOverview,
+            clusterHealth, clusterLoading, clusterLastUpdated, loadClusterHealth,
+            timelineVisible, timelineLoading, timelineScope, timelineJob, timelineEvents, openTimeline, loadTimeline, eventTagType,
+            preflightVisible, preflightResult,
             controlTab, saving, submitting, showHelp, showLogs, jobLogs,
             selectedNode, nodeParams, nodeParamSchema, jobErrors,
             previewVisible, previewLoading, previewData, previewRows, previewNode,
@@ -2444,7 +2607,7 @@ const app = createApp({
             user, canEdit, canViewAudit, authMode, loginUsername, loginPassword, loginError, loginLoading,
             registerUsername, registerDisplayName, registerPassword, registerPasswordConfirm, registerAgreed, registerError, registerLoading,
             login, register, switchAuthMode, logout, onlyMine, helpTab, openHelp,
-            auditRows, auditTotal, auditPage, auditSize, auditKeyword, auditLoading, loadAudit, onAuditPage,
+            auditRows, auditTotal, auditPage, auditSize, auditKeyword, auditFilters, auditLoading, loadAudit, onAuditPage, resetAuditFilters,
             depDialogVisible, depJob, depCandidates, depSelected, depLoading, depSaving, openDepDialog, saveDeps,
             workflowJobs, workflowEdges, workflowLoading, workflowError, workflowUpdated, loadWorkflow,
             lineageDialogVisible, lineageJob, lineageAssets, lineageLoading, openLineageDialog,

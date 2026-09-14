@@ -10,6 +10,8 @@ import com.datastream.mvp.security.CurrentUser;
 import com.datastream.mvp.security.SecurityUtils;
 import com.datastream.mvp.service.JobService;
 import com.datastream.mvp.service.DependencyService;
+import com.datastream.mvp.service.DagPreflightService;
+import com.datastream.mvp.service.JobTimelineService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -33,6 +35,8 @@ public class JobController {
     private final JobService jobService;
     private final ScheduleHistoryRepository historyRepo;
     private final DependencyService dependencyService;
+    private final JobTimelineService timelineService;
+    private final DagPreflightService preflightService;
 
     @GetMapping
     public List<JobDefinition> list() {
@@ -202,6 +206,17 @@ public class JobController {
     public List<JobLog> logs(@PathVariable Long id) {
         jobService.findByIdForUser(id, currentUser());
         return jobService.getLogs(id);
+    }
+
+    @GetMapping("/{id}/timeline")
+    public List<Map<String, Object>> timeline(@PathVariable Long id,
+                                              @RequestParam(defaultValue = "ALL") JobTimelineService.Scope scope) {
+        return timelineService.timeline(id, currentUser(), scope);
+    }
+
+    @GetMapping("/{id}/preflight")
+    public Map<String, Object> preflight(@PathVariable Long id) {
+        return preflightService.validate(id, currentUser());
     }
 
     @GetMapping("/{id}/preview")

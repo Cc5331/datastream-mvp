@@ -114,3 +114,43 @@ test('内置控件降级副本与后端注册表保持一致', () => {
   }
 });
 
+test('首期视图与约定 API 已接入', () => {
+  for (const view of ['workbench', 'templates', 'data-sources', 'cluster', 'admin-overview']) assert.match(html, new RegExp(`currentView === '${view}'`));
+  for (const endpoint of ['dashboard/workbench', 'dashboard/admin-overview', 'data-sources/catalog', 'cluster/health']) assert.ok(appJs.includes(endpoint), `缺少 API ${endpoint}`);
+  assert.match(appJs, /jobs\/\$\{jobId\}\/timeline/);
+  assert.match(appJs, /jobs\/\$\{jobId\}\/preflight/);
+});
+
+test('内置模板是合法 DAG 且使用时重建标识并清理作业上下文', () => {
+  const sampleBlock = appJs.slice(appJs.indexOf('const SAMPLE_DAGS'), appJs.indexOf('// 模板中心'));
+  assert.match(sampleBlock, /nodes\s*:/);
+  assert.match(sampleBlock, /edges\s*:/);
+  assert.match(appJs, /JSON\.parse\(JSON\.stringify\(item\.dag\)\)/);
+  assert.match(appJs, /idMap\.set\(node\.id, id\)/);
+  assert.match(appJs, /edge\.source = idMap\.get\(edge\.source\)/);
+  assert.match(appJs, /currentJobId = null/);
+  assert.match(appJs, /await loadDagToCanvas\(dag\)/);
+});
+
+test('preflight 位于人工确认之后和实际提交之前', () => {
+  const canvasSubmit = appJs.slice(appJs.indexOf('async function submitJob()'), appJs.indexOf('// 导出 DAG JSON'));
+  const listSubmit = appJs.slice(appJs.indexOf('async function submitJobById'), appJs.indexOf('// 删除作业'));
+  for (const flow of [canvasSubmit, listSubmit]) {
+    const confirmAt = flow.indexOf('confirmAiDraftIfNeeded');
+    const preflightAt = flow.indexOf('runPreflight');
+    const submitAt = flow.indexOf('api.submitJob');
+    assert.ok(confirmAt >= 0 && confirmAt < preflightAt && preflightAt < submitAt, '提交顺序应为 AI 确认 → preflight → submit');
+  }
+  assert.match(appJs, /preflightResult\.value\.errors\.length\) throw/);
+  assert.match(canvasSubmit, /validateDagForSubmit\(\)/, '画布提交保留本地 DAG 校验');
+  assert.doesNotMatch(listSubmit, /validateDagForSubmit\(\)/, '列表运行不应错误校验当前画布');
+});
+
+test('集群健康页 15 秒刷新且离开和卸载时清理 timer', () => {
+  assert.match(appJs, /clusterTimer = setInterval\(loadClusterHealth, 15000\)/);
+  assert.match(appJs, /if \(v !== 'cluster'\) stopClusterPolling\(\)/);
+  const unmount = appJs.slice(appJs.indexOf('onUnmounted(() =>'));
+  assert.match(unmount, /stopClusterPolling\(\)/);
+  assert.match(appJs, /clearInterval\(clusterTimer\)/);
+});
+

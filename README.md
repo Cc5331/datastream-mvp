@@ -50,6 +50,9 @@ flowchart LR
 - **AI 助手（NL2Pipeline Agent）**：输入自然语言需求（如「读取 sales.csv，把 product_category 和 channel 拼接成新列，写出到 MySQL 表 ai_demo」），DeepSeek 依据控件注册表摘要生成可执行 DAG（仅使用合法控件类型与参数），落库为 DRAFT 作业，人工确认后可打开画布微调并提交运行。
 - **告警中心（故障感知）**：每 10s 自动扫描作业失败 / 在线重启超限 / 吞吐归零 / 高背压 / Checkpoint 失败 / 资源超阈值（`app.monitor.health-scan-ms` 可配），15 分钟去重后落库展示，支持邮件 + webhook 通知与恢复闭环，前端带未读角标与已读管理。
 - **智能诊断 Agent**：对失败作业一键诊断——本地规则引擎先命中 8 类高频错误（文件不存在、路径乱码、字段配置缺失、Kafka 不可用等），未命中自动调用 DeepSeek 归因，返回根因 / 关键证据 / 修复建议，部分参数可一键修正。
+- **企业工作台与模板中心**：登录后默认进入个人工作台，汇总作业状态、未读告警与最近作业；内置模板支持搜索、预览并安全复制为新画布。
+- **运行治理与管理总览**：作业详情可查看生命周期、日志、调度和告警聚合时间线；ADMIN 可查看用户、作业、告警运营总览，集群健康页展示 Flink 可用性、TaskManager、Slot 与作业状态。
+- **数据源资产目录与提交预检**：按当前用户权限汇总可用连接器和 DAG 已用文件/JDBC/Kafka/HDFS 资产（敏感参数不返回）；提交前确定性检查 DAG 结构、连通性、控件、必填参数与并行度。
 
 ## 二、快速启动
 
@@ -275,7 +278,19 @@ docker compose down -v         :: 停止并删除数据卷
 | POST | /api/jobs/{id}/copy | 复制作业（新作业状态 DRAFT，名称追加「（副本）」） |
 | POST | /api/jobs/{id}/schedule | 设置定时调度（body: `{scheduleEnabled, cronExpression}`，启用时自动校验 cron 并计算 nextFireTime） |
 | GET | /api/jobs/{id}/logs | 作业日志 |
+| GET | /api/jobs/{id}/timeline | 生命周期、日志、调度和告警聚合时间线（支持 scope=ALL/LATEST） |
+| GET | /api/jobs/{id}/preflight | 无副作用 DAG 提交前确定性检查 |
 | GET | /api/jobs/{id}/preview | DAG 翻译预览 |
+
+### 工作台与平台治理
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | /api/dashboard/workbench | 当前用户可见作业、状态、告警与最近作业摘要 |
+| GET | /api/dashboard/admin-overview | 全平台用户、作业和告警运营摘要（仅 ADMIN） |
+| GET | /api/data-sources/catalog | 可用连接器与当前用户可见作业的已用资产目录 |
+| GET | /api/cluster/health | Flink 集群可用性、TaskManager、Slot 与作业状态摘要 |
+| GET | /api/audit | 审计分页检索，支持用户、操作、对象、IP 与时间范围组合筛选 |
 
 ### 数据预览（/api/preview）
 
@@ -305,7 +320,7 @@ docker compose down -v         :: 停止并删除数据卷
 
 ```
 项目根目录
-├── backend/                 # Spring Boot 后端
+├── backend/                 # Spring Boot 后端（14 个 Controller / 35 个 Service）
 │   ├── src/main/java/com/datastream/mvp/
 │   │   ├── MvpBackendApplication.java
 │   │   ├── config/          # DataInitializer（控件种子）/ WebConfig / 异常处理
@@ -318,7 +333,7 @@ docker compose down -v         :: 停止并删除数据卷
 │   ├── plugins/             # 热加载插件目录
 │   └── pom.xml
 ├── frontend/
-│   ├── public/              # 静态 SPA（index.html / css / js/app.js）
+│   ├── public/              # 静态 SPA（14 个视图，index.html / css / js/app.js）
 │   ├── serve.js             # 静态服务 + /api 反向代理（端口 3000）
 │   └── package.json
 ├── flink/                   # Git Bash 包装脚本与配置示例
@@ -378,6 +393,8 @@ python test-resources/benchmark.py
 | 1,000,000 行 | 76,139 行/s | 112,015 行/s | 217,795 行/s |
 
 完整报告见 `test-results/benchmark_report.md`。
+
+当前自动化回归基线：后端 Maven Reactor 共 **91** 个测试用例，前端 Node Test Runner 共 **14** 个测试用例。
 
 ## 十二、AI 智能化层（LLM Agent）
 

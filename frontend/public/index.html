@@ -91,34 +91,35 @@
                     <span class="version-badge">MVP v1.0</span>
                 </div>
                 <div class="header-right">
-                    <el-button size="small" :type="currentView === 'canvas' ? 'primary' : ''" @click="currentView = 'canvas'">
-                        <el-icon><Monitor /></el-icon> 画布设计
-                    </el-button>
-                    <el-button size="small" :type="currentView === 'jobs' ? 'primary' : ''" @click="currentView = 'jobs'">
-                        <el-icon><List /></el-icon> 作业管理
-                    </el-button>
-                    <el-button size="small" :type="currentView === 'controls' ? 'primary' : ''" @click="currentView = 'controls'">
-                        <el-icon><Grid /></el-icon> 控件管理
-                    </el-button>
-                    <el-button size="small" :type="currentView === 'monitor' ? 'primary' : ''" @click="currentView = 'monitor'">
-                        <el-icon><Odometer /></el-icon> 实时监控
-                    </el-button>
-                    <el-button size="small" :type="currentView === 'kafka' ? 'primary' : ''" @click="currentView = 'kafka'">
-                        <el-icon><Connection /></el-icon> Kafka 可视化
-                    </el-button>
-                    <el-button size="small" :type="currentView === 'workflow' ? 'primary' : ''" @click="currentView = 'workflow'">
-                        <el-icon><Share /></el-icon> 工作流
-                    </el-button>
-                    <el-button v-if="canViewAudit" size="small" :type="currentView === 'audit' ? 'primary' : ''" @click="currentView = 'audit'">
-                        <el-icon><Memo /></el-icon> 操作审计
-                    </el-button>
-                    <el-button v-if="canEdit" size="small" :type="currentView === 'ai' ? 'primary' : ''" @click="currentView = 'ai'">
-                        <el-icon><MagicStick /></el-icon> AI 助手
-                    </el-button>
-                    <el-button size="small" :type="currentView === 'alerts' ? 'primary' : ''" @click="currentView = 'alerts'; loadAlerts()">
-                        <el-icon><Bell /></el-icon> 告警中心
-                        <el-badge v-if="alertUnread > 0" :value="alertUnread" :max="99" style="margin-left:4px;" />
-                    </el-button>
+                    <el-button size="small" :type="currentView === 'workbench' ? 'primary' : ''" @click="currentView = 'workbench'">工作台</el-button>
+                    <el-button size="small" :type="currentView === 'canvas' ? 'primary' : ''" @click="currentView = 'canvas'">画布设计</el-button>
+                    <el-button size="small" :type="currentView === 'jobs' ? 'primary' : ''" @click="currentView = 'jobs'">作业管理</el-button>
+                    <el-dropdown trigger="click" @command="view => currentView = view">
+                        <el-button size="small">开发资源 <el-icon><ArrowDown /></el-icon></el-button>
+                        <template #dropdown><el-dropdown-menu>
+                            <el-dropdown-item command="templates">模板中心</el-dropdown-item>
+                            <el-dropdown-item command="data-sources">数据源中心</el-dropdown-item>
+                            <el-dropdown-item command="controls">控件管理</el-dropdown-item>
+                            <el-dropdown-item v-if="canEdit" command="ai">AI 助手</el-dropdown-item>
+                        </el-dropdown-menu></template>
+                    </el-dropdown>
+                    <el-dropdown trigger="click" @command="view => currentView = view">
+                        <el-button size="small">运行运维 <el-icon><ArrowDown /></el-icon></el-button>
+                        <template #dropdown><el-dropdown-menu>
+                            <el-dropdown-item command="monitor">实时监控</el-dropdown-item>
+                            <el-dropdown-item command="cluster">集群健康</el-dropdown-item>
+                            <el-dropdown-item command="kafka">Kafka 可视化</el-dropdown-item>
+                            <el-dropdown-item command="workflow">工作流</el-dropdown-item>
+                            <el-dropdown-item command="alerts">告警中心（{{ alertUnread }}）</el-dropdown-item>
+                        </el-dropdown-menu></template>
+                    </el-dropdown>
+                    <el-dropdown v-if="canViewAudit" trigger="click" @command="view => currentView = view">
+                        <el-button size="small">管理 <el-icon><ArrowDown /></el-icon></el-button>
+                        <template #dropdown><el-dropdown-menu>
+                            <el-dropdown-item command="audit">操作审计</el-dropdown-item>
+                            <el-dropdown-item v-if="user.role === 'ADMIN'" command="admin-overview">运营总览</el-dropdown-item>
+                        </el-dropdown-menu></template>
+                    </el-dropdown>
                     <el-dropdown trigger="click" @command="openHelp">
                         <el-button size="small" type="info">
                             <el-icon><QuestionFilled /></el-icon> 帮助
@@ -143,6 +144,39 @@
             </el-header>
 
             <el-main style="padding: 0; overflow: hidden;">
+                <div v-show="currentView === 'workbench'" class="portal-view" v-loading="workbenchLoading">
+                    <div class="page-heading"><div><h2>工作台</h2><p>作业运行态势与常用操作</p></div><el-button @click="loadWorkbench">刷新</el-button></div>
+                    <div class="metric-grid">
+                        <div v-for="(count, status) in (workbench.jobStatus || {})" :key="status" class="enterprise-card metric-tile"><span>{{ status }}</span><strong>{{ count }}</strong></div>
+                        <div class="enterprise-card metric-tile danger"><span>未读告警</span><strong>{{ workbench.unreadAlerts ?? workbench.unreadAlertCount ?? 0 }}</strong></div>
+                    </div>
+                    <div class="portal-columns">
+                        <section class="enterprise-card"><div class="card-title">最近作业</div><el-table :data="workbench.recentJobs || []" size="small"><el-table-column prop="name" label="名称"></el-table-column><el-table-column prop="status" label="状态" width="120"><template #default="scope"><el-tag :type="statusTag(scope.row.status)" size="small">{{ scope.row.status }}</el-tag></template></el-table-column><el-table-column label="操作" width="90"><template #default="scope"><el-button text type="primary" @click="openJobDetail(scope.row)">详情</el-button></template></el-table-column></el-table></section>
+                        <section class="enterprise-card"><div class="card-title">快捷入口</div><div class="quick-grid"><button @click="currentView='canvas'; newCanvas()">新建作业</button><button @click="currentView='templates'">使用模板</button><button @click="currentView='data-sources'">数据源中心</button><button @click="currentView='cluster'">集群健康</button></div></section>
+                    </div>
+                </div>
+
+                <div v-show="currentView === 'templates'" class="portal-view">
+                    <div class="page-heading"><div><h2>模板中心</h2><p>从经过校验的内置 DAG 快速开始</p></div><div class="filter-row"><el-input v-model="templateKeyword" clearable placeholder="搜索模板" style="width:220px"></el-input><el-select v-model="templateCategory" clearable placeholder="全部分类" style="width:150px"><el-option label="实时采集" value="实时采集"></el-option><el-option label="批量处理" value="批量处理"></el-option></el-select></div></div>
+                    <div class="card-grid"><article v-for="item in filteredTemplates" :key="item.key" class="enterprise-card template-card"><el-tag size="small">{{ item.category }}</el-tag><h3>{{ item.title }}</h3><p>{{ item.description }}</p><div><el-tag v-for="tag in item.tags" :key="tag" type="info" size="small">{{ tag }}</el-tag></div><footer><el-button @click="openTemplatePreview(item)">预览</el-button><el-button type="primary" @click="useTemplate(item)">使用模板</el-button></footer></article></div>
+                </div>
+
+                <div v-show="currentView === 'data-sources'" class="portal-view" v-loading="dataSourcesLoading">
+                    <div class="page-heading"><div><h2>数据源中心</h2><p>可用连接器与当前账号已使用的数据资产</p></div><el-button @click="loadDataSources">刷新</el-button></div>
+                    <h3 class="section-title">连接器目录</h3><div class="card-grid"><article v-for="item in (dataSourceCatalog.connectors || [])" :key="item.type || item.name" class="enterprise-card"><h3>{{ item.name || item.type }}</h3><p>{{ item.description || '平台内置数据连接器' }}</p><el-tag :type="item.enabled === false ? 'info' : 'success'">{{ item.enabled === false ? '不可用' : '可用' }}</el-tag></article></div>
+                    <h3 class="section-title">已用资产</h3><el-table :data="dataSourceCatalog.assets || []" class="enterprise-card"><el-table-column prop="name" label="资产"></el-table-column><el-table-column prop="type" label="类型"></el-table-column><el-table-column label="位置" show-overflow-tooltip><template #default="scope">{{ scope.row.path || scope.row.table || scope.row.topic || scope.row.url || '-' }}</template></el-table-column><el-table-column prop="jobName" label="关联作业"></el-table-column></el-table>
+                </div>
+
+                <div v-show="currentView === 'admin-overview'" class="portal-view" v-loading="adminOverviewLoading">
+                    <div class="page-heading"><div><h2>管理运营总览</h2><p>仅管理员可见的平台运营指标</p></div><el-button @click="loadAdminOverview">刷新</el-button></div>
+                    <div class="metric-grid"><div v-for="(value,key) in adminOverview" :key="key" class="enterprise-card metric-tile"><span>{{ key }}</span><strong>{{ typeof value === 'object' ? '-' : value }}</strong></div></div>
+                </div>
+
+                <div v-show="currentView === 'cluster'" class="portal-view" v-loading="clusterLoading">
+                    <div class="page-heading"><div><h2>集群健康</h2><p>每 15 秒自动刷新 · 更新于 {{ clusterLastUpdated || '-' }}</p></div><el-button type="primary" @click="loadClusterHealth">手动刷新</el-button></div>
+                    <div class="metric-grid"><div v-for="(value,key) in clusterHealth" :key="key" class="enterprise-card metric-tile"><span>{{ key }}</span><strong :class="{'health-ok': value === true || value === 'UP'}">{{ typeof value === 'object' ? '-' : value }}</strong></div></div>
+                </div>
+
                 <!-- 画布设计视图 -->
                 <div v-show="currentView === 'canvas'" class="canvas-view">
                     <div class="canvas-toolbar">
@@ -385,6 +419,7 @@
                                 <el-button v-if="canEdit" size="small" type="primary" plain @click="openDepDialog(jobDetailRow)">⛓ 依赖</el-button>
                                 <el-button size="small" type="warning" plain @click="openDiagnose(jobDetailRow)">🤖 诊断</el-button>
                                 <el-button size="small" @click="viewLogs(jobDetailRow)">日志</el-button>
+                                <el-button size="small" type="primary" plain @click="openTimeline(jobDetailRow)">运行时间线</el-button>
                                 <el-button size="small" type="info" @click="openVersions(jobDetailRow)">历史</el-button>
                                 <el-button size="small" type="info" plain @click="openLineageDialog(jobDetailRow)">🧬 血缘</el-button>
                                 <el-button v-if="canEdit" size="small" type="danger" @click="deleteJobFromDetail(jobDetailRow.id)">删除</el-button>
@@ -434,13 +469,15 @@
 
                 <!-- 操作审计视图 -->
                 <div v-show="currentView === 'audit'" class="audit-view">
-                    <div style="display:flex; gap:10px; align-items:center; margin-bottom:12px;">
-                        <el-input v-model="auditKeyword" placeholder="搜索操作 / 用户 / 对象ID" clearable size="small" style="width:280px" @keyup.enter="loadAudit()">
-                            <template #prefix><el-icon><Search /></el-icon></template>
-                        </el-input>
-                        <el-button size="small" type="primary" @click="loadAudit()">查询</el-button>
-                        <el-button size="small" @click="loadAudit()">刷新</el-button>
-                        <span style="color:#909399; font-size:12px;">共 {{ auditTotal }} 条</span>
+                    <div class="audit-filter enterprise-card">
+                        <el-input v-model="auditKeyword" placeholder="关键词" clearable @keyup.enter="loadAudit(0)"></el-input>
+                        <el-input v-model="auditFilters.username" placeholder="用户名" clearable></el-input>
+                        <el-input v-model="auditFilters.action" placeholder="操作" clearable></el-input>
+                        <el-input v-model="auditFilters.targetType" placeholder="对象类型" clearable></el-input>
+                        <el-input v-model="auditFilters.targetId" placeholder="对象 ID" clearable></el-input>
+                        <el-input v-model="auditFilters.ip" placeholder="IP 地址" clearable></el-input>
+                        <el-date-picker v-model="auditFilters.range" type="datetimerange" value-format="YYYY-MM-DDTHH:mm:ss" start-placeholder="开始时间" end-placeholder="结束时间"></el-date-picker>
+                        <el-button type="primary" @click="loadAudit(0)">查询</el-button><el-button @click="resetAuditFilters">重置</el-button><span>共 {{ auditTotal }} 条</span>
                     </div>
                     <el-table :data="auditRows" v-loading="auditLoading" style="width:100%; flex:1;" stripe size="small">
                         <el-table-column prop="createdAt" label="时间" width="165"></el-table-column>
@@ -1007,6 +1044,21 @@
                     </div>
                 </el-tab-pane>
             </el-tabs>
+        </el-dialog>
+
+        <el-dialog v-model="templatePreviewVisible" :title="templatePreview?.title || '模板预览'" width="680px">
+            <template v-if="templatePreview"><p>{{ templatePreview.description }}</p><div class="dag-preview"><span v-for="(node,index) in templatePreview.dag.nodes" :key="node.id"><b>{{ node.label }}</b><i v-if="index < templatePreview.dag.nodes.length - 1">→</i></span></div></template>
+            <template #footer><el-button @click="templatePreviewVisible=false">关闭</el-button><el-button type="primary" @click="useTemplate(templatePreview)">使用模板</el-button></template>
+        </el-dialog>
+        <el-dialog v-model="timelineVisible" :title="'运行时间线' + (timelineJob ? '：' + timelineJob.name : '')" width="720px">
+            <el-radio-group v-model="timelineScope" @change="loadTimeline"><el-radio-button value="ALL">全部运行</el-radio-button><el-radio-button value="LATEST">最近一次</el-radio-button></el-radio-group>
+            <el-timeline v-loading="timelineLoading" style="margin-top:24px"><el-timeline-item v-for="event in timelineEvents" :key="event.source + '-' + (event.sourceId || event.time)" :timestamp="event.time || event.timestamp || event.createdAt" placement="top"><el-tag :type="eventTagType(event.level || event.type)" size="small">{{ event.source || event.level || 'INFO' }}</el-tag><strong style="margin-left:8px">{{ event.type || event.event || event.title || event.status }}</strong><p>{{ event.message || event.detail }}</p></el-timeline-item></el-timeline>
+            <el-empty v-if="!timelineLoading && !timelineEvents.length" description="暂无时间线事件"></el-empty>
+        </el-dialog>
+        <el-dialog v-model="preflightVisible" title="提交前检查" width="620px" :close-on-click-modal="false">
+            <el-alert v-if="preflightResult.errors.length" :title="`发现 ${preflightResult.errors.length} 项错误，已阻止提交`" type="error" :closable="false" show-icon></el-alert>
+            <el-alert v-else :title="preflightResult.warnings.length ? '检查通过，但存在警告' : '检查通过，可以提交'" :type="preflightResult.warnings.length ? 'warning' : 'success'" :closable="false" show-icon></el-alert>
+            <div class="preflight-list"><div v-for="item in preflightResult.errors" :key="item.code || item.message" class="preflight-error">{{ item.message || item }}</div><div v-for="item in preflightResult.warnings" :key="item.code || item.message" class="preflight-warning">{{ item.message || item }}</div></div>
         </el-dialog>
 
         <!-- 运行日志对话框 -->
