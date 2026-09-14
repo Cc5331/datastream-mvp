@@ -80,6 +80,9 @@ app:
     # 允许跨域访问 /api 的来源白名单（逗号分隔）；写 * 时不携带凭据，仅用于临时排障
     cors-allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://127.0.0.1:3000}
   hadoop-home: ${HADOOP_HOME:D:\\code\\hadoop}
+  data-source:
+    key-file: ${DATA_SOURCE_KEY_FILE:./data/.data_source_key}
+    allowed-hosts: ${DATA_SOURCE_ALLOWED_HOSTS:${APP_PREVIEW_ALLOWED_JDBC_HOSTS:localhost,127.0.0.1,mysql,postgres,oracle,kafka,redis,namenode}}
   ai:
     # 默认 DeepSeek；切回 OpenAI 时设 AI_PROVIDER=openai 并提供 OPENAI_API_KEY
     provider: ${AI_PROVIDER:deepseek}
@@ -88,6 +91,9 @@ app:
     model: ${DEEPSEEK_MODEL:${OPENAI_MODEL:deepseek-v4-flash}}
     allowed-models: ${AI_ALLOWED_MODELS:deepseek-v4-flash,deepseek-v4-flash-vision-exp}
     timeout-ms: ${AI_TIMEOUT_MS:60000}
+    # 推理模型会先输出 reasoning_content（实测单次诊断约占 1500 tokens），
+    # 预算过小会导致 content 为空并报「LLM 返回为空」
+    max-tokens: ${AI_MAX_TOKENS:16000}
   alert:
     email:
       host: ${SMTP_HOST:}
@@ -100,7 +106,7 @@ app:
   preview:
     allowed-roots: ${APP_PREVIEW_ALLOWED_ROOTS:../data,../test-resources,../output}
     max-file-bytes: ${APP_PREVIEW_MAX_FILE_BYTES:67108864}
-    allowed-jdbc-hosts: ${APP_PREVIEW_ALLOWED_JDBC_HOSTS:localhost,127.0.0.1,postgres,oracle,mysql}
+    allowed-jdbc-hosts: ${APP_PREVIEW_ALLOWED_JDBC_HOSTS:localhost,127.0.0.1,mysql,postgres,oracle,kafka,redis,namenode}
     allowed-hdfs-authorities: ${APP_PREVIEW_ALLOWED_HDFS_AUTHORITIES:localhost:9000,namenode:9000}
   paths:
     # 控件默认路径根目录：本机为相对 backend 工作目录的相对路径，容器由 compose 注入

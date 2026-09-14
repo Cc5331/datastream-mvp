@@ -597,7 +597,7 @@ public class DagTranslationService {
                 String schema = extractFieldsFromDdlTemplate(template);
                 if (schema != null) { nodeSchemas.put(node.getId(), schema); }
                 flinkSql.append("-- Node: ").append(node.getLabel()).append(" (").append(node.getId()).append(")\n");
-                flinkSql.append(renderTemplate(template, mapLocalInputPath(node.getParams()), node.getId())).append("\n\n");
+                flinkSql.append(renderTemplate(template, withSchemaDefaults(mapLocalInputPath(node.getParams()), control.getParamSchema()), node.getId())).append("\n\n");
             } else if ("output".equals(control.getCategory())) {
                 String sourceFields = findIncomingSourceSchema(node.getId(), dag.getEdges(), nodeSchemas);
                 String rendered;
@@ -629,9 +629,9 @@ public class DagTranslationService {
                 if (sourceFields != null) {
                     log.info("Schema propagation: replacing 'data STRING' with custom fields from source for node {}", node.getId());
                     String modifiedTemplate = replaceDataStringInDDL(template, sourceFields);
-                    rendered = renderTemplate(modifiedTemplate, renderParams, node.getId());
+                    rendered = renderTemplate(modifiedTemplate, withSchemaDefaults(renderParams, control.getParamSchema()), node.getId());
                 } else {
-                    rendered = renderTemplate(template, renderParams, node.getId());
+                    rendered = renderTemplate(template, withSchemaDefaults(renderParams, control.getParamSchema()), node.getId());
                 }
                 flinkSql.append(rendered).append("\n\n");
 
@@ -970,7 +970,7 @@ public class DagTranslationService {
             return gatewayResult;
         }
 
-        log.info("SQL Gateway down, trying sql-client.sh...");
+        log.info("SQL Gateway down, trying sql-client script...");
         String jobId = trySqlClientScript(tempSqlFile);
         if (jobId != null) { log.info("Job via sql-client.sh: {}", jobId); Files.deleteIfExists(tempSqlFile); return SubmitResult.ok(jobId); }
 
@@ -1068,7 +1068,27 @@ public class DagTranslationService {
 
                         log.debug("Gateway stmt " + (i+1) + " poll " + (w+1) + "/" + maxPolls + " status: " + os);
 
-                        boolean _isDone = "COMPLETED".equals(os) || "FINISHED".equals(os) || "SUCCESS".equals(os) || (isInsert && "RUNNING".equals(os));
+                        // 失败状态必须立即暴露：否则会一直轮询到耗尽，最终报出误导性的
+                        // “未接受任何 INSERT 语句”，把真实错误（如表不存在、SQL 非法）吞掉
+                        if ("ERROR".equals(os) || "FAILED".equals(os) || "CANCELED".equals(os)) {
+                            String detail = oj.has("errors") ? oj.get("errors").toString() : op;
+                            String err = "Flink SQL 第 " + (i+1) + " 条语句执行失败(" + os + "): "
+                                    + detail.substring(0, Math.min(300, detail.length()));
+                            log.warn(err);
+                            throw new RuntimeException(err);
+                        }
+                        // INSERT 已进入 RUNNING 即视为集群已接受，作业 ID 由后续轮询认领
+                        if (isInsert && "RUNNING".equals(os)) {
+                            insertAccepted = true;
+                            if (jid == null) for (int j = 0; j < 20; j++) {
+                                String n = findNewFlinkJob(hc, beforeIds);
+                                if (n != null) { jid = n; break; }
+                                Thread.sleep(500);
+                            }
+                            break;
+                        }
+
+                        boolean _isDone = "COMPLETED".equals(os) || "FINISHED".equals(os) || "SUCCESS".equals(os);
                         if (!_isDone && os == null && !op.isEmpty() && op.startsWith("{") && !oj.has("errors")) {
                             _isDone = true;
                             log.debug("Gateway stmt " + (i+1) + " detected completion (empty status, no errors)");
@@ -1102,6 +1122,13 @@ public class DagTranslationService {
                             break;
                         }
                     }
+                    // 轮询耗尽仍无终态：INSERT 未报错说明集群可能仍在启动作业，
+                    // 按「已接受待认领」处理，交给状态轮询器取回真实 Job ID；
+                    // 直接判失败会把慢启动作业误标为 FAILED。
+                    if (isInsert && !insertAccepted) {
+                        insertAccepted = true;
+                        log.info("Gateway stmt " + (i+1) + " 轮询超时未达终态，按已接受处理待状态轮询认领");
+                    }
                 }
             }
             try { hc.send(java.net.http.HttpRequest.newBuilder()
@@ -1117,16 +1144,34 @@ public class DagTranslationService {
     }
     private String trySqlClientScript(Path sqlFile) {
         try {
-            String b = null;
-            for (String bp : new String[]{"C:/Program Files/Git/bin/bash.exe", "C:/Program Files (x86)/Git/bin/bash.exe"}) {
-                if (new java.io.File(bp).exists()) { b = bp; break; }
+            // Flink 官方发行版在 Windows 上不含 sql-client.sh（只有 .bat）。
+            // 先探测脚本是否存在，避免对必然失败的路径做 30s 空等与误导性的“尝试过”日志。
+            String scriptName;
+            String bash = null;
+            String sh = "sql-client.sh";
+            if (new java.io.File(flinkHome.replace("\\", "/") + "/bin/" + sh).exists()) {
+                for (String bp : new String[]{"C:/Program Files/Git/bin/bash.exe", "C:/Program Files (x86)/Git/bin/bash.exe"}) {
+                    if (new java.io.File(bp).exists()) { bash = bp; break; }
+                }
+                if (bash == null) { log.warn("sql-client.sh 存在但未找到 bash.exe，跳过该降级路径"); return null; }
+                scriptName = sh;
+            } else if (new java.io.File(flinkHome.replace("\\", "/") + "/bin/sql-client.bat").exists()) {
+                String comspec = System.getenv("COMSPEC");
+                bash = (comspec == null || comspec.isBlank()) ? "cmd.exe" : comspec;
+                scriptName = "sql-client.bat";
+            } else {
+                log.warn("{} 下未找到 sql-client 脚本，跳过该降级路径（Windows 发行版通常只有 sql-client.bat）", flinkHome);
+                return null;
             }
-            if (b == null) { log.warn("bash.exe not found"); return null; }
+            String b = bash;
 
-            String sc = flinkHome.replace("\\", "/") + "/bin/sql-client.sh";
+            String sc = flinkHome.replace("\\", "/") + "/bin/" + scriptName;
             String sf = sqlFile.toAbsolutePath().toString().replace("\\", "/");
             log.info("Running: " + b + " " + sc + " -f " + sf);
-            ProcessBuilder pb = new ProcessBuilder(b, sc, "-f", sf);
+            // .bat 不能直接作为 Executable 启动，必须经 cmd /c 调用
+            ProcessBuilder pb = "sql-client.bat".equals(scriptName)
+                    ? new ProcessBuilder(b, "/c", sc, "-f", sf)
+                    : new ProcessBuilder(b, sc, "-f", sf);
             pb.environment().put("FLINK_CONF_DIR", flinkHome.replace("\\", "/") + "/conf");
             pb.environment().put("FLINK_HOME", flinkHome.replace("\\", "/"));
             pb.redirectErrorStream(true);
@@ -1149,13 +1194,13 @@ public class DagTranslationService {
 
             if (!p.waitFor(30, TimeUnit.SECONDS)) {
                 p.destroyForcibly();
-                log.warn("sql-client.sh timed out after 30s");
+                log.warn("{} timed out after 30s", scriptName);
                 return null;
             }
             reader.join(5000);
 
             String all = output.toString();
-            log.info("sql-client.sh output: " + all.length() + " chars");
+            log.info("{} output: {} chars", scriptName, all.length());
 
             // Try to find Flink Job ID in output
             java.util.regex.Matcher m = java.util.regex.Pattern.compile(
@@ -1622,9 +1667,35 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
                 // 必须转义单引号，否则密码或路径含 ' 会闭合字面量导致语法错误/注入
                 String value = entry.getValue() != null ? escapeSqlLiteral(entry.getValue().toString()) : "";
                 result = result.replace("${" + entry.getKey() + "}", value);
+                // ${params.x} 表示该占位符必须由节点参数提供（无 schema 默认值兜底），
+                // 参数缺失时整体替换为空串，避免把占位符原样拼进 Flink SQL
+                result = result.replace("${params." + entry.getKey() + "}", entry.getValue() != null ? value : "");
             }
         }
         return result;
+    }
+
+    /**
+     * 用控件 paramSchema 的默认值补齐缺失参数。
+     * 节点 params 只保存用户显式填写的值，带默认值的可选项（如 csv_output 的 delimiter）
+     * 不会落库；若模板里引用了这些占位符，不补齐就会把 ${delimiter} 原样拼进 Flink SQL 导致建表失败。
+     */
+    private Map<String, Object> withSchemaDefaults(Map<String, Object> params, String paramSchema) {
+        Map<String, Object> merged = new HashMap<>();
+        if (params != null) merged.putAll(params);
+        if (paramSchema == null || paramSchema.isBlank()) return merged;
+        try {
+            JsonNode properties = objectMapper.readTree(paramSchema).path("properties");
+            properties.fields().forEachRemaining(entry -> {
+                if (merged.containsKey(entry.getKey())) return;
+                JsonNode def = entry.getValue().path("default");
+                if (def.isMissingNode() || def.isNull()) return;
+                merged.put(entry.getKey(), def.isTextual() ? def.asText() : def);
+            });
+        } catch (Exception e) {
+            log.warn("控件 paramSchema 默认值解析失败，跳过补齐: {}", e.getMessage());
+        }
+        return merged;
     }
 
     /**

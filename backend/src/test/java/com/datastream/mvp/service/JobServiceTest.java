@@ -30,7 +30,7 @@ class JobServiceTest {
                 mock(ControlRegistryService.class), translationService, new ObjectMapper(),
                 mock(ExcelPreprocessor.class), mock(FlinkJobStatusChecker.class),
                 mock(HealthMonitor.class), mock(MonitorService.class), mock(JobDependencyRepository.class),
-                mock(PreviewService.class));
+                mock(PreviewService.class), mock(DataSourceNodeResolver.class));
     }
 
     @Test

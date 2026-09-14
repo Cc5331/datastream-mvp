@@ -30,6 +30,7 @@ class DataSourceCatalogServiceTest {
 
         String serialized = result.toString();
         assertTrue(serialized.contains("orders"));
+        assertTrue(serialized.contains("enabled=true"));
         assertFalse(serialized.contains("secret"));
         assertFalse(serialized.contains("hidden"));
         assertFalse(serialized.contains("username"));

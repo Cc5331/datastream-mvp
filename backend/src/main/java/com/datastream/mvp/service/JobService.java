@@ -46,6 +46,7 @@ public class JobService {
     private final MonitorService monitorService;
     private final JobDependencyRepository dependencyRepo;
     private final PreviewService previewService;
+    private final DataSourceNodeResolver dataSourceNodeResolver;
 
     @Value("${app.mysql.default-username:root}")
     private String defaultMysqlUsername;
@@ -203,6 +204,9 @@ public class JobService {
         try {
             // 解析 DAG JSON
             DagDefinition dag = objectMapper.readValue(job.getDagJson(), DagDefinition.class);
+
+            // 节点若引用已保存数据源，则用数据源配置与加密凭据覆盖连接级参数（无引用时原样返回）
+            dataSourceNodeResolver.resolveForOwner(dag, job.getOwnerId());
 
             // 翻译 DAG -> Flink 作业
             String flinkSql = dagTranslationService.translate(dag);
@@ -445,7 +449,10 @@ public class JobService {
         JobDefinition job = findById(id);
         java.util.List<String> result = new java.util.ArrayList<>();
         try {
-            com.fasterxml.jackson.databind.JsonNode dagNode = objectMapper.readTree(job.getDagJson());
+            // 引用数据源的节点需要先展开连接参数与凭据，否则预览无连接信息
+            DagDefinition resolved = objectMapper.readValue(job.getDagJson(), DagDefinition.class);
+            dataSourceNodeResolver.resolveForOwner(resolved, job.getOwnerId());
+            com.fasterxml.jackson.databind.JsonNode dagNode = objectMapper.valueToTree(resolved);
             com.fasterxml.jackson.databind.JsonNode nodes = dagNode.get("nodes");
             if (nodes != null && nodes.isArray()) {
                 for (int ni = 0; ni < nodes.size(); ni++) {

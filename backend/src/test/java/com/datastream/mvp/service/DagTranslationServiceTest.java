@@ -403,6 +403,28 @@ class DagTranslationServiceTest {
     }
 
     @Test
+    void outputTemplateFallsBackToSchemaDefaultForOmittedOptionalParam() {
+        // 回归：节点 params 只保存用户显式填写的值，带默认值的可选项（如 delimiter）不会落库；
+        // 渲染时不按 paramSchema 补默认值，'${delimiter}' 会原样进入 Flink SQL，导致建表被集群拒绝
+        ControlRegistry csvOut = control("csv_output", "output",
+                "CREATE TABLE ${id} (\n  data STRING\n) WITH (\n  'connector' = 'filesystem',\n  'path' = '${path}',\n  'format' = 'csv',\n  'csv.delimiter' = '${delimiter}',\n  'sink.parallelism' = '1'\n);");
+        csvOut.setParamSchema("{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"delimiter\":{\"type\":\"string\",\"default\":\",\"}}}");
+        when(controlService.findByType("csv_output")).thenReturn(csvOut);
+
+        Map<String, Object> outParams = csvOutputParams("delim_default.csv");
+        outParams.remove("delimiter");
+        List<DagDefinition.DagNode> nodes = List.of(
+                node("csv_input_1", "csv_input", csvInputParams()),
+                node("csv_output_1", "csv_output", outParams));
+        List<DagDefinition.DagEdge> edges = List.of(edge("e1", "csv_input_1", "csv_output_1"));
+
+        String sql = service.translate(dag("delim-default", 1, nodes, edges));
+
+        assertTrue(!sql.contains("${delimiter}"), "未替换的占位符不应进入 Flink SQL");
+        assertTrue(sql.contains("'csv.delimiter' = ','"), "应按 paramSchema 默认值补齐为逗号");
+    }
+
+    @Test
     void unknownControlType_throws() {
         when(controlService.findByType("nope")).thenThrow(new RuntimeException("Control not found: type=nope"));
         List<DagDefinition.DagNode> nodes = List.of(

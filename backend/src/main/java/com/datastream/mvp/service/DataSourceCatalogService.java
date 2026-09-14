@@ -39,6 +39,7 @@ public class DataSourceCatalogService {
         item.put("category", control.getCategory());
         item.put("description", control.getDescription());
         item.put("version", control.getVersion());
+        item.put("enabled", Boolean.TRUE.equals(control.getEnabled()));
         return item;
     }
 
