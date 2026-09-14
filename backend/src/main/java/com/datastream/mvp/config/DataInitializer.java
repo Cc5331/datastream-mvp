@@ -249,7 +249,7 @@ public class DataInitializer implements CommandLineRunner {
         createControl("row_filter", "行过滤", "transform",
                 "按条件过滤行",
                 "{\"type\":\"object\",\"properties\":{\"condition\":{\"type\":\"string\",\"title\":\"过滤条件（SQL WHERE 表达式）\",\"default\":\"age > 18\"}},\"required\":[\"condition\"]}",
-                "SELECT * FROM ${id} WHERE ${condition}",
+                "SELECT * FROM ${id} WHERE ${params.condition}",
                 "1.0.0", "built-in");
         // JSON 解析
         createControl("json_parse", "JSON 解析", "transform",

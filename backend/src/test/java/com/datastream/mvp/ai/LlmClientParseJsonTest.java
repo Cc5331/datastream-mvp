@@ -45,4 +45,48 @@ class LlmClientParseJsonTest {
         JsonNode result = client.parseJson(fenced);
         assertEquals("n1", result.path("nodes").path(0).path("id").asText());
     }
+
+    @Test
+    void parseChatCompletion_readsContentForNormalReply() {
+        JsonNode root = readJson("{\"choices\":[{\"finish_reason\":\"stop\",\"message\":"
+                + "{\"role\":\"assistant\",\"content\":\"{\\\"rootCause\\\":\\\"x\\\"}\"}}]}");
+
+        JsonNode result = client.parseChatCompletion(root, "deepseek-v4-flash");
+
+        assertEquals("x", result.path("rootCause").asText());
+    }
+
+    @Test
+    void parseChatCompletion_reportsTruncatedReasoningWhenContentEmpty() {
+        // 推理模型：推理吃掉全部 token 预算后 content 为空，finish_reason=length。
+        // 此时必须给出可操作的提示，而不是笼统的「LLM 返回为空」
+        JsonNode root = readJson("{\"choices\":[{\"finish_reason\":\"length\",\"message\":"
+                + "{\"role\":\"assistant\",\"content\":\"\",\"reasoning_content\":\"We need answer only JSON...\"}}],"
+                + "\"usage\":{\"completion_tokens\":4000,"
+                + "\"completion_tokens_details\":{\"reasoning_tokens\":3900}}}");
+
+        IllegalStateException ex = org.junit.jupiter.api.Assertions.assertThrows(
+                IllegalStateException.class, () -> client.parseChatCompletion(root, "deepseek-v4-flash"));
+
+        org.junit.jupiter.api.Assertions.assertTrue(ex.getMessage().contains("token 上限截断"), ex.getMessage());
+        org.junit.jupiter.api.Assertions.assertTrue(ex.getMessage().contains("reasoning_tokens=3900"), ex.getMessage());
+        org.junit.jupiter.api.Assertions.assertTrue(ex.getMessage().contains("app.ai.max-tokens"), ex.getMessage());
+    }
+
+    @Test
+    void parseChatCompletion_reportsReasoningOnlyReply() {
+        JsonNode root = readJson("{\"choices\":[{\"finish_reason\":\"stop\",\"message\":"
+                + "{\"role\":\"assistant\",\"content\":\"   \",\"reasoning_content\":\"thinking...\"}}],"
+                + "\"usage\":{\"completion_tokens\":120}}");
+
+        IllegalStateException ex = org.junit.jupiter.api.Assertions.assertThrows(
+                IllegalStateException.class, () -> client.parseChatCompletion(root, "deepseek-v4-flash"));
+
+        org.junit.jupiter.api.Assertions.assertTrue(ex.getMessage().contains("推理内容"), ex.getMessage());
+    }
+
+    private JsonNode readJson(String json) {
+        try { return mapper.readTree(json); }
+        catch (Exception e) { throw new IllegalStateException(e); }
+    }
 }

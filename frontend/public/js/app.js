@@ -215,6 +215,33 @@ const api = {
         const res = await axios.get(API_BASE + '/dashboard/admin-overview');
         return res.data;
     },
+    async getDataSources() {
+        const res = await axios.get(API_BASE + '/data-sources');
+        return Array.isArray(res.data) ? res.data : [];
+    },
+    async getDataSource(id) {
+        const res = await axios.get(`${API_BASE}/data-sources/${id}`);
+        return res.data;
+    },
+    async createDataSource(payload) {
+        const res = await axios.post(API_BASE + '/data-sources', payload);
+        return res.data;
+    },
+    async updateDataSource(id, payload) {
+        const res = await axios.put(`${API_BASE}/data-sources/${id}`, payload);
+        return res.data;
+    },
+    async deleteDataSource(id) {
+        await axios.delete(`${API_BASE}/data-sources/${id}`);
+    },
+    async testDataSource(payload) {
+        const res = await axios.post(API_BASE + '/data-sources/test', payload);
+        return res.data;
+    },
+    async testSavedDataSource(id, payload) {
+        const res = await axios.post(`${API_BASE}/data-sources/${id}/test`, payload);
+        return res.data;
+    },
     async getDataSourceCatalog() {
         const res = await axios.get(API_BASE + '/data-sources/catalog');
         return res.data;
@@ -247,8 +274,8 @@ const SAMPLE_DAGS = {
         jobName: '示例：Datagen → CSV',
         parallelism: 1,
         nodes: [
-            { id: 'dg_1', type: 'datagen_input', label: 'Datagen', params: { rowsPerSecond: '50', fieldsConfig: '[{"name":"id","type":"INT"},{"name":"name","type":"STRING"},{"name":"score","type":"DOUBLE"}]' }, x: 120, y: 140 },
-            { id: 'csv_out_1', type: 'csv_output', label: 'CSV 输出', params: { path: DEFAULT_OUTPUT_DIR + '/sample_output.csv', hasHeader: 'true', delimiter: ',' }, x: 430, y: 140 }
+            { id: 'dg_1', type: 'datagen_input', label: 'Datagen', params: { rowsPerSecond: 50, fieldsConfig: '[{"name":"id","type":"INT"},{"name":"name","type":"STRING"},{"name":"score","type":"DOUBLE"}]' }, x: 120, y: 140 },
+            { id: 'csv_out_1', type: 'csv_output', label: 'CSV 输出', params: { path: DEFAULT_OUTPUT_DIR + '/sample_output.csv', hasHeader: true, delimiter: ',' }, x: 430, y: 140 }
         ],
         edges: [ { id: 'e1', source: 'dg_1', target: 'csv_out_1' } ]
     },
@@ -256,7 +283,7 @@ const SAMPLE_DAGS = {
         jobName: '示例：Datagen → JSON',
         parallelism: 1,
         nodes: [
-            { id: 'dg_1', type: 'datagen_input', label: 'Datagen', params: { rowsPerSecond: '50', fieldsConfig: '[{"name":"id","type":"INT"},{"name":"name","type":"STRING"}]' }, x: 120, y: 140 },
+            { id: 'dg_1', type: 'datagen_input', label: 'Datagen', params: { rowsPerSecond: 50, fieldsConfig: '[{"name":"id","type":"INT"},{"name":"name","type":"STRING"}]' }, x: 120, y: 140 },
             { id: 'json_out_1', type: 'json_output', label: 'JSON 输出', params: { path: DEFAULT_OUTPUT_DIR + '/sample_output.json', mode: 'lines' }, x: 430, y: 140 }
         ],
         edges: [ { id: 'e1', source: 'dg_1', target: 'json_out_1' } ]
@@ -265,9 +292,9 @@ const SAMPLE_DAGS = {
         jobName: '示例：CSV → 字段过滤 → CSV',
         parallelism: 1,
         nodes: [
-            { id: 'csv_in_1', type: 'csv_input', label: 'CSV 输入', params: { path: '/data/sales.csv', hasHeader: 'true', delimiter: ',' }, x: 120, y: 140 },
+            { id: 'csv_in_1', type: 'csv_input', label: 'CSV 输入', params: { path: '/data/sales.csv', hasHeader: true, delimiter: ',' }, x: 120, y: 140 },
             { id: 'ff_1', type: 'field_filter', label: '字段过滤', params: { fields: 'sale_id,amount' }, x: 330, y: 140 },
-            { id: 'csv_out_1', type: 'csv_output', label: 'CSV 输出', params: { path: DEFAULT_OUTPUT_DIR + '/sample_filtered.csv', hasHeader: 'true', delimiter: ',' }, x: 540, y: 140 }
+            { id: 'csv_out_1', type: 'csv_output', label: 'CSV 输出', params: { path: DEFAULT_OUTPUT_DIR + '/sample_filtered.csv', hasHeader: true, delimiter: ',' }, x: 540, y: 140 }
         ],
         edges: [ { id: 'e1', source: 'csv_in_1', target: 'ff_1' }, { id: 'e2', source: 'ff_1', target: 'csv_out_1' } ]
     }
@@ -362,6 +389,7 @@ const app = createApp({
         // ===== 首期门户视图 =====
         const workbench = ref({ statusCounts: {}, unreadAlerts: 0, recentJobs: [] });
         const workbenchLoading = ref(false);
+        const workbenchError = ref('');
         const templates = ref(BUILTIN_TEMPLATES);
         const templateKeyword = ref('');
         const templateCategory = ref('');
@@ -372,18 +400,75 @@ const app = createApp({
             return (!templateCategory.value || item.category === templateCategory.value)
                 && (!keyword || [item.title, item.description, item.category, ...(item.tags || [])].join(' ').toLowerCase().includes(keyword));
         }));
+        const DATA_SOURCE_TYPES = ['MYSQL', 'POSTGRESQL', 'ORACLE', 'KAFKA', 'REDIS', 'HDFS'];
+        const DATA_SOURCE_DEFAULTS = {
+            MYSQL: { host: '', port: 3306, database: '', parameters: '' },
+            POSTGRESQL: { host: '', port: 5432, database: '', schema: 'public', sslMode: 'prefer' },
+            ORACLE: { host: '', port: 1521, serviceName: '', schema: '' },
+            KAFKA: { bootstrapServers: '', securityProtocol: 'PLAINTEXT', saslMechanism: 'PLAIN' },
+            REDIS: { host: '', port: 6379, database: 0, ssl: false },
+            HDFS: { uri: '', user: '', testPath: '/' }
+        };
+        const savedDataSources = ref([]);
         const dataSourceCatalog = ref({ connectors: [], assets: [] });
-        const dataSourcesLoading = ref(false);
+        const savedDataSourcesLoading = ref(false);
+        const catalogLoading = ref(false);
+        const dataSourcesLoading = computed(() => savedDataSourcesLoading.value || catalogLoading.value);
+        const savedDataSourcesError = ref('');
+        const catalogError = ref('');
+        const dataSourcesError = computed(() => savedDataSourcesError.value || catalogError.value);
+        const dataSourceKeyword = ref('');
+        const dataSourceTypeFilter = ref('');
+        const filteredDataSources = computed(() => {
+            const keyword = dataSourceKeyword.value.trim().toLowerCase();
+            return savedDataSources.value.filter(item => (!dataSourceTypeFilter.value || item.type === dataSourceTypeFilter.value)
+                && (!keyword || [item.name, item.description, dataSourceAddress(item)].join(' ').toLowerCase().includes(keyword)));
+        });
+        const NODE_DATA_SOURCE_TYPES = {
+            mysql_input: 'MYSQL', mysql_output: 'MYSQL',
+            pg_input: 'POSTGRESQL', pg_output: 'POSTGRESQL',
+            oracle_input: 'ORACLE', oracle_output: 'ORACLE',
+            kafka_input: 'KAFKA', kafka_output: 'KAFKA',
+            hdfs_input: 'HDFS', hdfs_output: 'HDFS'
+        };
+        const nodeDataSourceOptions = computed(() => {
+            const node = selectedNode.value;
+            const type = node && node.getData ? NODE_DATA_SOURCE_TYPES[node.getData()?.type] : null;
+            if (!type) return [];
+            return savedDataSources.value.filter(item => item.type === type && item.enabled);
+        });
+        const dataSourceDialogVisible = ref(false);
+        const dataSourceSaving = ref(false);
+        const dataSourceTesting = ref(false);
+        const dataSourceTestResult = ref(null);
+        const dataSourceForm = reactive({ id: null, name: '', type: 'MYSQL', description: '', enabled: true, config: {}, username: '', password: '', clearCredentials: false, credentialConfigured: false, version: null });
         const adminOverview = ref({});
         const adminOverviewLoading = ref(false);
+        const adminOverviewError = ref('');
+        const adminMetricCards = computed(() => [
+            { key: 'totalJobs', label: '作业总数', value: adminOverview.value.totalJobs ?? 0 },
+            { key: 'onlineJobs', label: '上线作业', value: adminOverview.value.onlineJobs ?? 0 },
+            { key: 'totalUsers', label: '用户总数', value: adminOverview.value.totalUsers ?? 0 },
+            { key: 'unreadAlerts', label: '未读告警', value: adminOverview.value.unreadAlerts ?? 0 }
+        ]);
         const clusterHealth = ref({});
         const clusterLoading = ref(false);
+        const clusterError = ref('');
+        const slotUsageText = computed(() => {
+            const total = Number(clusterHealth.value.slotsTotal || 0);
+            const available = Number(clusterHealth.value.slotsAvailable || 0);
+            if (!total) return '0 / 0（0%）';
+            const used = Math.max(0, total - available);
+            return `${used} / ${total}（${Math.round(used * 100 / total)}%）`;
+        });
         const clusterLastUpdated = ref('');
         const timelineVisible = ref(false);
         const timelineLoading = ref(false);
+        const timelineError = ref('');
         const timelineScope = ref('ALL');
         const timelineJob = ref(null);
         const timelineEvents = ref([]);
+        let timelineLoadSeq = 0;
         const preflightVisible = ref(false);
         const preflightResult = ref({ errors: [], warnings: [] });
 
@@ -480,6 +565,12 @@ const app = createApp({
             const container = document.getElementById('dag-canvas');
             if (!container) return;
 
+            // 画布所在视图可能处于 v-show 隐藏状态（例如登录后默认停在工作台），
+            // 此时 clientHeight 为 0。X6 会把尺寸写成内联样式（width/height: 0px）
+            // 永久覆盖 flex 布局，导致画布高度为 0、无法拖拽连线。
+            // 因此隐藏状态下直接跳过，等切到画布视图（watch currentView）再初始化。
+            if (container.clientWidth === 0 || container.clientHeight === 0) return;
+
             graph = new X6.Graph({
                 container,
                 width: container.clientWidth,
@@ -515,8 +606,14 @@ const app = createApp({
             graph.on('node:click', ({ node }) => {
                 selectedNode.value = node;
                 const data = node.getData() || {};
-                nodeParams.value = { ...(data.params || {}) };
-                nodeParamSchema.value = data.paramSchema || {};
+                const schema = data.paramSchema || {};
+                const params = { ...(data.params || {}) };
+                // 未保存过的可选参数（如含默认值的开关）用 schema 默认值兜底，避免表单空值
+                for (const [key, prop] of Object.entries(schema.properties || {})) {
+                    if (params[key] === undefined && prop.default !== undefined) params[key] = prop.default;
+                }
+                nodeParams.value = params;
+                nodeParamSchema.value = schema;
             });
 
             // 点击空白取消选中
@@ -808,13 +905,26 @@ const app = createApp({
             ElMessage.info('已退出登录');
         }
 
+        function getErrorMessage(err, fallback = '请求失败') {
+            return err?.response?.data?.error || err?.response?.data?.message || err?.message || fallback;
+        }
+        function preflightFailure(message) {
+            const error = new Error(message);
+            error.preflightOnly = true;
+            return error;
+        }
+
         async function loadWorkbench() {
             workbenchLoading.value = true;
+            workbenchError.value = '';
             try { workbench.value = await api.getWorkbench(); }
-            catch (err) { ElMessage.error('工作台加载失败: ' + (err.response?.data?.message || err.message)); }
+            catch (err) { workbenchError.value = '工作台加载失败：' + getErrorMessage(err); }
             finally { workbenchLoading.value = false; }
         }
         function openTemplatePreview(item) { templatePreview.value = item; templatePreviewVisible.value = true; }
+        function templateNodeCount(item, category) {
+            return (item?.dag?.nodes || []).filter(node => category === 'input' ? node.type.endsWith('_input') : node.type.endsWith('_output')).length;
+        }
         function cloneTemplateDag(item) {
             const dag = JSON.parse(JSON.stringify(item.dag));
             const stamp = Date.now().toString(36);
@@ -830,6 +940,16 @@ const app = createApp({
             return dag;
         }
         async function useTemplate(item) {
+            if (!item) return;
+            const hasCanvasContent = !!(graph && graph.getNodes && graph.getNodes().length);
+            if (hasCanvasContent) {
+                try {
+                    await ElMessageBox.confirm('当前画布已有内容，使用模板将覆盖当前画布。未保存内容仍会保留到您确认前，是否继续？', '确认使用模板', { type: 'warning', confirmButtonText: '覆盖并使用', cancelButtonText: '保留当前画布' });
+                } catch (_) {
+                    ElMessage.info('已保留当前画布，可保存后再使用模板');
+                    return;
+                }
+            }
             const dag = cloneTemplateDag(item);
             currentJobId = null;
             currentJobName.value = '';
@@ -839,44 +959,209 @@ const app = createApp({
             templatePreviewVisible.value = false;
             await loadDagToCanvas(dag);
         }
-        async function loadDataSources() {
-            dataSourcesLoading.value = true;
+        function assetDisplayName(asset) {
+            return asset.path || [asset.url, asset.table].filter(Boolean).join(' · ') || [asset.bootstrapServers, asset.topic].filter(Boolean).join(' · ') || asset.nodeId || '-';
+        }
+        async function openJobDetailById(id) {
+            try {
+                const row = jobs.value.find(job => job.id === id) || await api.getJob(id);
+                openJobDetail(row);
+            } catch (err) {
+                ElMessage.error('关联作业加载失败：' + getErrorMessage(err));
+            }
+        }
+        function dataSourceAddress(item) {
+            const config = item?.config || {};
+            if (item?.type === 'KAFKA') return config.bootstrapServers || '-';
+            if (item?.type === 'HDFS') return config.uri || '-';
+            const host = config.host || '-';
+            const port = config.port ? `:${config.port}` : '';
+            const suffix = item?.type === 'ORACLE' ? config.serviceName : config.database;
+            return `${host}${port}${suffix ? '/' + suffix : ''}`;
+        }
+        function resetDataSourceForm(type = 'MYSQL') {
+            Object.assign(dataSourceForm, { id: null, name: '', type, description: '', enabled: true, config: { ...DATA_SOURCE_DEFAULTS[type] }, username: '', password: '', clearCredentials: false, credentialConfigured: false, version: null });
+            dataSourceTestResult.value = null;
+        }
+        function onDataSourceTypeChange(type) {
+            dataSourceForm.config = { ...DATA_SOURCE_DEFAULTS[type] };
+            dataSourceForm.username = '';
+            dataSourceForm.password = '';
+            dataSourceForm.clearCredentials = false;
+            dataSourceTestResult.value = null;
+        }
+        function openCreateDataSource() {
+            resetDataSourceForm();
+            dataSourceDialogVisible.value = true;
+        }
+        async function openEditDataSource(row) {
+            dataSourceTestResult.value = null;
+            try {
+                const item = await api.getDataSource(row.id);
+                Object.assign(dataSourceForm, {
+                    id: item.id, name: item.name || '', type: item.type, description: item.description || '', enabled: item.enabled !== false,
+                    config: { ...DATA_SOURCE_DEFAULTS[item.type], ...(item.config || {}) }, username: '', password: '', clearCredentials: false,
+                    credentialConfigured: !!item.credentialConfigured, version: item.version
+                });
+                dataSourceDialogVisible.value = true;
+            } catch (err) { ElMessage.error('数据源详情加载失败：' + getErrorMessage(err)); }
+        }
+        function validateDataSourceForm() {
+            const f = dataSourceForm;
+            if (!f.name.trim()) return '请输入连接名称';
+            const c = f.config;
+            if (['MYSQL', 'POSTGRESQL', 'ORACLE', 'REDIS'].includes(f.type)) {
+                if (!String(c.host || '').trim()) return '请输入主机地址';
+                const port = Number(c.port);
+                if (!Number.isInteger(port) || port < 1 || port > 65535) return '端口须为 1–65535 的整数';
+            }
+            if (['MYSQL', 'POSTGRESQL'].includes(f.type) && !String(c.database || '').trim()) return '请输入数据库名';
+            if (f.type === 'ORACLE' && !String(c.serviceName || '').trim()) return '请输入服务名';
+            if (f.type === 'KAFKA' && !String(c.bootstrapServers || '').trim()) return '请输入 Bootstrap Servers';
+            if (f.type === 'HDFS' && !/^hdfs:\/\//i.test(String(c.uri || '').trim())) return 'HDFS URI 须以 hdfs:// 开头';
+            return '';
+        }
+        function buildDataSourcePayload() {
+            return {
+                name: dataSourceForm.name.trim(), type: dataSourceForm.type, description: dataSourceForm.description.trim(), enabled: dataSourceForm.enabled,
+                config: { ...dataSourceForm.config },
+                credentials: { username: dataSourceForm.username.trim(), password: dataSourceForm.password },
+                clearCredentials: !!dataSourceForm.clearCredentials,
+                version: dataSourceForm.version
+            };
+        }
+        async function saveDataSource() {
+            const error = validateDataSourceForm();
+            if (error) { ElMessage.warning(error); return; }
+            dataSourceSaving.value = true;
+            try {
+                const payload = buildDataSourcePayload();
+                if (dataSourceForm.id) await api.updateDataSource(dataSourceForm.id, payload);
+                else await api.createDataSource(payload);
+                ElMessage.success(dataSourceForm.id ? '数据源已更新' : '数据源已创建');
+                dataSourceDialogVisible.value = false;
+                await loadSavedDataSources();
+            } catch (err) { ElMessage.error('保存失败：' + getErrorMessage(err)); }
+            finally { dataSourceSaving.value = false; }
+        }
+        async function testDataSourceConnection() {
+            const error = validateDataSourceForm();
+            if (error) { ElMessage.warning(error); return; }
+            dataSourceTesting.value = true;
+            dataSourceTestResult.value = null;
+            try {
+                const payload = buildDataSourcePayload();
+                dataSourceTestResult.value = dataSourceForm.id
+                    ? await api.testSavedDataSource(dataSourceForm.id, payload)
+                    : await api.testDataSource(payload);
+                if (!dataSourceTestResult.value.success) ElMessage.error(dataSourceTestResult.value.message || '连接测试失败');
+            } catch (err) {
+                dataSourceTestResult.value = { success: false, message: getErrorMessage(err) };
+            } finally { dataSourceTesting.value = false; }
+        }
+        async function testSavedDataSource(row) {
+            dataSourceTesting.value = true;
+            try {
+                const result = await api.testSavedDataSource(row.id, {});
+                const latency = result.latencyMs == null ? '' : `（${result.latencyMs} ms）`;
+                result.success ? ElMessage.success((result.message || '连接成功') + latency) : ElMessage.error(result.message || '连接失败');
+            } catch (err) { ElMessage.error('连接测试失败：' + getErrorMessage(err)); }
+            finally { dataSourceTesting.value = false; }
+        }
+        async function deleteDataSource(row) {
+            try {
+                await ElMessageBox.confirm(`确认删除数据源“${row.name}”吗？`, '删除数据源', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' });
+                await api.deleteDataSource(row.id);
+                ElMessage.success('数据源已删除');
+                await loadSavedDataSources();
+            } catch (err) {
+                if (err === 'cancel' || err === 'close') return;
+                const prefix = err?.response?.status === 409 ? '数据源仍被引用：' : '删除失败：';
+                ElMessage.error(prefix + getErrorMessage(err));
+            }
+        }
+        async function loadSavedDataSources() {
+            savedDataSourcesLoading.value = true;
+            savedDataSourcesError.value = '';
+            try { savedDataSources.value = await api.getDataSources(); }
+            catch (err) { savedDataSourcesError.value = '已保存连接加载失败：' + getErrorMessage(err); }
+            finally { savedDataSourcesLoading.value = false; }
+        }
+        async function loadDataSourceCatalog() {
+            catalogLoading.value = true;
+            catalogError.value = '';
             try { dataSourceCatalog.value = await api.getDataSourceCatalog(); }
-            catch (err) { ElMessage.error('数据源中心加载失败: ' + (err.response?.data?.message || err.message)); }
-            finally { dataSourcesLoading.value = false; }
+            catch (err) { catalogError.value = '连接器与内联资产加载失败：' + getErrorMessage(err); }
+            finally { catalogLoading.value = false; }
+        }
+        async function loadDataSources() {
+            await Promise.allSettled([loadSavedDataSources(), loadDataSourceCatalog()]);
         }
         async function loadAdminOverview() {
-            if (user.value?.role !== 'ADMIN') return;
+            if (user.value?.role !== 'ADMIN') { currentView.value = 'workbench'; ElMessage.warning('运营总览仅管理员可访问，已返回工作台'); return; }
             adminOverviewLoading.value = true;
+            adminOverviewError.value = '';
             try { adminOverview.value = await api.getAdminOverview(); }
-            catch (err) { ElMessage.error('管理总览加载失败: ' + (err.response?.data?.message || err.message)); }
-            finally { adminOverviewLoading.value = false; }
+            catch (err) {
+                if (err.response?.status === 403) { currentView.value = 'workbench'; ElMessage.warning('无权访问运营总览，已返回工作台'); }
+                else adminOverviewError.value = '管理总览加载失败：' + getErrorMessage(err);
+            } finally { adminOverviewLoading.value = false; }
         }
         async function loadClusterHealth() {
+            if (clusterLoading.value) return;
             clusterLoading.value = true;
-            try { clusterHealth.value = await api.getClusterHealth(); clusterLastUpdated.value = new Date().toLocaleTimeString('zh-CN'); }
-            catch (err) { ElMessage.error('集群健康加载失败: ' + (err.response?.data?.message || err.message)); }
+            clusterError.value = '';
+            try { clusterHealth.value = await api.getClusterHealth(); clusterLastUpdated.value = clusterHealth.value.checkedAt || ''; }
+            catch (err) { clusterError.value = '集群健康加载失败：' + getErrorMessage(err); }
             finally { clusterLoading.value = false; }
         }
         function startClusterPolling() { stopClusterPolling(); loadClusterHealth(); clusterTimer = setInterval(loadClusterHealth, 15000); }
         function stopClusterPolling() { if (clusterTimer) { clearInterval(clusterTimer); clusterTimer = null; } }
         async function loadTimeline() {
             if (!timelineJob.value) return;
+            const seq = ++timelineLoadSeq;
+            timelineEvents.value = [];
+            timelineError.value = '';
             timelineLoading.value = true;
             try {
                 const data = await api.getJobTimeline(timelineJob.value.id, timelineScope.value);
-                timelineEvents.value = Array.isArray(data) ? data : (data.events || data.content || []);
-            } catch (err) { ElMessage.error('运行时间线加载失败: ' + (err.response?.data?.message || err.message)); }
-            finally { timelineLoading.value = false; }
+                if (seq === timelineLoadSeq) timelineEvents.value = Array.isArray(data) ? data : (data.events || data.content || []);
+            } catch (err) {
+                if (seq === timelineLoadSeq) timelineError.value = '运行时间线加载失败：' + getErrorMessage(err);
+            } finally { if (seq === timelineLoadSeq) timelineLoading.value = false; }
         }
-        function openTimeline(row) { timelineJob.value = row; timelineScope.value = 'ALL'; timelineVisible.value = true; loadTimeline(); }
-        function eventTagType(level) { return level === 'ERROR' ? 'danger' : level === 'WARN' ? 'warning' : level === 'INFO' ? 'success' : 'info'; }
+        function openTimeline(row) { timelineEvents.value = []; timelineError.value = ''; timelineJob.value = row; timelineScope.value = 'ALL'; timelineVisible.value = true; loadTimeline(); }
+        function clearTimeline() { timelineLoadSeq++; timelineEvents.value = []; timelineError.value = ''; timelineJob.value = null; timelineScope.value = 'ALL'; timelineLoading.value = false; }
+        function eventTagType(level) {
+            const value = String(level || '').toUpperCase();
+            if (['ERROR', 'FAILED', 'FAILURE', 'FATAL', 'CRITICAL'].some(item => value.includes(item))) return 'danger';
+            if (['WARN', 'WARNING', 'BLOCKED', 'CANCELLED'].some(item => value.includes(item))) return 'warning';
+            if (['INFO', 'SUCCESS', 'COMPLETED', 'RUNNING', 'ONLINE', 'SUBMITTED'].some(item => value.includes(item))) return 'success';
+            return 'info';
+        }
+        function eventIcon(event) {
+            const value = `${event?.level || ''} ${event?.type || ''} ${event?.status || ''}`.toUpperCase();
+            if (value.includes('ERROR') || value.includes('FAIL')) return 'CircleCloseFilled';
+            if (value.includes('WARN') || value.includes('BLOCK') || value.includes('CANCEL')) return 'WarningFilled';
+            if (value.includes('COMPLETE') || value.includes('SUCCESS')) return 'CircleCheckFilled';
+            if (value.includes('SUBMIT') || value.includes('RUNNING')) return 'VideoPlay';
+            if (value.includes('SCHEDULE')) return 'Timer';
+            if (value.includes('ALERT')) return 'BellFilled';
+            return 'InfoFilled';
+        }
         async function runPreflight(id) {
-            const result = await api.getPreflight(id);
-            preflightResult.value = { errors: result.errors || [], warnings: result.warnings || [] };
+            let result;
+            try { result = await api.getPreflight(id); }
+            catch (err) {
+                preflightResult.value = { errors: [], warnings: [], serviceError: '提交前检查服务不可用：' + getErrorMessage(err) };
+                preflightVisible.value = true;
+                await nextTick();
+                throw preflightFailure('提交前检查服务不可用，已阻止提交');
+            }
+            preflightResult.value = { errors: result.errors || [], warnings: result.warnings || [], serviceError: '' };
             preflightVisible.value = true;
             await nextTick();
-            if (preflightResult.value.errors.length) throw new Error('提交前检查发现错误，请修复后重试');
+            if (preflightResult.value.errors.length) throw preflightFailure('提交前检查发现错误，请修复后重试');
             if (preflightResult.value.warnings.length) {
                 await ElMessageBox.confirm('提交前检查存在警告，是否继续提交？', 'Preflight 检查', { type: 'warning' });
             }
@@ -968,6 +1253,12 @@ const app = createApp({
         function bpClass(level) { if (!level) return ''; const l = String(level).toLowerCase(); return l === 'ok' ? 'bp-ok' : l === 'low' ? 'bp-low' : l === 'high' ? 'bp-high' : ''; }
         function cpText(cp) { if (!cp || cp.error) return 'N/A'; if (!cp.lastCompletedTs) return '尚未完成'; const d = new Date(cp.lastCompletedTs); return '完成 ' + d.toLocaleTimeString() + ' · ' + Math.round(cp.endToEndDuration || 0) + 'ms'; }
         function fmtDuration(ms) { if (!ms || ms < 0) return '-'; if (ms < 1000) return ms + 'ms'; const sec = Math.floor(ms / 1000); const h = Math.floor(sec / 3600); const m = Math.floor((sec % 3600) / 60); const s0 = sec % 60; return h > 0 ? h + 'h' + m + 'm' : m > 0 ? m + 'm' + s0 + 's' : s0 + 's'; }
+        // 后端返回 ISO 时间（含 T 与微秒），列表里展示到分钟即可
+        function fmtDateTime(value) {
+            if (!value) return '-';
+            const m = String(value).match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+            return m ? `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}` : String(value);
+        }
         function statusTagType(status) { const s = String(status || '').toUpperCase(); if (s === 'COMPLETED') return 'success'; if (s === 'FAILED') return 'danger'; if (s === 'RUNNING' || s === 'SUBMITTED') return 'warning'; return 'info'; }
         const TREND_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
         function initTrendChart() {
@@ -1624,9 +1915,10 @@ const app = createApp({
                 jobLogs.value = await api.getLogs(currentJobId);
                 showLogs.value = true;
             } catch (err) {
-                if (err === 'cancel' || err === 'close') return;
-                ElMessage.error('提交失败: ' + (err.response?.data?.message || err.message));
-                if (currentJobId) { jobErrors.value[currentJobId] = err.response?.data?.message || err.message; }
+                if (err === 'cancel' || err === 'close' || err?.preflightOnly) return;
+                const message = getErrorMessage(err);
+                ElMessage.error('提交失败: ' + message);
+                if (currentJobId) { jobErrors.value[currentJobId] = message; }
                 try {
                     if (currentJobId) {
                         jobLogs.value = await api.getLogs(currentJobId);
@@ -1879,12 +2171,47 @@ const app = createApp({
             if (!selectedNode.value) return;
             const node = selectedNode.value;
             const data = node.getData() || {};
+            const schemaProps = nodeParamSchema.value?.properties || {};
             data.params = {};
             for (const [k, v] of Object.entries(nodeParams.value)) {
+                if (k === 'dataSourceId') {
+                    // 保持数值类型，后端按 Long 解析；清空时移除该键
+                    if (v === null || v === undefined || v === '') continue;
+                    data.params[k] = v;
+                    continue;
+                }
+                const type = schemaProps[k]?.type;
+                if (type === 'boolean') {
+                    // 统一存布尔，避免与翻译层 toString() 取值产生「true」/true 混用
+                    data.params[k] = v === true || String(v).trim() === 'true';
+                    continue;
+                }
+                if (type === 'number' || type === 'integer') {
+                    // 开关类参数在表单中隐藏时可能留空，空值不写入以免触发类型校验
+                    if (v === null || v === undefined || String(v).trim() === '') continue;
+                    const num = Number(String(v).trim());
+                    data.params[k] = Number.isNaN(num) ? v : num;
+                    continue;
+                }
                 data.params[k] = typeof v === 'string' ? v.trim() : v;
             }
             node.setData(data);
             ElMessage.success('参数已应用');
+        }
+
+        // 参数控件代理：按 schema 类型归一化，兼容历史数据里存成字符串的开关/数值
+        function paramProxy(key, param) {
+            const value = nodeParams.value[key];
+            if (value === undefined || value === null) return param.default;
+            if (param.type === 'boolean') return value === true || String(value).trim() === 'true';
+            if (param.type === 'number' || param.type === 'integer') {
+                const num = Number(String(value).trim());
+                return Number.isNaN(num) ? undefined : num;
+            }
+            return value;
+        }
+        function setParam(key, value) {
+            nodeParams.value[key] = value;
         }
 
         // 预览节点数据（读取输入/输出文件前 N 行）
@@ -1957,9 +2284,10 @@ const app = createApp({
                 ElMessage.success('作业已提交');
                 await loadJobs();
             } catch (err) {
-                if (err === 'cancel' || err === 'close') return;
-                ElMessage.error('提交失败: ' + (err.response?.data?.message || err.message));
-                jobErrors.value[id] = err.response?.data?.message || err.message;
+                if (err === 'cancel' || err === 'close' || err?.preflightOnly) return;
+                const message = getErrorMessage(err);
+                ElMessage.error('提交失败: ' + message);
+                jobErrors.value[id] = message;
             }
         }
 
@@ -2531,6 +2859,18 @@ const app = createApp({
             if (v !== 'cluster') stopClusterPolling();
 
             if (v === 'workbench') { loadWorkbench(); }
+            else if (v === 'canvas') {
+                // 画布此前可能处于隐藏状态（尺寸为 0），切回来需重新初始化或适配真实尺寸
+                nextTick(() => {
+                    if (!graph) { initGraph(); setupDropHandler(); }
+                    else {
+                        const el = document.getElementById('dag-canvas');
+                        if (el && el.clientWidth > 0 && el.clientHeight > 0) {
+                            graph.resize(el.clientWidth, el.clientHeight);
+                        }
+                    }
+                });
+            }
             else if (v === 'data-sources') { loadDataSources(); }
             else if (v === 'admin-overview') { loadAdminOverview(); }
             else if (v === 'cluster') { startClusterPolling(); }
@@ -2581,16 +2921,19 @@ const app = createApp({
 
         return {
             currentView, controls, jobs, selectedJobs, batchOperating, jobSearch, jobStatusFilter, filteredJobs, jobName, parallelism, currentJobName,
-            workbench, workbenchLoading, loadWorkbench, templates, filteredTemplates, templateKeyword, templateCategory, templatePreviewVisible, templatePreview, openTemplatePreview, useTemplate,
-            dataSourceCatalog, dataSourcesLoading, loadDataSources, adminOverview, adminOverviewLoading, loadAdminOverview,
-            clusterHealth, clusterLoading, clusterLastUpdated, loadClusterHealth,
-            timelineVisible, timelineLoading, timelineScope, timelineJob, timelineEvents, openTimeline, loadTimeline, eventTagType,
+            workbench, workbenchLoading, workbenchError, loadWorkbench, templates, filteredTemplates, templateKeyword, templateCategory, templatePreviewVisible, templatePreview, openTemplatePreview, templateNodeCount, useTemplate,
+            DATA_SOURCE_TYPES, savedDataSources, filteredDataSources, nodeDataSourceOptions, dataSourceCatalog, dataSourcesLoading, savedDataSourcesLoading, catalogLoading, savedDataSourcesError, catalogError, dataSourcesError,
+            dataSourceKeyword, dataSourceTypeFilter, dataSourceDialogVisible, dataSourceSaving, dataSourceTesting, dataSourceTestResult, dataSourceForm,
+            loadDataSources, loadSavedDataSources, loadDataSourceCatalog, dataSourceAddress, assetDisplayName, openJobDetailById, openCreateDataSource, openEditDataSource, onDataSourceTypeChange, saveDataSource, testDataSourceConnection, testSavedDataSource, deleteDataSource,
+            adminOverview, adminOverviewLoading, adminOverviewError, adminMetricCards, loadAdminOverview,
+            clusterHealth, clusterLoading, clusterError, clusterLastUpdated, slotUsageText, loadClusterHealth,
+            timelineVisible, timelineLoading, timelineError, timelineScope, timelineJob, timelineEvents, openTimeline, loadTimeline, clearTimeline, eventTagType, eventIcon,
             preflightVisible, preflightResult,
             controlTab, saving, submitting, showHelp, showLogs, jobLogs,
             selectedNode, nodeParams, nodeParamSchema, jobErrors,
             previewVisible, previewLoading, previewData, previewRows, previewNode,
             controlsByCategory, onDragStart, saveDag, submitJob,
-            exportDag, importDagTrigger, importDag, clearCanvas, newCanvas, applyParams,
+            exportDag, importDagTrigger, importDag, clearCanvas, newCanvas, applyParams, paramProxy, setParam,
             openJob, submitJobById, deleteJob, deleteJobFromDetail, viewLogs, statusTag, undoDag, redoDag, canUndo, canRedo,
             openJobDetail, onJobMore, jobCols, jobDetailVisible, jobDetailRow,
             onlineJobById, offlineJobById, onJobSelectionChange, batchChangeOnline, confirmBatchOnline,
@@ -2603,7 +2946,7 @@ const app = createApp({
             schedulePresets, scheduleNlText, scheduleCronHuman, applySchedulePreset, parseNlSchedule, cronToHuman,
             monitorJobs, monitorLoading, monitorError, monitorAutoRefresh, monitorAutoScale, monitorTrendMode, monitorLastUpdated, monitorStats, refreshMonitor,
             monitorTrends, monitorTrendUpdated, removeMonitorTrend, trendActionTop,
-            fmtNum, bpClass, cpText, fmtDuration, statusTagType,
+            fmtNum, bpClass, cpText, fmtDuration, fmtDateTime, statusTagType,
             user, canEdit, canViewAudit, authMode, loginUsername, loginPassword, loginError, loginLoading,
             registerUsername, registerDisplayName, registerPassword, registerPasswordConfirm, registerAgreed, registerError, registerLoading,
             login, register, switchAuthMode, logout, onlyMine, helpTab, openHelp,
@@ -2622,9 +2965,12 @@ const app = createApp({
 });
 
 // 注册 Element Icon 组件
+// index.html 是 DOM 模板，浏览器会把标签名小写化（<DataBoard /> 变成 <databoard>），
+// 只注册 PascalCase 名称会导致图标全部渲染失败，必须同时注册 kebab-case 别名。
+app.use(ElementPlus);
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
     app.component(key, component);
+    const kebab = key.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+    if (kebab !== key) app.component(kebab, component);
 }
-
-app.use(ElementPlus);
 app.mount('#app');

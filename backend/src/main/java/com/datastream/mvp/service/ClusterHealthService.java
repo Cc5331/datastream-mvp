@@ -2,6 +2,7 @@ package com.datastream.mvp.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -21,6 +22,7 @@ public class ClusterHealthService {
     private final HttpClient httpClient;
     private final Duration requestTimeout;
 
+    @Autowired
     public ClusterHealthService(@Value("${flink.cluster.host:localhost}") String host,
                                 @Value("${flink.cluster.port:8081}") int port,
                                 ObjectMapper objectMapper) {

@@ -52,7 +52,7 @@ flowchart LR
 - **智能诊断 Agent**：对失败作业一键诊断——本地规则引擎先命中 8 类高频错误（文件不存在、路径乱码、字段配置缺失、Kafka 不可用等），未命中自动调用 DeepSeek 归因，返回根因 / 关键证据 / 修复建议，部分参数可一键修正。
 - **企业工作台与模板中心**：登录后默认进入个人工作台，汇总作业状态、未读告警与最近作业；内置模板支持搜索、预览并安全复制为新画布。
 - **运行治理与管理总览**：作业详情可查看生命周期、日志、调度和告警聚合时间线；ADMIN 可查看用户、作业、告警运营总览，集群健康页展示 Flink 可用性、TaskManager、Slot 与作业状态。
-- **数据源资产目录与提交预检**：按当前用户权限汇总可用连接器和 DAG 已用文件/JDBC/Kafka/HDFS 资产（敏感参数不返回）；提交前确定性检查 DAG 结构、连通性、控件、必填参数与并行度。
+- **数据源管理与提交预检**：支持 MySQL / PostgreSQL / Oracle / Kafka / Redis / HDFS 六类连接的持久化 CRUD、测试连接、owner 隔离与 AES-GCM 凭据加密；同时保留连接器及 DAG 已用资产目录，所有响应不返回凭据。画布参数面板可下拉选择已保存数据源，节点只存 `dataSourceId` 与表名等资产级参数，连接地址与凭据由后端注入，未引用数据源的旧 DAG 保持原样。提交前确定性检查 DAG 结构、连通性、控件、必填参数与并行度。
 
 ## 二、快速启动
 
@@ -289,6 +289,10 @@ docker compose down -v         :: 停止并删除数据卷
 | GET | /api/dashboard/workbench | 当前用户可见作业、状态、告警与最近作业摘要 |
 | GET | /api/dashboard/admin-overview | 全平台用户、作业和告警运营摘要（仅 ADMIN） |
 | GET | /api/data-sources/catalog | 可用连接器与当前用户可见作业的已用资产目录 |
+| GET / POST | /api/data-sources | 查询或创建持久化数据源连接（写操作限 ADMIN/OPERATOR） |
+| GET / PUT / DELETE | /api/data-sources/{id} | 查看、修改或删除数据源连接（owner 隔离，ADMIN 可管理全量） |
+| POST | /api/data-sources/test | 测试未保存的数据源配置，不隐式保存 |
+| POST | /api/data-sources/{id}/test | 测试已保存连接，空密码沿用加密凭据 |
 | GET | /api/cluster/health | Flink 集群可用性、TaskManager、Slot 与作业状态摘要 |
 | GET | /api/audit | 审计分页检索，支持用户、操作、对象、IP 与时间范围组合筛选 |
 
@@ -394,7 +398,7 @@ python test-resources/benchmark.py
 
 完整报告见 `test-results/benchmark_report.md`。
 
-当前自动化回归基线：后端 Maven Reactor 共 **91** 个测试用例，前端 Node Test Runner 共 **14** 个测试用例。
+当前自动化回归基线：后端 Maven Reactor 共 **115** 个测试用例，前端 Node Test Runner 共 **28** 个测试用例。
 
 ## 十二、AI 智能化层（LLM Agent）
 
@@ -412,6 +416,7 @@ python test-resources/benchmark.py
 | DEEPSEEK_BASE_URL | 默认 `https://api.deepseek.com` |
 | DEEPSEEK_MODEL | 覆盖 `application.yml` 的默认模型（默认 `deepseek-v4-flash`）；前端「AI 服务商」里只能选 `AI_ALLOWED_MODELS` 白名单内的模型 |
 | AI_CONFIG_ENCRYPTION_KEY | AI 服务商 API Key 落盘加密密钥；不配置时自动使用 `backend/data/.ai_config_key` 本机密钥文件（二者都不进仓库） |
+| DATA_SOURCE_ENCRYPTION_KEY | 数据源连接凭据加密密钥；未配置时回退 `APP_CONFIG_ENCRYPTION_KEY` / `AI_CONFIG_ENCRYPTION_KEY` / `backend/data/.app_config_key` 本机密钥文件。生产环境务必显式注入，否则密钥文件丢失将导致已保存凭据无法解密 |
 | AI_LEGACY_ENCRYPTION_KEY | 可选，一次性迁移用：解密旧密钥加密的历史配置，解密后自动用新密钥重新加密落盘 |
 | H2_CONSOLE_ENABLED | 默认 `false`；置 `true` 才开启 H2 Web 控制台，且仅 ADMIN 可访问 |
 | CORS_ALLOWED_ORIGINS | 允许跨域访问 /api 的来源白名单，默认 `http://localhost:3000,http://127.0.0.1:3000` |

@@ -272,7 +272,9 @@ public class AgentService {
             String system = "你是数据流平台（Spring Boot + Flink）的故障诊断专家。"
                     + "根据给定的作业诊断数据包，输出故障归因 JSON，不要输出额外文字。格式："
                     + "{\"rootCause\":\"一句话根因\",\"evidence\":\"关键证据\",\"suggestions\":[\"建议1\",\"建议2\"],\"paramFixes\":{\"节点id\":{\"参数名\":\"修正值\"}}}"
-                    + "注意：paramFixes 只能修正 DAG 节点参数（如 path/url/table/username/password/topic/bootstrapServers），不要改节点类型；无法确定修正值时给空对象。";
+                    + "注意：paramFixes 只能修正 DAG 节点参数（如 path/url/table/username/password/topic/bootstrapServers），不要改节点类型；无法确定修正值时给空对象。"
+                    // 推理模型会为开放问题展开很长的思考，明确要求简短可显著降低 reasoning 消耗
+                    + "请直接依据 ERROR 日志定位最可能的根因，控制在 3 句以内，不要穷举所有可能性。";
             JsonNode resp = llmClient.chatJson(system, "诊断数据包：\n" + packet.toString(), model);
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("source", llmClient.providerName());

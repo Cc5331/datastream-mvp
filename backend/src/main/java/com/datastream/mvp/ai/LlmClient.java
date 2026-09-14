@@ -61,6 +61,14 @@ public class LlmClient {
     @Value("${app.ai.timeout-ms:60000}")
     private long timeoutMs;
 
+    /**
+     * 单次回复的 token 上限。推理模型（如 deepseek-flash）会先输出 reasoning_content，
+     * 实测一次诊断可消耗近 1500 个 reasoning token；预算过小会导致推理未完成、
+     * content 为空而被误判为「LLM 返回为空」。
+     */
+    @Value("${app.ai.max-tokens:8000}")
+    private int maxTokens;
+
     @Value("${app.ai.provider-file:data/ai_providers.json}")
     private String providerFile;
 
@@ -537,7 +545,7 @@ public class LlmClient {
             ObjectNode payload = objectMapper.createObjectNode();
             payload.put("model", selectedModel);
             payload.put("temperature", 0.2);
-            payload.put("max_tokens", 4000);
+            payload.put("max_tokens", maxTokens);
             payload.set("response_format", objectMapper.createObjectNode().put("type", "json_object"));
             ArrayNode messages = payload.putArray("messages");
             ObjectNode sys = messages.addObject();
@@ -561,21 +569,40 @@ public class LlmClient {
                         + truncate(resp.body(), 500));
             }
             JsonNode root = objectMapper.readTree(resp.body());
-            JsonNode content = root.path("choices").path(0).path("message").path("content");
-            if (content.isMissingNode() || content.asText().isBlank()) {
-                throw new IllegalStateException("LLM 返回为空: " + truncate(resp.body(), 500));
-            }
-            String text = content.asText().trim();
-            // 兼容返回内容中包裹了代码块的情况
-            if (text.startsWith("\u0060\u0060\u0060")) {
-                text = text.replaceAll("^\\s*\u0060\u0060\u0060(?:json)?\\s*", "").replaceAll("\\s*\u0060\u0060\u0060\\s*$", "");
-            }
-            return objectMapper.readTree(text);
+            return parseChatCompletion(root, selectedModel);
         } catch (IllegalStateException e) {
             throw e;
         } catch (Exception e) {
             throw new IllegalStateException("LLM 调用失败: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * 从 chat/completions 响应中取出可用的 JSON 结果。
+     * 推理模型（deepseek-flash 等）会把思考过程放在 reasoning_content，
+     * 正常应答仍在 content；若 content 为空且推理被 token 上限截断，
+     * 直接报「返回为空」会掩盖真实原因，因此这里给出可操作的提示。
+     */
+    JsonNode parseChatCompletion(JsonNode root, String model) {
+        JsonNode message = root.path("choices").path(0).path("message");
+        String text = message.path("content").asText("").trim();
+        if (text.isEmpty()) {
+            String reasoning = message.path("reasoning_content").asText("");
+            String finish = root.path("choices").path(0).path("finish_reason").asText("");
+            JsonNode usage = root.path("usage");
+            String hint = "length".equals(finish)
+                    ? "推理被 token 上限截断，请调大 app.ai.max-tokens（当前 " + maxTokens + "）"
+                    : "模型未返回 content" + (reasoning.isEmpty() ? "" : "，但返回了 " + reasoning.length() + " 字符推理内容");
+            throw new IllegalStateException("LLM 返回为空（模型 " + model + "，finish_reason=" + finish
+                    + "，completion_tokens=" + usage.path("completion_tokens").asInt(0)
+                    + "，reasoning_tokens=" + usage.path("completion_tokens_details").path("reasoning_tokens").asInt(0)
+                    + "）：" + hint);
+        }
+        // 兼容返回内容中包裹了代码块的情况
+        if (text.startsWith("\u0060\u0060\u0060")) {
+            text = text.replaceAll("^\\s*\u0060\u0060\u0060(?:json)?\\s*", "").replaceAll("\\s*\u0060\u0060\u0060\\s*$", "");
+        }
+        return parseJson(text);
     }
 
     private void applyProtocolConfig(String wireApi, String reasoningEffort, boolean storeResponses) {
@@ -640,7 +667,7 @@ public class LlmClient {
             ObjectNode payload = objectMapper.createObjectNode();
             payload.put("model", selectedModel);
             payload.put("temperature", 0.2);
-            payload.put("max_tokens", 4000);
+            payload.put("max_tokens", maxTokens);
             payload.set("response_format", objectMapper.createObjectNode().put("type", "json_object"));
             ArrayNode messages = payload.putArray("messages");
             ObjectNode sys = messages.addObject();
@@ -664,11 +691,7 @@ public class LlmClient {
                         + truncate(resp.body(), 500));
             }
             JsonNode root = objectMapper.readTree(resp.body());
-            JsonNode content = root.path("choices").path(0).path("message").path("content");
-            if (content.isMissingNode() || content.asText().isBlank()) {
-                throw new IllegalStateException("LLM 返回为空: " + truncate(resp.body(), 500));
-            }
-            return parseJson(content.asText().trim());
+            return parseChatCompletion(root, selectedModel);
         } catch (IllegalStateException e) {
             throw e;
         } catch (Exception e) {
