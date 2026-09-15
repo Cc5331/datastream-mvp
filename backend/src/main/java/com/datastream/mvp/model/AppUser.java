@@ -34,7 +34,24 @@ public class AppUser {
 
     private boolean enabled = true;
 
+    @Column(length = 255)
+    private String avatarKey;
+
+    @Column(length = 200)
+    private String signature;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 16)
+    private UserStatus statusPreference = UserStatus.ONLINE;
+
+    private LocalDateTime lastLoginAt;
+
+    private LocalDateTime lastSeenAt;
+
+    private LocalDateTime updatedAt;
+
     private LocalDateTime createdAt = LocalDateTime.now();
 
     public enum UserRole { ADMIN, OPERATOR, VIEWER }
+    public enum UserStatus { ONLINE, AWAY, BUSY, INVISIBLE, OFFLINE }
 }

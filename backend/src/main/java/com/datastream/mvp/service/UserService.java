@@ -3,6 +3,7 @@ package com.datastream.mvp.service;
 import com.datastream.mvp.model.AppUser;
 import com.datastream.mvp.repository.AppUserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -18,8 +19,26 @@ public class UserService {
     private final AppUserRepository userRepo;
     private final PasswordEncoder passwordEncoder;
 
+    @Value("${app.user-presence.timeout-ms:90000}")
+    private long presenceTimeoutMs = 90000;
+
+    @Value("${app.user-presence.minimum-write-interval-ms:20000}")
+    private long minimumPresenceWriteIntervalMs = 20000;
+
     public record UserView(Long id, String username, String displayName, String role,
                            boolean enabled, LocalDateTime createdAt) {}
+
+    public record ProfileView(Long id, String username, String displayName, String role,
+                              String signature, AppUser.UserStatus statusPreference,
+                              boolean present, AppUser.UserStatus publicStatus, LocalDateTime lastLoginAt,
+                              LocalDateTime lastSeenAt, LocalDateTime updatedAt,
+                              boolean avatarConfigured, long avatarVersion) {}
+
+    public record ProfileUpdateRequest(String displayName, String signature,
+                                       AppUser.UserStatus statusPreference) {}
+
+    public record UsernameUpdateRequest(String username, String currentPassword) {}
+    public record PasswordUpdateRequest(String currentPassword, String newPassword) {}
 
     public record CreateUserRequest(String username, String password, String displayName,
                                     AppUser.UserRole role, Boolean enabled) {}
@@ -59,6 +78,97 @@ public class UserService {
         user.setRole(nextRole);
         user.setEnabled(nextEnabled);
         return view(userRepo.save(user));
+    }
+
+    public ProfileView profile(Long id) {
+        return profileView(find(id));
+    }
+
+    @Transactional
+    public ProfileView updateProfile(Long id, ProfileUpdateRequest request) {
+        if (request == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "资料不能为空");
+        AppUser user = find(id);
+        user.setDisplayName(normalizeDisplayName(request.displayName(), user.getUsername()));
+        String signature = request.signature() == null ? "" : request.signature().trim();
+        if (signature.length() > 200) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "个性签名不能超过 200 个字符");
+        }
+        user.setSignature(signature);
+        user.setStatusPreference(request.statusPreference() == null ? status(user) : request.statusPreference());
+        user.setUpdatedAt(LocalDateTime.now());
+        return profileView(userRepo.save(user));
+    }
+
+    @Transactional
+    public ProfileView updateUsername(Long id, UsernameUpdateRequest request) {
+        if (request == null || request.currentPassword() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请输入当前密码");
+        }
+        AppUser user = find(id);
+        if (!passwordEncoder.matches(request.currentPassword(), user.getPasswordHash())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "当前密码错误");
+        }
+        String username = normalizeUsername(request.username());
+        if (!username.equals(user.getUsername()) && userRepo.existsByUsername(username)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "用户名已存在");
+        }
+        user.setUsername(username);
+        user.setUpdatedAt(LocalDateTime.now());
+        return profileView(userRepo.save(user));
+    }
+
+    @Transactional
+    public void updateOwnPassword(Long id, PasswordUpdateRequest request) {
+        if (request == null || request.currentPassword() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请输入当前密码");
+        }
+        AppUser user = find(id);
+        if (!passwordEncoder.matches(request.currentPassword(), user.getPasswordHash())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "当前密码错误");
+        }
+        validateStrongPassword(request.newPassword());
+        if (passwordEncoder.matches(request.newPassword(), user.getPasswordHash())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "新密码不能与当前密码相同");
+        }
+        user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
+        user.setUpdatedAt(LocalDateTime.now());
+        userRepo.save(user);
+    }
+
+    @Transactional
+    public ProfileView markLogin(Long id) {
+        AppUser user = find(id);
+        LocalDateTime now = LocalDateTime.now();
+        user.setLastLoginAt(now);
+        user.setLastSeenAt(now);
+        return profileView(userRepo.save(user));
+    }
+
+    @Transactional
+    public void heartbeat(Long id) {
+        LocalDateTime now = LocalDateTime.now();
+        userRepo.touchPresence(id, now, now.minusNanos(minimumPresenceWriteIntervalMs * 1_000_000));
+    }
+
+    @Transactional
+    public void markOffline(Long id) {
+        userRepo.clearPresence(id);
+    }
+
+    public record AvatarChange(String oldKey, ProfileView profile) {}
+
+    @Transactional
+    public synchronized AvatarChange replaceAvatar(Long id, String avatarKey) {
+        AppUser user = find(id);
+        String oldKey = user.getAvatarKey();
+        user.setAvatarKey(avatarKey);
+        user.setUpdatedAt(LocalDateTime.now());
+        userRepo.save(user);
+        return new AvatarChange(oldKey, profileView(user));
+    }
+
+    public AppUser requireUser(Long id) {
+        return find(id);
     }
 
     @Transactional
@@ -106,12 +216,37 @@ public class UserService {
         }
     }
 
+    private void validateStrongPassword(String password) {
+        validatePassword(password);
+        if (!password.matches(".*[A-Za-z].*") || !password.matches(".*\\d.*")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "新密码必须同时包含字母和数字");
+        }
+    }
+
     private String normalizeDisplayName(String displayName, String username) {
         String value = displayName == null ? "" : displayName.trim();
         if (value.length() > 64) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "显示名称不能超过 64 个字符");
         }
         return value.isEmpty() ? username : value;
+    }
+
+    private AppUser.UserStatus status(AppUser user) {
+        return user.getStatusPreference() == null ? AppUser.UserStatus.ONLINE : user.getStatusPreference();
+    }
+
+    private ProfileView profileView(AppUser user) {
+        boolean present = user.isEnabled() && user.getLastSeenAt() != null
+                && user.getLastSeenAt().isAfter(LocalDateTime.now().minusNanos(presenceTimeoutMs * 1_000_000));
+        AppUser.UserStatus preference = status(user);
+        AppUser.UserStatus publicStatus = present && preference != AppUser.UserStatus.INVISIBLE
+                && preference != AppUser.UserStatus.OFFLINE ? preference : AppUser.UserStatus.OFFLINE;
+        long avatarVersion = user.getUpdatedAt() == null ? 0
+                : user.getUpdatedAt().atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli();
+        return new ProfileView(user.getId(), user.getUsername(), user.getDisplayName(), user.getRole().name(),
+                user.getSignature() == null ? "" : user.getSignature(), preference, present, publicStatus,
+                user.getLastLoginAt(), user.getLastSeenAt(), user.getUpdatedAt(),
+                user.getAvatarKey() != null && !user.getAvatarKey().isBlank(), avatarVersion);
     }
 
     private UserView view(AppUser user) {

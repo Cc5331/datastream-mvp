@@ -109,6 +109,34 @@ const api = {
         const res = await axios.get(`${API_BASE}/auth/me`);
         return res.data;
     },
+    async updateProfile(profile) {
+        const res = await axios.put(`${API_BASE}/auth/me`, profile);
+        return res.data;
+    },
+    async updateUsername(username, currentPassword) {
+        const res = await axios.put(`${API_BASE}/auth/me/username`, { username, currentPassword });
+        return res.data;
+    },
+    async updatePassword(currentPassword, newPassword) {
+        await axios.put(`${API_BASE}/auth/me/password`, { currentPassword, newPassword });
+    },
+    async uploadAvatar(file) {
+        const form = new FormData();
+        form.append('file', file);
+        const res = await axios.post(`${API_BASE}/auth/me/avatar`, form);
+        return res.data;
+    },
+    async deleteAvatar() {
+        const res = await axios.delete(`${API_BASE}/auth/me/avatar`);
+        return res.data;
+    },
+    async getAvatar(version) {
+        const res = await axios.get(`${API_BASE}/auth/me/avatar`, { params: { v: version }, responseType: 'blob' });
+        return res.data;
+    },
+    async heartbeat() {
+        await axios.post(`${API_BASE}/auth/presence/heartbeat`);
+    },
     async logout() {
         await axios.post(`${API_BASE}/auth/logout`);
     },
@@ -527,6 +555,22 @@ const app = createApp({
         const registerError = ref('');
         const registerLoading = ref(false);
         const onlyMine = ref(false);
+        const profileVisible = ref(false);
+        const profileSaving = ref(false);
+        const credentialVisible = ref(false);
+        const credentialMode = ref('username');
+        const credentialSaving = ref(false);
+        const credentialForm = reactive({ username: '', currentPassword: '', newPassword: '', confirmPassword: '' });
+        const avatarUploading = ref(false);
+        const avatarObjectUrl = ref('');
+        const profileForm = reactive({ displayName: '', signature: '', statusPreference: 'ONLINE' });
+        const userInitial = computed(() => {
+            const name = user.value?.displayName || user.value?.username || '?';
+            return name.trim().charAt(0).toUpperCase();
+        });
+        const statusLabels = { ONLINE: '在线', AWAY: '离开', BUSY: '忙碌', INVISIBLE: '隐身', OFFLINE: '显示离线' };
+        const statusLabel = computed(() => statusLabels[user.value?.statusPreference] || '离线');
+        const publicStatusClass = computed(() => 'presence-' + String(user.value?.publicStatus || 'OFFLINE').toLowerCase());
         const canEdit = computed(() => !!user.value && user.value.role !== 'VIEWER');
         const canViewAudit = computed(() => !!user.value && (user.value.role === 'ADMIN' || user.value.role === 'OPERATOR'));
 
@@ -541,6 +585,8 @@ const app = createApp({
                     token.value = '';
                     localStorage.removeItem('token');
                     user.value = null;
+                    stopPresenceHeartbeat();
+                    clearAvatarUrl();
                     stopAlertPolling();
                     alerts.value = [];
                     alertUnread.value = 0;
@@ -862,6 +908,133 @@ const app = createApp({
                 registerLoading.value = false;
             }
         }
+        let presenceTimer = null;
+        let heartbeatInFlight = false;
+        let avatarLoadSeq = 0;
+        function clearAvatarUrl() {
+            avatarLoadSeq++;
+            if (avatarObjectUrl.value) URL.revokeObjectURL(avatarObjectUrl.value);
+            avatarObjectUrl.value = '';
+        }
+        async function loadAvatar() {
+            const seq = ++avatarLoadSeq;
+            if (!user.value?.avatarConfigured) { clearAvatarUrl(); return; }
+            try {
+                const nextUrl = URL.createObjectURL(await api.getAvatar(user.value.avatarVersion));
+                if (seq !== avatarLoadSeq || !user.value) { URL.revokeObjectURL(nextUrl); return; }
+                const oldUrl = avatarObjectUrl.value;
+                avatarObjectUrl.value = nextUrl;
+                if (oldUrl) URL.revokeObjectURL(oldUrl);
+            } catch (_) {}
+        }
+        function syncProfileFormFromUser() {
+            profileForm.displayName = user.value.displayName || user.value.username;
+            profileForm.signature = user.value.signature || '';
+            profileForm.statusPreference = user.value.statusPreference || 'ONLINE';
+        }
+        function openProfile() {
+            if (!user.value) return;
+            syncProfileFormFromUser();
+            profileVisible.value = true;
+        }
+        async function saveProfile() {
+            profileSaving.value = true;
+            try {
+                user.value = await api.updateProfile(profileForm);
+                profileVisible.value = false;
+                ElMessage.success('个人资料已更新');
+            } catch (err) {
+                ElMessage.error(getErrorMessage(err, '个人资料更新失败'));
+            } finally { profileSaving.value = false; }
+        }
+        function openCredentialDialog(mode) {
+            credentialMode.value = mode;
+            credentialForm.username = user.value?.username || '';
+            credentialForm.currentPassword = '';
+            credentialForm.newPassword = '';
+            credentialForm.confirmPassword = '';
+            credentialVisible.value = true;
+        }
+        async function saveCredential() {
+            if (!credentialForm.currentPassword) {
+                ElMessage.warning('请输入当前密码');
+                return;
+            }
+            if (credentialMode.value === 'password') {
+                if (!credentialForm.newPassword || credentialForm.newPassword !== credentialForm.confirmPassword) {
+                    ElMessage.warning('两次输入的新密码不一致');
+                    return;
+                }
+            }
+            credentialSaving.value = true;
+            try {
+                if (credentialMode.value === 'username') {
+                    user.value = await api.updateUsername(credentialForm.username, credentialForm.currentPassword);
+                    ElMessage.success('登录用户名已修改');
+                } else {
+                    await api.updatePassword(credentialForm.currentPassword, credentialForm.newPassword);
+                    ElMessage.success('密码已修改，请使用新密码登录');
+                    credentialVisible.value = false;
+                    await logout();
+                    return;
+                }
+                credentialVisible.value = false;
+            } catch (err) {
+                ElMessage.error(getErrorMessage(err, '账号信息修改失败'));
+            } finally { credentialSaving.value = false; }
+        }
+        async function uploadAvatarFile(options) {
+            const file = options.file;
+            if (!['image/jpeg', 'image/png'].includes(file.type)) {
+                ElMessage.error('头像仅支持 JPEG、PNG 格式');
+                return;
+            }
+            if (file.size > 2 * 1024 * 1024) {
+                ElMessage.error('头像不能超过 2MB');
+                return;
+            }
+            avatarUploading.value = true;
+            try {
+                user.value = await api.uploadAvatar(file);
+                await loadAvatar();
+                ElMessage.success('头像已更新');
+            } catch (err) {
+                ElMessage.error(getErrorMessage(err, '头像上传失败'));
+            } finally { avatarUploading.value = false; }
+        }
+        async function removeAvatar() {
+            try {
+                user.value = await api.deleteAvatar();
+                clearAvatarUrl();
+                ElMessage.success('头像已删除');
+            } catch (err) { ElMessage.error(getErrorMessage(err, '头像删除失败')); }
+        }
+        async function sendPresenceHeartbeat() {
+            if (!token.value || !user.value || heartbeatInFlight) return;
+            heartbeatInFlight = true;
+            try { await api.heartbeat(); } catch (_) {} finally { heartbeatInFlight = false; }
+        }
+        function startPresenceHeartbeat() {
+            stopPresenceHeartbeat();
+            sendPresenceHeartbeat();
+            presenceTimer = setInterval(sendPresenceHeartbeat, 60000);
+        }
+        function stopPresenceHeartbeat() {
+            if (presenceTimer) clearInterval(presenceTimer);
+            presenceTimer = null;
+        }
+        async function handleProfileCommand(command) {
+            if (command === 'profile') openProfile();
+            else if (command === 'logout') await logout();
+            else if (command.startsWith('status-')) {
+                const nextStatus = command.substring(7).toUpperCase();
+                if (nextStatus === user.value.statusPreference) return;
+                syncProfileFormFromUser();
+                profileForm.statusPreference = nextStatus;
+                await saveProfile();
+            }
+        }
+
         async function login() {
             if (!loginUsername.value || !loginPassword.value) {
                 loginError.value = '请输入用户名和密码';
@@ -878,7 +1051,9 @@ const app = createApp({
                 currentView.value = 'workbench';
                 await loadControls();
                 await loadJobs();
+                await loadAvatar();
                 startAlertPolling();
+                startPresenceHeartbeat();
                 nextTick(() => {
                     setTimeout(() => {
                         if (!graph) { initGraph(); setupDropHandler(); }
@@ -892,6 +1067,8 @@ const app = createApp({
         }
         async function logout() {
             try { await api.logout(); } catch (_) {}
+            stopPresenceHeartbeat();
+            clearAvatarUrl();
             stopAlertPolling();
             alerts.value = [];
             alertUnread.value = 0;
@@ -2900,7 +3077,9 @@ const app = createApp({
                 await loadControls();
                 await loadJobs();
                 await loadWorkbench();
+                await loadAvatar();
                 startAlertPolling();
+                startPresenceHeartbeat();
                 // 登录态下延迟初始化画布
                 setTimeout(() => {
                     initGraph();
@@ -2909,14 +3088,24 @@ const app = createApp({
             }
 
             document.addEventListener('keydown', handleKeydown);
+            document.addEventListener('visibilitychange', handlePresenceResume);
+            window.addEventListener('online', handlePresenceResume);
         });
 
+        function handlePresenceResume() {
+            if (!document.hidden) sendPresenceHeartbeat();
+        }
+
         onUnmounted(() => {
+            stopPresenceHeartbeat();
+            clearAvatarUrl();
             stopAlertPolling();
             stopMonitorPolling();
             stopClusterPolling();
             stopKafkaStream();
             document.removeEventListener('keydown', handleKeydown);
+            document.removeEventListener('visibilitychange', handlePresenceResume);
+            window.removeEventListener('online', handlePresenceResume);
         });
 
         return {
@@ -2948,6 +3137,10 @@ const app = createApp({
             monitorTrends, monitorTrendUpdated, removeMonitorTrend, trendActionTop,
             fmtNum, bpClass, cpText, fmtDuration, fmtDateTime, statusTagType,
             user, canEdit, canViewAudit, authMode, loginUsername, loginPassword, loginError, loginLoading,
+            profileVisible, profileSaving, credentialVisible, credentialMode, credentialSaving, credentialForm,
+            avatarUploading, avatarObjectUrl, profileForm, userInitial,
+            statusLabels, statusLabel, publicStatusClass, openProfile, saveProfile, openCredentialDialog,
+            saveCredential, uploadAvatarFile, removeAvatar, handleProfileCommand,
             registerUsername, registerDisplayName, registerPassword, registerPasswordConfirm, registerAgreed, registerError, registerLoading,
             login, register, switchAuthMode, logout, onlyMine, helpTab, openHelp,
             auditRows, auditTotal, auditPage, auditSize, auditKeyword, auditFilters, auditLoading, loadAudit, onAuditPage, resetAuditFilters,

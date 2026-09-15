@@ -137,7 +137,25 @@
                     <div class="user-menu" v-if="user">
                         <el-tag :type="user.role === 'ADMIN' ? 'danger' : user.role === 'OPERATOR' ? 'warning' : 'info'" size="small" effect="dark">{{ user.role }}</el-tag>
                         <span class="user-name">{{ user.displayName || user.username }}</span>
-                        <el-button size="small" type="danger" plain @click="logout"><el-icon><switch-button /></el-icon> 退出</el-button>
+                        <el-dropdown trigger="click" @command="handleProfileCommand">
+                            <button class="profile-trigger" type="button" :title="statusLabel + ' · 点击管理账户'">
+                                <el-avatar :size="36" :src="avatarObjectUrl">{{ userInitial }}</el-avatar>
+                                <span class="presence-dot" :class="publicStatusClass"></span>
+                            </button>
+                            <template #dropdown>
+                                <el-dropdown-menu>
+                                    <el-dropdown-item disabled>
+                                        <div class="profile-menu-summary"><strong>{{ user.displayName || user.username }}</strong><small>@{{ user.username }} · {{ statusLabel }}</small></div>
+                                    </el-dropdown-item>
+                                    <el-dropdown-item command="profile" divided><el-icon><user /></el-icon>个人资料</el-dropdown-item>
+                                    <el-dropdown-item command="status-ONLINE"><el-icon><circle-check /></el-icon><span class="status-menu-dot presence-online"></span>设为在线</el-dropdown-item>
+                                    <el-dropdown-item command="status-AWAY"><el-icon><clock /></el-icon><span class="status-menu-dot presence-away"></span>设为离开</el-dropdown-item>
+                                    <el-dropdown-item command="status-BUSY"><el-icon><circle-close /></el-icon><span class="status-menu-dot presence-busy"></span>设为忙碌</el-dropdown-item>
+                                    <el-dropdown-item command="status-INVISIBLE"><el-icon><hide /></el-icon><span class="status-menu-dot presence-offline"></span>设为隐身</el-dropdown-item>
+                                    <el-dropdown-item command="logout" divided><el-icon><switch-button /></el-icon>退出登录</el-dropdown-item>
+                                </el-dropdown-menu>
+                            </template>
+                        </el-dropdown>
                     </div>
                 </div>
             </el-header>
@@ -1288,6 +1306,83 @@
             </template>
         </el-dialog>
 
+
+        <!-- 个人资料对话框 -->
+        <el-dialog v-model="profileVisible" title="个人资料" width="560px" class="profile-dialog">
+            <div class="profile-editor">
+                <section class="profile-avatar-section">
+                    <div class="profile-avatar-wrap">
+                        <el-avatar :size="88" :src="avatarObjectUrl">{{ userInitial }}</el-avatar>
+                        <span class="presence-dot profile-presence" :class="publicStatusClass"></span>
+                    </div>
+                    <div class="profile-avatar-actions">
+                        <el-upload :show-file-list="false" :http-request="uploadAvatarFile" accept="image/jpeg,image/png" :disabled="avatarUploading">
+                            <el-button type="primary" :loading="avatarUploading"><el-icon><upload /></el-icon>上传头像</el-button>
+                        </el-upload>
+                        <el-button v-if="user?.avatarConfigured" type="danger" plain @click="removeAvatar"><el-icon><delete /></el-icon>删除头像</el-button>
+                        <small>支持 JPEG、PNG，最大 2MB；服务端自动压缩并清除图片元数据</small>
+                    </div>
+                </section>
+                <el-form label-position="top">
+                    <div class="profile-readonly-grid">
+                        <el-form-item label="登录用户名"><el-input :model-value="user?.username" disabled></el-input></el-form-item>
+                        <el-form-item label="角色"><el-input :model-value="user?.role" disabled></el-input></el-form-item>
+                    </div>
+                    <div class="profile-security-actions">
+                        <el-button type="primary" plain @click="openCredentialDialog('username')"><el-icon><edit-pen /></el-icon>修改登录用户名</el-button>
+                        <el-button type="warning" plain @click="openCredentialDialog('password')"><el-icon><lock /></el-icon>修改账号密码</el-button>
+                    </div>
+                    <el-form-item label="显示名称">
+                        <el-input v-model="profileForm.displayName" maxlength="64" show-word-limit></el-input>
+                    </el-form-item>
+                    <el-form-item label="个性签名">
+                        <el-input v-model="profileForm.signature" type="textarea" :rows="3" maxlength="200" show-word-limit placeholder="介绍一下自己"></el-input>
+                    </el-form-item>
+                    <el-form-item label="展示状态">
+                        <el-radio-group v-model="profileForm.statusPreference">
+                            <el-radio-button label="ONLINE">在线</el-radio-button>
+                            <el-radio-button label="AWAY">离开</el-radio-button>
+                            <el-radio-button label="BUSY">忙碌</el-radio-button>
+                            <el-radio-button label="INVISIBLE">隐身</el-radio-button>
+                            <el-radio-button label="OFFLINE">显示离线</el-radio-button>
+                        </el-radio-group>
+                        <small class="profile-status-tip">展示状态是个人偏好；实际在线状态由浏览器心跳判断，停止活动约 90 秒后显示离线。</small>
+                    </el-form-item>
+                    <div class="profile-times" v-if="user?.lastLoginAt">
+                        最近登录：{{ fmtDateTime(user.lastLoginAt) }}<span v-if="user?.lastSeenAt"> · 最近活动：{{ fmtDateTime(user.lastSeenAt) }}</span>
+                    </div>
+                </el-form>
+            </div>
+            <template #footer>
+                <el-button @click="profileVisible = false"><el-icon><close /></el-icon>取消</el-button>
+                <el-button type="primary" :loading="profileSaving" @click="saveProfile"><el-icon><circle-check /></el-icon>保存资料</el-button>
+            </template>
+        </el-dialog>
+
+        <!-- 登录凭据修改对话框 -->
+        <el-dialog v-model="credentialVisible" :title="credentialMode === 'username' ? '修改登录用户名' : '修改账号密码'" width="460px">
+            <el-form label-position="top">
+                <el-form-item v-if="credentialMode === 'username'" label="新登录用户名">
+                    <el-input v-model="credentialForm.username" maxlength="32" placeholder="3-32 位字母、数字或下划线"></el-input>
+                </el-form-item>
+                <template v-else>
+                    <el-form-item label="新密码">
+                        <el-input v-model="credentialForm.newPassword" type="password" show-password maxlength="128" placeholder="8-128 位，须同时包含字母和数字"></el-input>
+                    </el-form-item>
+                    <el-form-item label="确认新密码">
+                        <el-input v-model="credentialForm.confirmPassword" type="password" show-password maxlength="128"></el-input>
+                    </el-form-item>
+                </template>
+                <el-form-item label="当前密码（安全验证）">
+                    <el-input v-model="credentialForm.currentPassword" type="password" show-password maxlength="128" @keyup.enter="saveCredential"></el-input>
+                </el-form-item>
+                <el-alert v-if="credentialMode === 'password'" title="密码修改成功后将自动退出，请使用新密码重新登录。" type="warning" :closable="false" show-icon></el-alert>
+            </el-form>
+            <template #footer>
+                <el-button @click="credentialVisible = false"><el-icon><close /></el-icon>取消</el-button>
+                <el-button type="primary" :loading="credentialSaving" @click="saveCredential"><el-icon><circle-check /></el-icon>确认修改</el-button>
+            </template>
+        </el-dialog>
 
         <!-- 版本历史对话框 -->
         <el-dialog v-model="versionDialogVisible" title="版本历史" width="640px">

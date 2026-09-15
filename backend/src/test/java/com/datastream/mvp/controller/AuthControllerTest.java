@@ -4,6 +4,8 @@ import com.datastream.mvp.model.AppUser;
 import com.datastream.mvp.repository.AppUserRepository;
 import com.datastream.mvp.security.JwtUtil;
 import com.datastream.mvp.service.AuditService;
+import com.datastream.mvp.service.AvatarStorageService;
+import com.datastream.mvp.service.UserService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,6 +22,8 @@ class AuthControllerTest {
     private PasswordEncoder encoder;
     private JwtUtil jwtUtil;
     private AuditService auditService;
+    private UserService userService;
+    private AvatarStorageService avatarStorageService;
     private HttpServletRequest request;
     private AuthController controller;
 
@@ -29,9 +33,11 @@ class AuthControllerTest {
         encoder = mock(PasswordEncoder.class);
         jwtUtil = mock(JwtUtil.class);
         auditService = mock(AuditService.class);
+        userService = mock(UserService.class);
+        avatarStorageService = mock(AvatarStorageService.class);
         request = mock(HttpServletRequest.class);
         when(request.getRemoteAddr()).thenReturn("127.0.0.1");
-        controller = new AuthController(userRepo, encoder, jwtUtil, auditService);
+        controller = new AuthController(userRepo, encoder, jwtUtil, auditService, userService, avatarStorageService);
     }
 
     @Test
@@ -43,8 +49,9 @@ class AuthControllerTest {
             saved.setId(9L);
             return saved;
         });
+        when(userService.profile(9L)).thenReturn(profile(9L, "new_user", "新用户", "VIEWER"));
 
-        AuthController.UserView response = controller.register(
+        UserService.ProfileView response = controller.register(
                 new AuthController.RegisterRequest(" new_user ", " 新用户 ", "secure123"), request);
 
         assertEquals(9L, response.id());
@@ -84,6 +91,7 @@ class AuthControllerTest {
         when(userRepo.findByUsername("admin")).thenReturn(Optional.of(user));
         when(encoder.matches("secret", user.getPasswordHash())).thenReturn(true);
         when(jwtUtil.generateToken(1L, "admin", "管理员", "ADMIN")).thenReturn("jwt-token");
+        when(userService.markLogin(1L)).thenReturn(profile(1L, "admin", "管理员", "ADMIN"));
 
         AuthController.LoginResponse response = controller.login(
                 new AuthController.LoginRequest(" admin ", "secret"), request);
@@ -116,6 +124,11 @@ class AuthControllerTest {
         assertThrows(ResponseStatusException.class,
                 () -> controller.login(new AuthController.LoginRequest("admin", "secret"), request));
         verifyNoInteractions(encoder, jwtUtil);
+    }
+
+    private UserService.ProfileView profile(Long id, String username, String displayName, String role) {
+        return new UserService.ProfileView(id, username, displayName, role, "", AppUser.UserStatus.ONLINE,
+                true, AppUser.UserStatus.ONLINE, null, null, null, false, 0);
     }
 
     private AppUser user() {

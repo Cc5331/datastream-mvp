@@ -83,6 +83,11 @@ app:
   data-source:
     key-file: ${DATA_SOURCE_KEY_FILE:./data/.data_source_key}
     allowed-hosts: ${DATA_SOURCE_ALLOWED_HOSTS:${APP_PREVIEW_ALLOWED_JDBC_HOSTS:localhost,127.0.0.1,mysql,postgres,oracle,kafka,redis,namenode}}
+  profile:
+    avatar-dir: ${AVATAR_DIR:./data/avatars}
+  user-presence:
+    timeout-ms: ${USER_PRESENCE_TIMEOUT_MS:90000}
+    minimum-write-interval-ms: ${USER_PRESENCE_MINIMUM_WRITE_INTERVAL_MS:20000}
   ai:
     # 默认 DeepSeek；切回 OpenAI 时设 AI_PROVIDER=openai 并提供 OPENAI_API_KEY
     provider: ${AI_PROVIDER:deepseek}

@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.LocalDateTime;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -82,6 +83,84 @@ class UserServiceTest {
 
         assertEquals("newHash", viewer.getPasswordHash());
         verify(userRepo).save(viewer);
+    }
+
+    @Test
+    void updateProfileOnlyChangesPersonalFields() {
+        AppUser viewer = user(2L, AppUser.UserRole.VIEWER, true);
+        when(userRepo.findById(2L)).thenReturn(Optional.of(viewer));
+        when(userRepo.save(viewer)).thenReturn(viewer);
+
+        UserService.ProfileView result = service.updateProfile(2L,
+                new UserService.ProfileUpdateRequest(" 新名称 ", " 保持数据流动 ", AppUser.UserStatus.BUSY));
+
+        assertEquals("新名称", result.displayName());
+        assertEquals("保持数据流动", result.signature());
+        assertEquals(AppUser.UserStatus.BUSY, result.statusPreference());
+        assertEquals(AppUser.UserRole.VIEWER, viewer.getRole());
+        assertTrue(viewer.isEnabled());
+    }
+
+    @Test
+    void userCanChangeUsernameWithCurrentPassword() {
+        AppUser viewer = user(2L, AppUser.UserRole.VIEWER, true);
+        when(userRepo.findById(2L)).thenReturn(Optional.of(viewer));
+        when(passwordEncoder.matches("currentPass1", "hash")).thenReturn(true);
+        when(userRepo.existsByUsername("new_user")).thenReturn(false);
+        when(userRepo.save(viewer)).thenReturn(viewer);
+
+        UserService.ProfileView result = service.updateUsername(2L,
+                new UserService.UsernameUpdateRequest(" new_user ", "currentPass1"));
+
+        assertEquals("new_user", result.username());
+        assertEquals("new_user", viewer.getUsername());
+    }
+
+    @Test
+    void userCanChangePasswordAndWrongCurrentPasswordIsRejected() {
+        AppUser viewer = user(2L, AppUser.UserRole.VIEWER, true);
+        when(userRepo.findById(2L)).thenReturn(Optional.of(viewer));
+        when(passwordEncoder.matches("wrong", "hash")).thenReturn(false);
+        assertEquals(400, assertThrows(ResponseStatusException.class,
+                () -> service.updateOwnPassword(2L,
+                        new UserService.PasswordUpdateRequest("wrong", "newStrong9")))
+                .getStatusCode().value());
+
+        when(passwordEncoder.matches("currentPass1", "hash")).thenReturn(true);
+        when(passwordEncoder.matches("newStrong9", "hash")).thenReturn(false);
+        when(passwordEncoder.encode("newStrong9")).thenReturn("newHash");
+        service.updateOwnPassword(2L,
+                new UserService.PasswordUpdateRequest("currentPass1", "newStrong9"));
+        assertEquals("newHash", viewer.getPasswordHash());
+    }
+
+    @Test
+    void presenceDependsOnRecentHeartbeatAndHonorsInvisible() {
+        AppUser viewer = user(2L, AppUser.UserRole.VIEWER, true);
+        viewer.setLastSeenAt(LocalDateTime.now());
+        viewer.setStatusPreference(AppUser.UserStatus.INVISIBLE);
+        when(userRepo.findById(2L)).thenReturn(Optional.of(viewer));
+
+        UserService.ProfileView hidden = service.profile(2L);
+        assertTrue(hidden.present());
+        assertEquals(AppUser.UserStatus.OFFLINE, hidden.publicStatus());
+
+        viewer.setStatusPreference(AppUser.UserStatus.ONLINE);
+        viewer.setLastSeenAt(LocalDateTime.now().minusMinutes(2));
+        UserService.ProfileView expired = service.profile(2L);
+        assertFalse(expired.present());
+        assertEquals(AppUser.UserStatus.OFFLINE, expired.publicStatus());
+    }
+
+    @Test
+    void rejectsOverlongSignature() {
+        AppUser viewer = user(2L, AppUser.UserRole.VIEWER, true);
+        when(userRepo.findById(2L)).thenReturn(Optional.of(viewer));
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                () -> service.updateProfile(2L, new UserService.ProfileUpdateRequest(
+                        "用户", "x".repeat(201), AppUser.UserStatus.ONLINE)));
+        assertEquals(400, ex.getStatusCode().value());
+        verify(userRepo, never()).save(any());
     }
 
     private AppUser user(Long id, AppUser.UserRole role, boolean enabled) {

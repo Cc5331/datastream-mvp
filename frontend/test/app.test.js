@@ -337,6 +337,48 @@ test('内置示例 DAG 的参数类型与控件 schema 一致', () => {
   assert.match(samples, /hasHeader: true/);
 });
 
+test('个人资料与导航栏头像形成完整交互闭环', () => {
+  const userMenu = html.slice(html.indexOf('<div class="user-menu"'), html.indexOf('</el-header>'));
+  assert.match(userMenu, /class="profile-trigger"/, '导航栏应以头像作为个人菜单入口');
+  assert.match(userMenu, /:src="avatarObjectUrl"/, '头像应使用鉴权后的 Blob URL');
+  assert.match(userMenu, /handleProfileCommand/);
+  assert.match(userMenu, /command="profile"/);
+  assert.match(userMenu, /command="logout"/);
+  assert.doesNotMatch(userMenu, /@click="logout"/, '退出按钮应收进头像菜单，保证头像位于最右侧');
+  assert.match(html, /v-model="profileVisible" title="个人资料"/);
+  assert.match(html, /profileForm\.displayName/);
+  assert.match(html, /profileForm\.signature/);
+  assert.match(html, /profileForm\.statusPreference/);
+  assert.doesNotMatch(html, /v-html="profileForm\.signature"/, '签名只能按文本显示');
+  assert.match(appJs, /responseType: 'blob'/, '鉴权头像应通过 Axios Blob 加载');
+  assert.match(appJs, /URL\.revokeObjectURL/);
+});
+
+test('个人资料提供用户名与密码修改入口', () => {
+  assert.match(html, /修改登录用户名/);
+  assert.match(html, /修改账号密码/);
+  assert.match(html, /v-model="credentialVisible"/);
+  assert.match(html, /credentialForm\.currentPassword/);
+  assert.match(html, /credentialForm\.newPassword/);
+  assert.match(html, /credentialForm\.confirmPassword/);
+  assert.match(appJs, /auth\/me\/username/);
+  assert.match(appJs, /auth\/me\/password/);
+  assert.match(appJs, /function openCredentialDialog\(mode\)/);
+  assert.match(appJs, /async function saveCredential\(\)/);
+});
+
+test('用户在线状态使用独立 HTTP 心跳并在退出时清理', () => {
+  assert.match(appJs, /async heartbeat\(\)/);
+  assert.match(appJs, /auth\/presence\/heartbeat/);
+  assert.match(appJs, /presenceTimer = setInterval\(sendPresenceHeartbeat, 60000\)/);
+  assert.match(appJs, /heartbeatInFlight/, '心跳请求应防止并发重入');
+  assert.match(appJs, /function stopPresenceHeartbeat\(\)/);
+  const logout = appJs.slice(appJs.indexOf('async function logout()'), appJs.indexOf('function getErrorMessage'));
+  assert.match(logout, /stopPresenceHeartbeat\(\)/);
+  const unmount = appJs.slice(appJs.indexOf('onUnmounted(() =>'));
+  assert.match(unmount, /stopPresenceHeartbeat\(\)/);
+});
+
 test('画布不在隐藏状态下初始化 X6', () => {
   // X6 以 0 尺寸初始化会把 width/height:0px 写进内联样式并永久覆盖 flex 布局，
   // 导致画布高度为 0、无法拖拽连线；登录后默认停在工作台时正是这种情形。

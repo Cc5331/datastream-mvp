@@ -1,5 +1,6 @@
 package com.datastream.mvp.security;
 
+import com.datastream.mvp.repository.AppUserRepository;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -24,6 +25,7 @@ import java.util.List;
 public class JwtAuthFilter extends OncePerRequestFilter {
 
     private final JwtUtil jwtUtil;
+    private final AppUserRepository userRepo;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
@@ -33,11 +35,11 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             try {
                 Claims claims = jwtUtil.parse(header.substring(7));
                 Long userId = Long.valueOf(claims.getSubject());
-                String username = claims.get("username", String.class);
-                String displayName = claims.get("displayName", String.class);
-                String role = claims.get("role", String.class);
-                if (role == null) role = "VIEWER";
-                CurrentUser principal = new CurrentUser(userId, username, displayName, role);
+                // JWT 只证明稳定身份；角色、名称与启用状态以数据库为准，修改后下一请求立即生效
+                var user = userRepo.findById(userId).filter(com.datastream.mvp.model.AppUser::isEnabled)
+                        .orElseThrow(() -> new IllegalStateException("用户不存在或已停用"));
+                String role = user.getRole().name();
+                CurrentUser principal = new CurrentUser(userId, user.getUsername(), user.getDisplayName(), role);
                 var auth = new UsernamePasswordAuthenticationToken(principal, null,
                         List.of(new SimpleGrantedAuthority("ROLE_" + role)));
                 auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
