@@ -430,7 +430,7 @@ python test-resources/benchmark.py
 
 - `DEVELOPMENT.md`：开发维护指南（逻辑框架 / 扩展规范 / 红线 / 回归清单）
 - `AGENTS.md`：AI 助手工作区指令（动代码前先读 DEVELOPMENT.md）
-- `docs/`：目前为空目录（原计划的设计文档内容已并入 `DEVELOPMENT.md`）
+- `docs/作品演示录像脚本.md`：作品演示录像（技术实现 / 核心功能 / 性能测试）分镜脚本、口播稿与拍前清单
 - `test-resources/benchmark.py`：性能基准测试脚本
 
 ---

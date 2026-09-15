@@ -100,7 +100,7 @@
     ├── output/                         # 作业输出目录（CSV/Excel 等，gitignore）
     ├── test-resources/                 # 测试数据（sales.csv / sample_data.xlsx / large 大数据集）与基准脚本
     ├── test-results/                   # 性能基准报告产物
-    ├── docs/                           # 目前为空目录（README 中原「详细设计文档」已并入本文件）
+    ├── docs/                           # 作品演示录像脚本（分镜 / 口播 / 拍前准备 / 应急降级）
     ├── start-all.bat / start-docker.bat / stop-docker.bat / start_sql_gw.bat
     ├── deploy-linux.sh / stop-linux.sh
     └── README.md                       # 用户向 README
