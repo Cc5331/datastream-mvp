@@ -190,13 +190,33 @@ public class JobService {
     }
 
     /**
-     * 提交作业到 Flink
+     * 提交作业到 Flink。
+     *
+     * 并发防护：手动提交、JobScheduler 定时触发、DependencyService 自动触发可能同时到达，
+     * 因此整个「校验状态 → 翻译 → 提交 → 落状态」过程持有该作业的分片锁（service/JobLocks），
+     * 并显式拒绝已在运行/已提交的作业，避免重复拉起同一个 Flink 作业。
      */
     public JobDefinition submit(Long id) {
+        java.util.concurrent.locks.ReentrantLock lock = JobLocks.forJob(id);
+        lock.lock();
+        try {
+            return doSubmit(id);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private JobDefinition doSubmit(Long id) {
         JobDefinition job = findById(id);
         if (job.getSource() == JobDefinition.JobSource.AI
                 && job.getConfirmationStatus() != JobDefinition.ConfirmationStatus.CONFIRMED) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "AI 生成作业必须先人工确认");
+        }
+        // 已在集群中运行/已提交的作业不重复提交（定时器与依赖触发此前各自判断，绕过入口即可重复提交）
+        JobDefinition.JobStatus current = job.getStatus();
+        if (current == JobDefinition.JobStatus.SUBMITTED || current == JobDefinition.JobStatus.RUNNING) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "作业正在运行中（当前状态 " + current + "），请等待结束或先取消");
         }
         try {
             // 解析 DAG JSON
@@ -234,16 +254,24 @@ public class JobService {
     }
 
     /**
-     * 取消作业
+     * 取消作业。
+     * 与 submit 共用同一把作业分片锁：避免「提交中」与「取消中」交叉，
+     * 也保证取消后的输出合并不会与轮询器判定完成的合并同时操作同一批 part 文件。
      */
     public void cancel(Long id) {
-        JobDefinition job = findById(id);
-        dagTranslationService.cancelFlinkJob(job.getFlinkJobId());
-        job.setStatus(JobDefinition.JobStatus.CANCELLED);
-        job.setUpdatedAt(LocalDateTime.now());
-        jobRepo.save(job);
-        flinkJobStatusChecker.finalizeJobOutputs(job);
-        addLog(id, "INFO", "作业已取消，Flink Job ID: " + job.getFlinkJobId());
+        java.util.concurrent.locks.ReentrantLock lock = JobLocks.forJob(id);
+        lock.lock();
+        try {
+            JobDefinition job = findById(id);
+            dagTranslationService.cancelFlinkJob(job.getFlinkJobId());
+            job.setStatus(JobDefinition.JobStatus.CANCELLED);
+            job.setUpdatedAt(LocalDateTime.now());
+            jobRepo.save(job);
+            flinkJobStatusChecker.finalizeJobOutputs(job);
+            addLog(id, "INFO", "作业已取消，Flink Job ID: " + job.getFlinkJobId());
+        } finally {
+            lock.unlock();
+        }
     }
     /**
      * 作业上线：进入受监管的持续处理状态。
@@ -273,6 +301,16 @@ public class JobService {
         } else {
             job.setScheduleEnabled(false);
             job.setDagJson(forceKafkaNoAutoStop(job.getDagJson()));
+        }
+        // 已在集群中运行（例如用户先手动跑了一次）：直接接管为上线状态，不重复提交——
+        // submit() 现在会拒绝已 SUBMITTED/RUNNING 的作业，若继续走 submit 会被 409 打断
+        if (job.getStatus() == JobDefinition.JobStatus.SUBMITTED || job.getStatus() == JobDefinition.JobStatus.RUNNING) {
+            job.setOnline(true);
+            if (job.getOnlineSince() == null) job.setOnlineSince(now);
+            job.setUpdatedAt(now);
+            jobRepo.save(job);
+            addLog(id, "INFO", "作业已在集群中运行，直接纳入上线监管（不重复提交）");
+            return job;
         }
         job.setOnline(true);
         job.setOnlineSince(now);

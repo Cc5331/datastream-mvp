@@ -152,6 +152,43 @@ class JobServiceTest {
         assertNotNull(submitted.getSubmittedAt());
     }
 
+    /**
+     * 并发/重复提交防护：已在集群中运行（SUBMITTED/RUNNING）的作业再次 submit 必须被拒，
+     * 否则手动提交、cron 调度、依赖触发三路并发会拉起重复的 Flink 作业。
+     */
+    @Test
+    void submitRejectsJobAlreadyRunning() throws Exception {
+        for (JobDefinition.JobStatus running : List.of(
+                JobDefinition.JobStatus.SUBMITTED, JobDefinition.JobStatus.RUNNING)) {
+            JobDefinition job = job(20L, 7L);
+            job.setDagJson("{\"jobName\":\"test\",\"parallelism\":1,\"nodes\":[],\"edges\":[]}");
+            job.setStatus(running);
+            when(jobRepo.findById(20L)).thenReturn(Optional.of(job));
+
+            ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                    () -> service.submit(20L), "状态 " + running + " 时不应允许重复提交");
+            assertEquals(409, ex.getStatusCode().value());
+        }
+        // 关键：一次都不能真的提交到 Flink
+        verify(translationService, never()).submitToFlink(any(), anyInt());
+    }
+
+    @Test
+    void submit_allowsRerunAfterTerminalStatus() throws Exception {
+        JobDefinition job = job(21L, 7L);
+        job.setDagJson("{\"jobName\":\"test\",\"parallelism\":1,\"nodes\":[],\"edges\":[]}");
+        job.setStatus(JobDefinition.JobStatus.COMPLETED);
+        when(jobRepo.findById(21L)).thenReturn(Optional.of(job));
+        when(translationService.translate(any())).thenReturn("SELECT 1;");
+        when(translationService.submitToFlink("SELECT 1;", 1)).thenReturn("flink-999");
+        when(jobRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        JobDefinition submitted = service.submit(21L);
+
+        assertEquals(JobDefinition.JobStatus.SUBMITTED, submitted.getStatus());
+        assertEquals("flink-999", submitted.getFlinkJobId());
+    }
+
     private JobDefinition job(Long id, Long ownerId) {
         JobDefinition job = new JobDefinition();
         job.setId(id);

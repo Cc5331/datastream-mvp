@@ -192,19 +192,9 @@ public class FlinkJobStatusChecker {
                         l.setMessage("Status: " + localStatus + " (Flink: " + flinkState + ")");
                         l.setTimestamp(LocalDateTime.now());
                         logRepo.save(l);
-                        if (localStatus == JobStatus.COMPLETED) {
-                            convertExcelOutputsIfNeeded(job);
-                            mergeCsvOutputsIfNeeded(job);
-                            mergeJsonOutputsIfNeeded(job);
-                            convertXmlOutputsIfNeeded(job);
-                            convertParquetOutputsIfNeeded(job);
-                        }
-                        if (localStatus == JobStatus.CANCELLED) {
-                            convertExcelOutputsIfNeeded(job);
-                            mergeCsvOutputsIfNeeded(job);
-                            mergeJsonOutputsIfNeeded(job);
-                            convertXmlOutputsIfNeeded(job);
-                            convertParquetOutputsIfNeeded(job);
+                        if (localStatus == JobStatus.COMPLETED || localStatus == JobStatus.CANCELLED) {
+                            // 统一走带锁入口：完成/取消后的输出合并可能与取消流程、补合并重试并发
+                            finalizeJobOutputs(job);
                         }
                         if (localStatus == JobStatus.FAILED) {
                             fetchFlinkJobError(job, flinkJobId);
@@ -265,11 +255,7 @@ public class FlinkJobStatusChecker {
             l.setMessage("Status: COMPLETED (job no longer in Flink overview)");
             l.setTimestamp(LocalDateTime.now());
             logRepo.save(l);
-            convertExcelOutputsIfNeeded(job);
-            mergeCsvOutputsIfNeeded(job);
-            mergeJsonOutputsIfNeeded(job);
-            convertXmlOutputsIfNeeded(job);
-            convertParquetOutputsIfNeeded(job);
+            finalizeJobOutputs(job);
             return;
         }
         log.warn("Job {} (Flink ID: {}) disappeared together with the cluster restart, marking FAILED", job.getId(), flinkJobId);
@@ -891,11 +877,7 @@ public class FlinkJobStatusChecker {
             if (recent.isEmpty()) return;
             for (JobDefinition job : recent) {
                 if (!hasPendingOutputs(job)) continue;
-                convertExcelOutputsIfNeeded(job);
-                mergeCsvOutputsIfNeeded(job);
-                mergeJsonOutputsIfNeeded(job);
-                convertXmlOutputsIfNeeded(job);
-                convertParquetOutputsIfNeeded(job);
+                finalizeJobOutputs(job);
             }
         } catch (Exception e) {
             log.debug("Finalize recently completed jobs: {}", e.getMessage());
@@ -956,10 +938,15 @@ public class FlinkJobStatusChecker {
     }
 
     /**
-     * Finalize outputs for a cancelled job: merge CSV/JSON part files and
+     * Finalize outputs for a cancelled/completed job: merge CSV/JSON part files and
      * convert Excel/XML/Parquet, so streaming jobs still produce files on cancel.
+     *
+     * 全程持有该作业的分片锁：轮询器判定完成、取消、Kafka 自动停止、补合并重试可能并发到达，
+     * 同一批 part 文件被两个线程同时「先删后写」会丢数据（见 service/JobLocks）。
      */
     public void finalizeJobOutputs(JobDefinition job) {
+        java.util.concurrent.locks.ReentrantLock lock = JobLocks.forJob(job == null ? null : job.getId());
+        lock.lock();
         try {
             convertExcelOutputsIfNeeded(job);
             mergeCsvOutputsIfNeeded(job);
@@ -968,6 +955,8 @@ public class FlinkJobStatusChecker {
             convertParquetOutputsIfNeeded(job);
         } catch (Exception e) {
             log.warn("finalizeJobOutputs error for job {}: {}", job.getId(), e.getMessage());
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -1015,11 +1004,7 @@ public class FlinkJobStatusChecker {
             l.setMessage("体验模式自动停止：Kafka 输入作业运行 " + elapsed + "s，已取消并合并输出");
             l.setTimestamp(LocalDateTime.now());
             logRepo.save(l);
-            convertExcelOutputsIfNeeded(job);
-            mergeCsvOutputsIfNeeded(job);
-            mergeJsonOutputsIfNeeded(job);
-            convertXmlOutputsIfNeeded(job);
-            convertParquetOutputsIfNeeded(job);
+            finalizeJobOutputs(job);
             return true;
         } catch (Exception e) {
             log.warn("autoStopKafkaJobIfNeeded error for job {}: {}", job.getId(), e.getMessage());
