@@ -48,6 +48,13 @@ public class AppUser {
 
     private LocalDateTime lastSeenAt;
 
+    /**
+     * 令牌版本：签发 JWT 时写入 claim，每次请求与库中值比对。
+     * 改密码 / 管理员重置密码 / 主动登出时 +1，使此前签发的所有 token 立即失效
+     * （无状态 JWT 无法逐个吊销，用版本号实现"全端下线"）。
+     */
+    private Integer tokenVersion = 0;
+
     private LocalDateTime updatedAt;
 
     private LocalDateTime createdAt = LocalDateTime.now();

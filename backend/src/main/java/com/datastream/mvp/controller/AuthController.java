@@ -86,7 +86,8 @@ public class AuthController {
             auditService.record(null, username, "LOGIN_FAILED", "USER", username, "登录失败：用户名或密码错误", httpReq.getRemoteAddr());
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "用户名或密码错误");
         }
-        String token = jwtUtil.generateToken(user.getId(), user.getUsername(), user.getDisplayName(), user.getRole().name());
+        String token = jwtUtil.generateToken(user.getId(), user.getUsername(), user.getDisplayName(), user.getRole().name(),
+                user.getTokenVersion());
         UserService.ProfileView profile = userService.markLogin(user.getId());
         auditService.record(user.getId(), user.getUsername(), "LOGIN", "USER", user.getUsername(), "登录成功", httpReq.getRemoteAddr());
         return new LoginResponse(token, profile);
@@ -174,8 +175,11 @@ public class AuthController {
     public ResponseEntity<Void> logout(HttpServletRequest httpReq) {
         CurrentUser current = SecurityUtils.currentUser();
         if (current != null) {
+            // 递增令牌版本：无状态 JWT 无法逐个吊销，登出即让该账号此前签发的所有 token 失效
+            userService.revokeTokens(current.id());
             userService.markOffline(current.id());
-            auditService.record(current.id(), current.username(), "LOGOUT", "USER", current.username(), "登出", httpReq.getRemoteAddr());
+            auditService.record(current.id(), current.username(), "LOGOUT", "USER", current.username(),
+                    "登出（已吊销已签发令牌）", httpReq.getRemoteAddr());
         }
         return ResponseEntity.ok().build();
     }

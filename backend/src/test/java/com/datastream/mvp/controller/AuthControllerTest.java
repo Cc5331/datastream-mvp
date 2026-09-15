@@ -88,9 +88,11 @@ class AuthControllerTest {
     @Test
     void login_returnsTokenForEnabledUser() {
         AppUser user = user();
+        user.setTokenVersion(2);
         when(userRepo.findByUsername("admin")).thenReturn(Optional.of(user));
         when(encoder.matches("secret", user.getPasswordHash())).thenReturn(true);
-        when(jwtUtil.generateToken(1L, "admin", "管理员", "ADMIN")).thenReturn("jwt-token");
+        // 登录必须把当前令牌版本签进 token，登出/改密后旧 token 才会因版本不匹配而失效
+        when(jwtUtil.generateToken(1L, "admin", "管理员", "ADMIN", 2)).thenReturn("jwt-token");
         when(userService.markLogin(1L)).thenReturn(profile(1L, "admin", "管理员", "ADMIN"));
 
         AuthController.LoginResponse response = controller.login(

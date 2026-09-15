@@ -38,6 +38,10 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 // JWT 只证明稳定身份；角色、名称与启用状态以数据库为准，修改后下一请求立即生效
                 var user = userRepo.findById(userId).filter(com.datastream.mvp.model.AppUser::isEnabled)
                         .orElseThrow(() -> new IllegalStateException("用户不存在或已停用"));
+                // 令牌版本校验：改密码 / 管理员重置密码 / 登出后自增，旧 token 立即失效
+                if (!tokenVersionMatches(JwtUtil.tokenVersionOf(claims), user.getTokenVersion())) {
+                    throw new IllegalStateException("令牌已失效，请重新登录");
+                }
                 String role = user.getRole().name();
                 CurrentUser principal = new CurrentUser(userId, user.getUsername(), user.getDisplayName(), role);
                 var auth = new UsernamePasswordAuthenticationToken(principal, null,
@@ -49,5 +53,15 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             }
         }
         filterChain.doFilter(request, response);
+    }
+
+    /**
+     * 令牌版本是否匹配：token 里的版本必须等于库中当前版本。
+     * claim 缺失按 0 处理（向后兼容旧 token）；库中为 null 也按 0 处理。
+     */
+    static boolean tokenVersionMatches(Integer tokenVersion, Integer currentVersion) {
+        int token = tokenVersion == null ? 0 : tokenVersion;
+        int current = currentVersion == null ? 0 : currentVersion;
+        return token == current;
     }
 }

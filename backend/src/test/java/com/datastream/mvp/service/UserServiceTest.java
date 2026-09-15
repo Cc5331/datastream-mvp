@@ -163,6 +163,52 @@ class UserServiceTest {
         verify(userRepo, never()).save(any());
     }
 
+    /**
+     * 令牌吊销：改密码 / 管理员重置密码 / 登出都必须让旧 token 失效，
+     * 否则「无状态 JWT 无法吊销」会让改密后的旧 token 在有效期内继续可用。
+     */
+    @Test
+    void updateOwnPassword_bumpsTokenVersionToRevokeIssuedTokens() {
+        AppUser user = user(5L, AppUser.UserRole.OPERATOR, true);
+        user.setTokenVersion(3);
+        when(userRepo.findById(5L)).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("oldPass1", "hash")).thenReturn(true);
+        when(passwordEncoder.matches("newPass1", "hash")).thenReturn(false);
+        when(passwordEncoder.encode("newPass1")).thenReturn("new-hash");
+
+        service.updateOwnPassword(5L, new UserService.PasswordUpdateRequest("oldPass1", "newPass1"));
+
+        assertEquals(4, user.getTokenVersion(), "改密码后令牌版本必须 +1");
+        assertEquals("new-hash", user.getPasswordHash());
+        verify(userRepo).save(user);
+    }
+
+    @Test
+    void resetPasswordByAdmin_bumpsTokenVersion() {
+        AppUser user = user(6L, AppUser.UserRole.VIEWER, true);
+        user.setTokenVersion(null); // 历史数据缺列时按 0 处理
+        when(userRepo.findById(6L)).thenReturn(Optional.of(user));
+        when(passwordEncoder.encode("resetPass1")).thenReturn("reset-hash");
+
+        service.resetPassword(6L, "resetPass1");
+
+        assertEquals(1, user.getTokenVersion());
+        verify(userRepo).save(user);
+    }
+
+    @Test
+    void revokeTokens_incrementsVersionWithoutTouchingPassword() {
+        AppUser user = user(7L, AppUser.UserRole.ADMIN, true);
+        user.setTokenVersion(9);
+        when(userRepo.findById(7L)).thenReturn(Optional.of(user));
+
+        service.revokeTokens(7L);
+
+        assertEquals(10, user.getTokenVersion());
+        assertEquals("hash", user.getPasswordHash(), "登出吊销不应改动密码");
+        verify(userRepo).save(user);
+    }
+
     private AppUser user(Long id, AppUser.UserRole role, boolean enabled) {
         AppUser user = new AppUser();
         user.setId(id);

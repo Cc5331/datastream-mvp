@@ -132,7 +132,25 @@ public class UserService {
         }
         user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
         user.setUpdatedAt(LocalDateTime.now());
+        bumpTokenVersion(user);
         userRepo.save(user);
+    }
+
+    /**
+     * 递增令牌版本：使该账号此前签发的所有 JWT 立即失效。
+     * 改密码、管理员重置密码、主动登出都走这里。
+     */
+    @Transactional
+    public void revokeTokens(Long id) {
+        AppUser user = find(id);
+        bumpTokenVersion(user);
+        user.setUpdatedAt(LocalDateTime.now());
+        userRepo.save(user);
+    }
+
+    private void bumpTokenVersion(AppUser user) {
+        int current = user.getTokenVersion() == null ? 0 : user.getTokenVersion();
+        user.setTokenVersion(current + 1);
     }
 
     @Transactional
@@ -176,6 +194,9 @@ public class UserService {
         validatePassword(password);
         AppUser user = find(id);
         user.setPasswordHash(passwordEncoder.encode(password));
+        // 管理员重置密码后，被重置账号的旧 token 必须失效
+        bumpTokenVersion(user);
+        user.setUpdatedAt(LocalDateTime.now());
         userRepo.save(user);
     }
 

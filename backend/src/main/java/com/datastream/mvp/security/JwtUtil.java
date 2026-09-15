@@ -17,6 +17,9 @@ import java.util.Date;
 @Component
 public class JwtUtil {
 
+    /** 令牌版本 claim：改密码 / 登出后自增，用于失效此前签发的 token */
+    public static final String TOKEN_VERSION_CLAIM = "tv";
+
     @Value("${app.jwt.secret}")
     private String secret;
 
@@ -35,16 +38,36 @@ public class JwtUtil {
     }
 
     public String generateToken(Long userId, String username, String displayName, String role) {
+        return generateToken(userId, username, displayName, role, 0);
+    }
+
+    /**
+     * 生成 token；tokenVersion 参与签发，用户改密/登出后旧 token 因版本不匹配而失效。
+     */
+    public String generateToken(Long userId, String username, String displayName, String role, Integer tokenVersion) {
         Date now = new Date();
         return Jwts.builder()
                 .subject(String.valueOf(userId))
                 .claim("username", username)
                 .claim("displayName", displayName == null ? username : displayName)
                 .claim("role", role)
+                .claim(TOKEN_VERSION_CLAIM, tokenVersion == null ? 0 : tokenVersion)
                 .issuedAt(now)
                 .expiration(new Date(now.getTime() + expirationMs))
                 .signWith(key())
                 .compact();
+    }
+
+    /** token 中的令牌版本；旧版本签发的 token 没有该 claim，按 0 处理 */
+    public static Integer tokenVersionOf(Claims claims) {
+        Object raw = claims == null ? null : claims.get(TOKEN_VERSION_CLAIM);
+        if (raw instanceof Number n) return n.intValue();
+        if (raw == null) return 0;
+        try {
+            return Integer.parseInt(String.valueOf(raw));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     public Claims parse(String token) {
