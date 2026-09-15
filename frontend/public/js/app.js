@@ -1,4 +1,4 @@
-﻿// ===== API 配置 =====
+// ===== API 配置 =====
 const API_BASE = '/api';
 
 const api = {
@@ -563,6 +563,9 @@ const app = createApp({
         let trendTimer = null;
         let alertTimer = null;
         let clusterTimer = null;
+        // 画布 resize 监听句柄：initGraph 可重入（登录后懒初始化/切换视图/重载画布都会调），
+        // 必须保存引用并在重绑前先移除，否则每次 initGraph 都会多挂一个监听器
+        let resizeHandler = null;
 
         // ===== 首期门户视图 =====
         const workbench = ref({ statusCounts: {}, unreadAlerts: 0, recentJobs: [] });
@@ -843,12 +846,16 @@ const app = createApp({
                 ElMessage.info('节点已删除');
             });
 
-            // 监听画布 resize
-            window.addEventListener('resize', () => {
+            // 监听画布 resize（先移除旧句柄，避免 initGraph 重入时监听器叠加泄漏）
+            if (resizeHandler) {
+                window.removeEventListener('resize', resizeHandler);
+            }
+            resizeHandler = () => {
                 if (graph) {
                     graph.resize(container.clientWidth, container.clientHeight);
                 }
-            });
+            };
+            window.addEventListener('resize', resizeHandler);
 
             // 历史状态刷新（撤销/重做按钮可用性）
             refreshHistoryState();
@@ -1229,6 +1236,9 @@ const app = createApp({
             stopPresenceHeartbeat();
             clearAvatarUrl();
             stopAlertPolling();
+            stopMonitorPolling();
+            stopClusterPolling();
+            stopKafkaStream();
             alerts.value = [];
             alertUnread.value = 0;
             token.value = '';
@@ -1237,7 +1247,12 @@ const app = createApp({
             currentView.value = 'workbench';
             jobs.value = [];
             controls.value = [];
-            if (graph) { try { graph.dispose(); } catch (_) {} graph = null; }
+            // 登出即释放画布与所有图表实例，避免重新登录后实例/监听器叠加
+            if (resizeHandler) {
+                window.removeEventListener('resize', resizeHandler);
+                resizeHandler = null;
+            }
+            disposeAllCharts();
             ElMessage.info('已退出登录');
         }
 
@@ -3308,6 +3323,22 @@ const app = createApp({
             if (!document.hidden) sendPresenceHeartbeat();
         }
 
+        /**
+         * 释放所有 ECharts 实例与 X6 画布。
+         * 之前只有趋势图会 dispose，工作流/血缘/Kafka 图与画布实例在卸载时泄漏，
+         * 反复登录登出会累积 canvas 与定时器。
+         */
+        function disposeAllCharts() {
+            for (const chart of [trendChart, kafkaChart.value, workflowChart, lineageChart]) {
+                if (chart) { try { chart.dispose(); } catch (_) {} }
+            }
+            trendChart = null;
+            kafkaChart.value = null;
+            workflowChart = null;
+            lineageChart = null;
+            if (graph) { try { graph.dispose(); } catch (_) {} graph = null; }
+        }
+
         onUnmounted(() => {
             stopPresenceHeartbeat();
             clearAvatarUrl();
@@ -3315,6 +3346,11 @@ const app = createApp({
             stopMonitorPolling();
             stopClusterPolling();
             stopKafkaStream();
+            if (resizeHandler) {
+                window.removeEventListener('resize', resizeHandler);
+                resizeHandler = null;
+            }
+            disposeAllCharts();
             document.removeEventListener('keydown', handleKeydown);
             document.removeEventListener('visibilitychange', handlePresenceResume);
             window.removeEventListener('online', handlePresenceResume);
