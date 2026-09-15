@@ -1,5 +1,6 @@
 package com.datastream.mvp.service;
 
+import com.datastream.mvp.model.JobDefinition;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
@@ -32,5 +33,34 @@ class FlinkJobStatusCheckerTest {
         assertTrue("mock-abc".startsWith("mock-"));
         assertTrue("sql-submitted-abc".startsWith("sql-submitted-"));
         assertEquals(false, "9f0c47f29f17f81703168ee9d0c39803".startsWith("flink-job-"));
+    }
+
+    /**
+     * 作业从 overview 消失时不能再一律判成功：
+     * 集群换代（JM 重启 / TM 重新注册）导致的消失必须判 FAILED，
+     * 否则「随集群丢失」的作业会被记成 COMPLETED 并生成空输出。
+     */
+    @Test
+    void missingFromOverview_isFailedOnlyWhenClusterGenerationChanged() {
+        assertEquals(JobDefinition.JobStatus.COMPLETED,
+                FlinkJobStatusChecker.resolveMissingJobStatus(false),
+                "集群未换代：Flink 正常结束后会把作业移出 overview，应判 COMPLETED");
+        assertEquals(JobDefinition.JobStatus.FAILED,
+                FlinkJobStatusChecker.resolveMissingJobStatus(true),
+                "集群换代：作业是被丢掉的，应判 FAILED");
+    }
+
+    @Test
+    void clusterGenerationChange_detectionRules() {
+        // 首次观测只记录基线，不算重启
+        assertEquals(false, FlinkJobStatusChecker.generationChanged(null, "tm-1"));
+        // 同一批 TaskManager = 未换代
+        assertEquals(false, FlinkJobStatusChecker.generationChanged("tm-1", "tm-1"));
+        // TaskManager 重新注册（JM 重启）→ 换代
+        assertEquals(true, FlinkJobStatusChecker.generationChanged("tm-1", "tm-2"));
+        assertEquals(true, FlinkJobStatusChecker.generationChanged("tm-1,tm-2", "tm-3"));
+        // 任一时刻取不到集群信息时不判定，避免误报
+        assertEquals(false, FlinkJobStatusChecker.generationChanged("tm-1", null));
+        assertEquals(false, FlinkJobStatusChecker.generationChanged(null, null));
     }
 }

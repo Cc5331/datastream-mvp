@@ -66,6 +66,13 @@ public class FlinkJobStatusChecker {
     /** mock 占位 ID 认领真实作业的最大时间差：超过则认为不是本次提交产生的作业 */
     private static final long MOCK_RESOLVE_MAX_DIFF_MS = 5 * 60 * 1000L;
 
+    /**
+     * 集群一代标识（当前在册 TaskManager 的注册 ID 集合）。
+     * JM 重启后 TaskManager 会重新注册并拿到新 ID，因此该标识变化即视为「集群换代」，
+     * 用它区分「作业正常结束后被 Flink 移出 overview」与「作业随集群重启丢失」。
+     */
+    private volatile String clusterGeneration;
+
     private static final Map<String, JobStatus> FLINK_TO_LOCAL_STATUS = new java.util.HashMap<>() {{
         put("CREATED", JobStatus.SUBMITTED);
         put("INITIALIZING", JobStatus.RUNNING);
@@ -121,6 +128,8 @@ public class FlinkJobStatusChecker {
             }
 
             // ---- Step 3: For each active mock/placeholder job, find the best matching real Flink job ----
+            boolean generationCheckedThisCycle = false;
+            boolean clusterRestartedThisCycle = false;
             for (JobDefinition job : activeJobs) {
                 String flinkJobId = job.getFlinkJobId();
                 if (flinkJobId == null) continue;
@@ -211,32 +220,106 @@ public class FlinkJobStatusChecker {
                     fetchFlinkJobError(job, flinkJobId);
                 }
 
-                // If the job was not found in Flink overview but was in RUNNING/SUBMITTED state,
-                // it may have completed and already been removed from the overview
+                // 作业不在 overview 里：可能是「跑完被 Flink 移除」，也可能是「JM 重启后作业丢失」。
+                // 先用集群一代标识判断本轮是否发生集群换代，再决定置 COMPLETED 还是 FAILED，
+                // 避免把「随集群重启丢失」误判成成功（与 HeartbeatMonitor 的 JOB_HEARTBEAT_LOST 语义对齐）。
                 if (!jobFoundInFlink && !needsResolution) {
-                    log.info("Job {} (Flink ID: {}) not found in Flink overview, may have completed", job.getId(), flinkJobId);
-                    if (job.getStatus() == JobStatus.RUNNING || job.getStatus() == JobStatus.SUBMITTED) {
-                        log.info("Job {} transitioning from {} -> COMPLETED (job not in Flink)", job.getId(), job.getStatus());
-                        job.setStatus(JobStatus.COMPLETED);
-                        job.setUpdatedAt(LocalDateTime.now());
-                        job.setCompletedAt(LocalDateTime.now());
-                        jobRepo.save(job);
-                        JobLog l = new JobLog();
-                        l.setJobId(job.getId()); l.setLevel("INFO");
-                        l.setMessage("Status: COMPLETED (job no longer in Flink overview)");
-                        l.setTimestamp(LocalDateTime.now());
-                        logRepo.save(l);
-convertExcelOutputsIfNeeded(job);
-                        mergeCsvOutputsIfNeeded(job);
-                        mergeJsonOutputsIfNeeded(job);
-                        convertXmlOutputsIfNeeded(job);
-                        convertParquetOutputsIfNeeded(job);
+                    if (!generationCheckedThisCycle) {
+                        generationCheckedThisCycle = true;
+                        String generation = probeClusterGeneration(httpClient);
+                        if (generation != null) {
+                            String previous = clusterGeneration;
+                            clusterGeneration = generation;
+                            clusterRestartedThisCycle = generationChanged(previous, generation);
+                            if (clusterRestartedThisCycle) {
+                                log.warn("Flink cluster generation changed ({} -> {})，本轮从 overview 消失的作业按「随集群重启丢失」处理",
+                                        previous, generation);
+                            }
+                        }
                     }
+                    markMissingJob(job, clusterRestartedThisCycle, flinkJobId);
                 }
             }
             finalizeRecentlyCompletedJobs();
         } catch (Exception e) {
             log.debug("Job status sync: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 作业在 /jobs/overview 中消失后的落地处理。
+     * - 正常结束：Flink 会把已结束的作业移出 overview → COMPLETED（保持既有输出合并行为）
+     * - 集群换代（JM 重启 / TaskManager 重新注册）：作业是被丢掉的，不是跑完的 → FAILED 并即时告警
+     */
+    void markMissingJob(JobDefinition job, boolean clusterRestarted, String flinkJobId) {
+        if (job.getStatus() != JobStatus.RUNNING && job.getStatus() != JobStatus.SUBMITTED) return;
+        if (resolveMissingJobStatus(clusterRestarted) == JobStatus.COMPLETED) {
+            log.info("Job {} (Flink ID: {}) not found in Flink overview, may have completed", job.getId(), flinkJobId);
+            log.info("Job {} transitioning from {} -> COMPLETED (job not in Flink)", job.getId(), job.getStatus());
+            job.setStatus(JobStatus.COMPLETED);
+            job.setUpdatedAt(LocalDateTime.now());
+            job.setCompletedAt(LocalDateTime.now());
+            jobRepo.save(job);
+            JobLog l = new JobLog();
+            l.setJobId(job.getId()); l.setLevel("INFO");
+            l.setMessage("Status: COMPLETED (job no longer in Flink overview)");
+            l.setTimestamp(LocalDateTime.now());
+            logRepo.save(l);
+            convertExcelOutputsIfNeeded(job);
+            mergeCsvOutputsIfNeeded(job);
+            mergeJsonOutputsIfNeeded(job);
+            convertXmlOutputsIfNeeded(job);
+            convertParquetOutputsIfNeeded(job);
+            return;
+        }
+        log.warn("Job {} (Flink ID: {}) disappeared together with the cluster restart, marking FAILED", job.getId(), flinkJobId);
+        job.setStatus(JobStatus.FAILED);
+        job.setUpdatedAt(LocalDateTime.now());
+        job.setCompletedAt(LocalDateTime.now());
+        jobRepo.save(job);
+        JobLog l = new JobLog();
+        l.setJobId(job.getId()); l.setLevel("ERROR");
+        l.setMessage("Status: FAILED (Flink 集群重启，作业已不在集群中，未产出有效结果)");
+        l.setTimestamp(LocalDateTime.now());
+        logRepo.save(l);
+        fetchFlinkJobError(job, flinkJobId);
+        healthMonitor.notifyJobFailed(job);
+    }
+
+    /** 消失判定：集群换代 → FAILED；否则 → COMPLETED（Flink 正常结束后会从 overview 移除） */
+    static JobStatus resolveMissingJobStatus(boolean clusterRestarted) {
+        return clusterRestarted ? JobStatus.FAILED : JobStatus.COMPLETED;
+    }
+
+    /** 集群一代标识是否变化：首次观测（previous 为空）不算重启，任一侧取不到也不判定 */
+    static boolean generationChanged(String previous, String current) {
+        return previous != null && current != null && !previous.equals(current);
+    }
+
+    /**
+     * 探测集群一代标识 = 当前在册 TaskManager 的注册 ID 集合（排序后拼接）。
+     * 取不到（REST 非 200 / 没有 TaskManager）时返回 null，本轮不做换代判定。
+     */
+    String probeClusterGeneration(HttpClient httpClient) {
+        try {
+            HttpResponse<String> resp = httpClient.send(
+                    HttpRequest.newBuilder()
+                            .uri(URI.create("http://" + flinkHost + ":" + flinkPort + "/taskmanagers"))
+                            .timeout(java.time.Duration.ofSeconds(5)).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200) return null;
+            JsonNode tms = objectMapper.readTree(resp.body()).get("taskmanagers");
+            if (tms == null || !tms.isArray() || tms.isEmpty()) return null;
+            java.util.List<String> ids = new java.util.ArrayList<>();
+            for (JsonNode tm : tms) {
+                if (tm.has("id")) ids.add(tm.get("id").asText());
+            }
+            if (ids.isEmpty()) return null;
+            java.util.Collections.sort(ids);
+            return String.join(",", ids);
+        } catch (Exception e) {
+            log.debug("cluster generation probe failed: {}", e.getMessage());
+            return null;
         }
     }
 
