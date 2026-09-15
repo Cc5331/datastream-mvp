@@ -38,6 +38,8 @@ test-resources/data/large/
 Thumbs.db
 
 test-resources/data/*.nohdr
+# CSV 输入作业运行时会剥离表头生成 *.nohdr，属可再生的中间产物
+data/*.nohdr
 test-resources/data/sample_data_converted.csv
 test-resources/data/processed_job_data_*.xlsx
 
