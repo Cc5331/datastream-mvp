@@ -30,10 +30,8 @@ public class LineageService {
     public Map<String, Object> getJobLineage(Long jobId, CurrentUser cu) {
         JobDefinition job = jobRepo.findById(jobId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "作业不存在: " + jobId));
-        if (cu == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "未登录");
-        if (!cu.isAdmin() && job.getOwnerId() != null && !job.getOwnerId().equals(cu.id())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "无权访问该作业");
-        }
+        // 统一走 JobAccess：ownerId 为空的作业仅管理员可访问（见 security/JobAccess）
+        com.datastream.mvp.security.JobAccess.assertCanAccess(job, cu);
         List<Map<String, Object>> assets = extractAssets(job.getDagJson());
         Map<String, Object> result = new LinkedHashMap<>();
         Map<String, Object> jobInfo = new LinkedHashMap<>();

@@ -240,11 +240,8 @@ public class DependencyService {
     }
 
     private void assertAccess(JobDefinition job, CurrentUser cu) {
-        if (cu == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "未登录");
-        if (cu.isAdmin()) return;
-        if (job.getOwnerId() != null && !job.getOwnerId().equals(cu.id())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "无权访问该作业");
-        }
+        // 统一走 JobAccess：ownerId 为空的作业仅管理员可访问（见 security/JobAccess）
+        com.datastream.mvp.security.JobAccess.assertCanAccess(job, cu);
     }
 
     private void addLog(Long jobId, String level, String message) {

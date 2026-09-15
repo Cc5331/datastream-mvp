@@ -72,7 +72,7 @@ public class MonitorService {
 
     /**
      * 监控总览。cu 为 null 时不做归属过滤（仅供系统级 AI 诊断聚合使用）；
-     * 传入当前用户时，非管理员只能看到自己（或历史遗留无归属）的作业。
+     * 传入当前用户时，非管理员只能看到自己创建的作业（无归属作业仅管理员可见）。
      */
     public List<ObjectNode> overview(CurrentUser cu) {
         List<ObjectNode> result = new ArrayList<>();
@@ -574,11 +574,14 @@ public class MonitorService {
         return removeTrend(jobId);
     }
 
-    /** 归属判定：ADMIN 全量；其余用户仅限自己创建的作业（历史无归属数据放行）。 */
+    /**
+     * 归属判定：ADMIN 全量；cu 为 null 表示系统内部聚合调用（overview()/trends() 无参重载，如 AI 诊断），不做过滤；
+     * 传入真实用户时统一走 {@link com.datastream.mvp.security.JobAccess#canAccess}——
+     * 即非管理员只能看自己创建的作业，**ownerId 为空的历史作业同样不可见**（此前这里放行，与 JobService 规则不一致）。
+     */
     private boolean canSee(JobDefinition job, CurrentUser cu) {
         if (cu == null) return true;
-        if (cu.isAdmin()) return true;
-        return job.getOwnerId() == null || job.getOwnerId().equals(cu.id());
+        return com.datastream.mvp.security.JobAccess.canAccess(job, cu);
     }
 
     private long lastPointTime(ArrayNode points) {
