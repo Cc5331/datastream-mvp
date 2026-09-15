@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -17,11 +18,15 @@ import java.util.Map;
 
 /**
  * Kafka 可视化 REST API：topic 列表/统计 + SSE 实时消息流。
+ *
+ * 权限：消息体是原始业务数据，话题名与内容都属于平台级信息，仅 ADMIN/OPERATOR 可读
+ * （VIEWER 只看自己的作业，不开放任意 topic 的实时数据）。
  */
 @Slf4j
 @RestController
 @RequestMapping("/api/kafka")
 @RequiredArgsConstructor
+@PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
 public class KafkaMonitorController {
 
     private final KafkaMonitorService kafkaMonitorService;

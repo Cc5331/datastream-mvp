@@ -108,7 +108,7 @@
                         <template #dropdown><el-dropdown-menu>
                             <el-dropdown-item command="monitor"><el-icon><data-line /></el-icon>实时监控</el-dropdown-item>
                             <el-dropdown-item command="cluster"><el-icon><monitor /></el-icon>集群健康</el-dropdown-item>
-                            <el-dropdown-item command="kafka"><el-icon><connection /></el-icon>Kafka 可视化</el-dropdown-item>
+                            <el-dropdown-item v-if="canEdit" command="kafka"><el-icon><connection /></el-icon>Kafka 可视化</el-dropdown-item>
                             <el-dropdown-item command="workflow"><el-icon><share /></el-icon>工作流</el-dropdown-item>
                             <el-dropdown-item command="alerts"><el-icon><bell /></el-icon>告警中心（{{ alertUnread }}）</el-dropdown-item>
                         </el-dropdown-menu></template>
@@ -343,7 +343,7 @@
                             </el-form>
                             
                             <div style="display:flex;gap:6px;">
-                                <el-button size="small" type="success" plain @click="previewNode" style="flex:1;" :loading="previewLoading"><el-icon><zoom-in /></el-icon> 预览数据</el-button>
+                                <el-button v-if="canEdit" size="small" type="success" plain @click="previewNode" style="flex:1;" :loading="previewLoading"><el-icon><zoom-in /></el-icon> 预览数据</el-button>
                                 <el-button size="small" type="primary" @click="applyParams" style="flex:1;"><el-icon><circle-check /></el-icon> 应用参数</el-button>
                             </div>
                         </div>

@@ -7,6 +7,7 @@ import com.datastream.mvp.service.JobService;
 import com.datastream.mvp.service.PreviewService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -19,10 +20,14 @@ import java.util.Map;
 
 /**
  * 数据预览接口：按文件类型读取前 N 行，供前端画布节点“预览数据”。
+ *
+ * 权限：预览会回显服务器上白名单目录内的原始数据，仅 ADMIN/OPERATOR 可用
+ * （VIEWER 为只读角色，只能看作业状态，不开放文件内容读取）。
  */
 @RestController
 @RequestMapping("/api/preview")
 @RequiredArgsConstructor
+@PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
 public class PreviewController {
 
     private final PreviewService previewService;
