@@ -334,7 +334,7 @@
 
 ### 9.1 服务健康
 - 前端 3000 返回 200、后端 18080（或手工启动的 8080）返回 200、Flink 18081 返回 200（如已启动）。
-- 后端 `/api/controls` 返回 **29** 个控件（重启后 DataInitializer 会清空重建注册表）。
+- 后端 `/api/controls` 返回与 `DataInitializer` 中 `createControl` 数量一致的控件（当前 **31** 个；重启后 DataInitializer 会清空重建注册表）。
 
 ### 9.2 核心链路（用 test-resources/data/sales.csv、sample_data.xlsx）
 - [ ] CSV → CSV：output/dag_sales_out2.csv 生成，行数 = 源行数 + 表头，中文正常。
@@ -356,15 +356,34 @@
 
 ---
 
-## 10. 后续完善路线（2026-09-11 重排）
-1. **安全收尾**：token 吊销（黑名单/版本号）、Monitor/Kafka/Preview 端点补角色与 owner 限制、ownerId 为空的历史作业收紧可见性、审计与日志脱敏。
-2. **Flink 状态语义修正**：区分「作业完成」与「Flink 重启后归档」，消除与 HeartbeatMonitor 的冲突；mock 作业增加超时兜底状态。
-3. **并发安全**：JobService.submit 加状态 CAS/锁，定时器与依赖触发不重复提交；输出合并加锁，避免与轮询器并发写同一批 part。
-4. **调度线程池隔离**：MonitorService 的 2s HTTP 采集与告警/调度分池，避免互相阻塞。
-5. **补测试空白**：FlinkJobStatusChecker、MysqlTableCreator、PluginLoaderService、Kafka/Parquet/HDFS 链路、调度与用户隔离。
-6. **前端工程化**：拆分 app.js 巨石、清理死 CSS、定时器/图表统一 dispose（可选引入构建步骤）。
-7. **AI 侧**：多服务商接入更多模型、诊断规则库扩充、Prompt 版本管理。
-8. **Docker 收尾**：docker-compose 已可用，补齐 compose 环境下的初始化剧本与一键验收脚本。
+## 10. 后续完善路线（2026-09-12 交叉核对后重排）
+
+> 2026-09-11 我列出的 8 条路线，已与并行开发提交（`99ac2fe` 多数据源、`65e1d6e` 告警与 mock 认领、
+> `c404a73` 安全 P0/P1、`7ed8bbf` 平台治理、`fdc6b73` 数据源管理、`34172e0` 预检、`1f190d6` 模板中心、
+> `236e8c9` 账户）逐条比对源码，结论如下（✅ 已完成 / 🟡 部分完成 / ⬜ 仍开放）。
+
+1. **安全收尾** 🟡
+   - ✅ Monitor 端点已按 owner 过滤（`MonitorController` 调 `SecurityUtils.currentUser()`），删除趋势需 ADMIN/OPERATOR
+   - ✅ `/api/preview/file` 的 allowed-roots 白名单已抽出 `PreviewService.assertAllowedRead`，作业输出预览复用同一份校验（修掉「DAG 里填任意路径读回 .env」）
+   - ✅ 用户停用/角色变更**下一请求立即生效**（`JwtAuthFilter` 每请求按 userId 回查数据库并校验 enabled）
+   - ⬜ **token 无吊销**：改密码/登出都不会让已签发 token 失效（无 tokenVersion / passwordChangedAt），需补
+   - ⬜ `KafkaMonitorController`、`PreviewController` 仍只要求登录，无角色限制（任意登录用户可读任意 topic / 预览文件）
+   - ⬜ `JobService.assertCanAccess` 仍是「ownerId 非空才校验」，**ownerId 为空的历史作业对所有登录用户开放**
+2. **Flink 状态语义修正** ⬜
+   - ✅ mock 认领已加时间上限（`MOCK_RESOLVE_MAX_DIFF_MS`，超出则拒绝认领并从候选移除），修掉「认领 976 秒前旧作业」
+   - ⬜ 「不在 `/jobs/overview` 即置 COMPLETED」仍在（`FlinkJobStatusChecker` 约 L216）：Flink 重启或归档会把 RUNNING 作业误判完成，与 HeartbeatMonitor 的 JOB_HEARTBEAT_LOST 语义冲突
+   - ⬜ mock 作业仍无超时兜底状态（集群不通时一直停在 SUBMITTED）
+3. **并发安全** ⬜
+   - ⬜ `JobService.submit` 仍无锁/CAS：手动提交、JobScheduler、DependencyService 可并发触发同一作业
+   - ⬜ 输出合并无锁：`cleanOutputTempDirs`（`DagTranslationService` L83/L743）在提交时清掉同名 `.tmp` / `_temp_csv` 暂存目录，若上一轮运行仍在写同一路径就会丢数据；`mergeCsvParts` 先删后写同样存在窗口
+4. **调度线程池隔离** ✅ 已修：`spring.task.scheduling.pool.size=${APP_SCHEDULING_POOL_SIZE:4}`，2s 采集不再独占唯一调度线程；告警邮件另有独立有界线程池（`AsyncExecutorConfig.alertTaskExecutor`，CallerRunsPolicy）
+5. **补测试空白** 🟡 测试从 18 类 / 71 用例增长到 **33 类 / 136 用例**（新增 `FlinkJobStatusCheckerTest`、`MysqlTableCreatorTest`、`DataSource*Test`、`AvatarStorageServiceTest`、`ClusterHealthServiceTest`、`JobTimelineServiceTest` 等）
+   - ⬜ 仍无：`PluginLoaderService`、Parquet / HDFS / Excel 输入输出链路、`JobScheduler`、多用户隔离的端到端用例
+6. **前端工程化** ⬜（且在恶化）：`app.js` 从 2451 行涨到 **3381 行**、`index.html` 1236 → 1423 行；resize 监听不释放、部分 ECharts 不 dispose、死 CSS 仍在
+7. **AI 侧** 🟡：诊断已统一切 DeepSeek（`e694dae`），提示词模板与示例扩充到 16/10（`1f190d6`）；⬜ 模型白名单外的多服务商编排、诊断规则库版本化仍未做
+8. **Docker 收尾** 🟡：compose 已扩到多数据库（PG/Oracle 相关服务、初始化 SQL、healthcheck），修掉容器内 SMTP 与 Kafka bootstrap 缺失；⬜ 仍缺 compose 环境下的一键验收剧本
+
+> 建议下一步优先级：**2（状态语义）→ 1 的 token 吊销与 owner 空白 → 3（并发安全）**——这三项都在「真跑 + 多用户 + 重跑」场景下会直接暴露，且都有明确修法。
 
 ---
 
@@ -496,3 +515,4 @@
 | 2026-09-15 | **修复落库作业 `Flink SQL 第 4 条语句执行失败` 并显式化 MySQL 建表策略**：作业 #2386（CSV→字段拼接→MySQL）提交即 FAILED，AI 诊断为「password 为空/表不存在」。实际排查（Gateway 会话逐条复现）推翻了该结论：`MysqlTableCreator` 日志显示表**已成功创建**（`dataflow.ai_demo`，9 列），凭据也正常（`resolveCredential` 从 `MYSQL_PASSWORD` 注入，非节点内联）。真因是 `field_concat` 生成了**非法 SQL**——`fields` 参数为 JSON 数组，`renderTemplate` 直接 `toString()` 得到 `CONCAT([product_category, channel])`，方括号触发 `SqlParseException: Encountered "["`。修复：① 新增 `buildFieldConcatSelect`，把 fields 解析为字段列表并逐个 `quoteFlinkField` + `CAST(... AS STRING)`，支持 JSON 数组与逗号分隔两种历史写法，新增 `separator` 生效；② `field_concat` schema 的 fields 由 `array` 改为 `string`（逗号分隔），从源头避免数组被拼进 SQL；③ `MysqlTableCreator` 补 `createTablePolicy`（CREATE_IF_MISSING / FAIL_IF_MISSING / VALIDATE_EXISTING，**未设置时默认自动建表**，且改为先查 `information_schema` 再建、不再无脑 `IF NOT EXISTS`），与 PG/Oracle 对齐；④ 拆出 `mysqlOutputParamSchema`，让 mysql_output 暴露建表策略（mysql_input 不受影响）；⑤ AI 提示词补充「mysql_output 必须带 CREATE_IF_MISSING」「field_concat.fields 用逗号分隔字符串」；⑥ 预检对 `string` 类型容忍数组值（旧 DAG 兼容）。**实测**：删表后重新提交作业 #2386 → **COMPLETED**，自动建表 9 列、写入 3000 行、拼接列 `category_channel` 值正确（`图书,跨境`）。后端 **135** 测试全绿 | DagTranslationService / DataInitializer / MysqlTableCreator / DagPreflightService / ai-prompts(nl2pipeline.zh\|en) / DagTranslationServiceTest / DagPreflightServiceTest / MysqlTableCreatorTest(新) / DataInitializerSchemaTest(新) / DEVELOPMENT |
 | 2026-09-15 | **丰富模板中心与 AI 示例，并修复链式 transform 与模板路径不可用**：模板中心由 3 个扩到 **16 个**（实时采集 / 格式转换 / 字段处理 / 数据清洗 / 数据落库五类，分类下拉改为从模板动态生成），AI 试试模块由 3 条扩到 **10 条**，覆盖拼接、过滤、去重、空值校验、Excel/XML/JSON/Parquet 与 MySQL 落库。**修复三类缺陷**：① **模板路径本机不可用**——模板沿用容器语义的 `/data`、`/test-resources`、`/output` 占位，而 `resolveRuntimePath` 在 Windows 直接返回原值，套用后提交必报「CSV 输入文件不存在」（用探针作业实测复现）；新增 `resolveTemplatePath`，从控件默认路径反推项目根目录再拼占位符，与 compose 的挂载语义一致。② **链式 transform 从未被支持**——边循环对 `transform→transform` 直接 `continue`，导致中间节点（如 row_filter 后的 field_concat）从未生成表，下游引用了不存在的表名；抽出 `buildTransformSql` 供两处复用，链中间节点物化为 `CREATE TEMPORARY VIEW` 并按节点去重，末尾节点仍内联进 INSERT，保持单 transform 作业 SQL 形态不变。③ **MySQL 模板缺 url**——节点 params 不回退 schema 默认值，模板必须显式写入 JDBC URL 与 `createTablePolicy`。**验证**：16 个模板全部真实提交并跑完（串行等待空闲槽位，`csv2pipeline` 的 3000 行过滤后落库 2395 行），产出 CSV/JSON/XML/Excel/Parquet 与 MySQL 表 `sales_demo`(3000)、`sales_pipeline`(2395) 均正确。排查中另确认 `csv2parquet`/`csv2csv_validate` 的失败是 TaskManager **4 个 Slot 被常驻流式作业占满**所致，非模板问题。后端 **136** 测试、前端 **37** 测试全绿 | SAMPLE_DAGS + BUILTIN_TEMPLATES + resolveTemplatePath / DagTranslationService(buildTransformSql + 临时视图) / 前端 index.html + app.test.js / DagTranslationServiceTest / DEVELOPMENT |
 | 2026-09-15 | **账户资料、头像与在线状态闭环**：`AppUser` 新增头像键、签名、展示状态、最近登录/活动与更新时间；`GET/PUT /api/auth/me` 返回并更新完整个人资料，登录记录活动时间，普通用户无法修改用户名/角色/启停状态。头像采用 `backend/data/avatars` 文件存储、数据库仅保存 UUID 键；上传限 JPEG/PNG 2MB，先读图片头校验最大 4096px/总像素后才解码，并通过 subsampling + 512px 归一化重编码清除 EXIF，读取必须携带 JWT，替换/删除清理旧文件。导航栏最右侧改为头像+在线状态点，下拉提供个人资料、快捷状态切换和退出，弹窗支持名称、签名、展示状态与头像操作；头像经 Axios Blob 携带 Bearer token 读取，使用 `avatarVersion` 破缓存并用请求序号避免 Blob URL 竞态泄漏。在线状态分离 `statusPreference` 与服务端推导的 `publicStatus`：前端 60 秒 HTTP 心跳、90 秒超时离线、20 秒内重复心跳不落库，防并发重入，恢复可见/联网时补心跳，退出/401/卸载清理定时器。`JwtAuthFilter` 每次请求以数据库最新用户状态建立权限，管理员降权/停用与名称修改下一请求即生效。真实隔离后端验收：资料更新 `BUSY`、心跳、头像上传→鉴权读取(image/png)→删除全通过。后端 **125** 测试、前端 **33** 测试全绿 | AppUser / AuthController / UserService / AvatarStorageService / AppUserRepository / JwtAuthFilter / SecurityConfig / application.yml / .env.example / 前端 index.html + app.js + style.css + tests / DEVELOPMENT |
+| 2026-09-15 | P0/P1 路线交叉核对（对照并行提交 99ac2fe / 65e1d6e / c404a73 / 7ed8bbf / fdc6b73 / 34172e0 / 1f190d6 / 236e8c9 之后的源码逐条复核，HEAD=8dfde85）：第 10 节路线改为带状态标注（✅ 已完成 / 🟡 部分 / ⬜ 仍开放）并写明证据——**已修**：调度线程池隔离（`spring.task.scheduling.pool.size=4` + 告警邮件独立有界线程池 `AsyncExecutorConfig`）、mock 认领加时间上限（`MOCK_RESOLVE_MAX_DIFF_MS`，修掉认领 976 秒前旧作业）、Monitor 端点按 owner 过滤且删除趋势需 ADMIN/OPERATOR、预览白名单抽为 `PreviewService.assertAllowedRead` 并被作业输出预览复用（堵住读 `.env` 的路径）、`JwtAuthFilter` 每请求回查用户使停用/改角色下一请求即生效、测试从 18 类 71 用例增至 **33 类 136 用例**；**仍开放**：token 无吊销（无 tokenVersion/passwordChangedAt）、`KafkaMonitorController` 与 `PreviewController` 无角色限制、`assertCanAccess` 仍对 ownerId 为空的历史作业放开、Flink 重启时「不在 overview 即 COMPLETED」误判（与 JOB_HEARTBEAT_LOST 语义冲突）、`JobService.submit` 无锁/CAS 与 `cleanOutputTempDirs`+merge 的并发写窗口、`app.js` 从 2451 行涨到 **3381 行**、PluginLoaderService / Parquet / HDFS / JobScheduler 仍无测试。另修正 §9.1 控件数 29→31（新增 pg_output / oracle_output，前后端注册表一致性校验通过） | DEVELOPMENT.md |
