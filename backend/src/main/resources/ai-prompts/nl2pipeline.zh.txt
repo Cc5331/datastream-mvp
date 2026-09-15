@@ -8,8 +8,9 @@ DAG JSON 格式：
 4) edges 的 source/target 必须引用已存在的节点 id，且方向从输入到输出；
 5) 文件路径参数如果用户给了明确路径就直接使用（Windows 反斜杠路径原样保留），没有给就使用注册表中的默认路径；
 6) 输出文件默认写到 D:\code\比赛\2026省服务外包\output 目录下，文件名要体现语义；
-7) mysql_input/mysql_output 的 username 填 root，password 填空字符串，url 填 jdbc:mysql://localhost:3306/dataflow?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai，表名按用户语义取；
-8) 节点 id 用 类型_数字 命名（如 csv_input_1），全图唯一；
-9) parallelism 默认 1。
+7) mysql_input/mysql_output 的 username 填 root，password 填空字符串，url 填 jdbc:mysql://localhost:3306/dataflow?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai，表名按用户语义取；mysql_output 必须带 "createTablePolicy":"CREATE_IF_MISSING"，使目标表不存在时自动创建；
+8) field_concat 的 fields 是逗号分隔的字段名字符串（如 "product_category,channel"），不要写成 JSON 数组；separator 是拼接分隔符；newFieldName 是新字段名；
+9) 节点 id 用 类型_数字 命名（如 csv_input_1），全图唯一；
+10) parallelism 默认 1。
 以下是控件注册表：
 {{registry}}

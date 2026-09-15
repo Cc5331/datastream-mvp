@@ -688,68 +688,34 @@ public class DagTranslationService {
             }
         }
 
+        // transform→transform 的中间节点物化为 TEMPORARY VIEW，供下游 SELECT 引用；
+        // 末尾 transform（直接连输出）仍内联进 INSERT，保持原有单 transform 作业的 SQL 形态不变。
+        Set<String> materializedViews = new HashSet<>();
+
         for (DagDefinition.DagEdge edge : dag.getEdges()) {
             String sourceTable = sanitize(edge.getSource());
             String targetTable = sanitize(edge.getTarget());
 
             String targetCategory = nodeCategoryMap.get(edge.getTarget());
-            if ("transform".equals(targetCategory)) { continue; }
+            if ("transform".equals(targetCategory)) {
+                // 上游是 transform 时，当前边是链中间环节，需要把上游物化为视图
+                if ("transform".equals(nodeCategoryMap.get(edge.getSource()))) {
+                    String viewName = sanitize(edge.getSource());
+                    if (materializedViews.add(viewName)) {
+                        String viewSql = buildTransformSql(edge, dag.getEdges(), nodeTypeMap,
+                                transformNodeParams, hdfsHeaderFilters, nodeSchemas);
+                        flinkSql.append("CREATE TEMPORARY VIEW ").append(viewName).append(" AS\n")
+                                .append(viewSql).append(";\n\n");
+                    }
+                }
+                continue;
+            }
 
             String sourceCategory = nodeCategoryMap.get(edge.getSource());
             if ("transform".equals(sourceCategory)) {
-                String transformType = nodeTypeMap.get(edge.getSource());
-                String upstreamTable = null;
-                for (DagDefinition.DagEdge ie : dag.getEdges()) {
-                    if (ie.getTarget().equals(edge.getSource())) {
-                        upstreamTable = sanitize(ie.getSource());
-                        break;
-                    }
-                }
-                if (upstreamTable == null) upstreamTable = sourceTable;
-                // HDFS 输入含表头时，转换节点的上游同样要过滤
-                String upstreamHeaderFilter = hdfsHeaderFilters.get(edge.getSource()) != null
-                        ? hdfsHeaderFilters.get(edge.getSource()) : hdfsHeaderFilters.get(upstreamTable);
-                String upstreamSource = upstreamHeaderFilter != null
-                        ? "(SELECT * FROM " + upstreamTable + " WHERE " + upstreamHeaderFilter + ")"
-                        : upstreamTable;
-                String ts;
-                Map<String, Object> tp = transformNodeParams.get(edge.getSource());
-                if ("field_filter".equals(transformType)) {
-                    ts = "SELECT " + buildFieldFilterSelect(tp) + " FROM " + upstreamSource;
-                } else if ("field_rename".equals(transformType)) {
-                    ts = "SELECT " + buildFieldRenameSelect(tp, findIncomingSourceSchema(edge.getSource(), dag.getEdges(), nodeSchemas)) + " FROM " + upstreamSource;
-                } else if ("json_parse".equals(transformType)) {
-                    ts = "SELECT " + buildJsonParseSelect(tp, findIncomingSourceSchema(edge.getSource(), dag.getEdges(), nodeSchemas)) + " FROM " + upstreamSource;
-                } else if ("dedupe".equals(transformType)) {
-                    List<String> dedupeFields = parseCsvFields(tp != null ? tp.get("dedupeFields") : null);
-                    if (dedupeFields.isEmpty()) {
-                        ts = "SELECT DISTINCT * FROM " + upstreamTable;
-                    } else {
-                        String incomingSchema = findIncomingSourceSchema(edge.getSource(), dag.getEdges(), nodeSchemas);
-                        List<String> allCols = parseSchemaFieldNames(incomingSchema);
-                        if (allCols.isEmpty()) {
-                            ts = "SELECT DISTINCT " + quoteFieldsList(dedupeFields) + " FROM " + upstreamSource;
-                        } else {
-                            String partition = String.join(", ", dedupeFields.stream().map(this::quoteFlinkField).toList());
-                            String orderKey = quoteFlinkField(dedupeFields.get(0));
-                            String colList = String.join(", ", allCols.stream().map(this::quoteFlinkField).toList());
-                            ts = "SELECT " + colList + " FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY " + partition + " ORDER BY " + orderKey + ") AS __rn FROM " + upstreamTable + ") WHERE __rn = 1";
-                        }
-                    }
-                } else if ("validate".equals(transformType)) {
-                    ts = buildValidateSql(tp, upstreamTable);
-                } else if ("route".equals(transformType)) {
-                    ts = buildRouteSql(edge, dag.getEdges(), tp, upstreamTable);
-                } else if ("redis_lookup".equals(transformType)) {
-                    ts = buildRedisLookupSelect(tp, upstreamTable);
-                } else {
-                    ControlRegistry sc = controlService.findByType(transformType);
-                    ts = renderTemplate(sc.getFlinkTemplate(), tp, edge.getSource());
-                    ts = ts.replace(sanitize(edge.getSource()), upstreamTable);
-                }
-                if (ts == null || ts.isBlank()) {
-                    throw new IllegalArgumentException("转换节点未生成可执行 SQL: " + edge.getSource());
-                }
+                // 上游已在链中间物化为视图，直接引用视图名
+                String ts = buildTransformSql(edge, dag.getEdges(), nodeTypeMap,
+                        transformNodeParams, hdfsHeaderFilters, nodeSchemas);
                 flinkSql.append("INSERT INTO ").append(targetTable).append("\n").append(ts).append(";\n\n");
                 continue;
             }
@@ -1572,6 +1538,76 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
         return null;
     }
 
+    /**
+     * 构建某个 transform 节点的 SELECT 片段。
+     * 抽成方法是因为 transform→transform 链上的中间节点要物化为 VIEW，
+     * 与「末尾 transform 内联进下游 INSERT」两处都需要同一段逻辑。
+     */
+    private String buildTransformSql(DagDefinition.DagEdge edge,
+                                     List<DagDefinition.DagEdge> edges,
+                                     Map<String, String> nodeTypeMap,
+                                     Map<String, Map<String, Object>> transformNodeParams,
+                                     Map<String, String> hdfsHeaderFilters,
+                                     Map<String, String> nodeSchemas) {
+        String transformNodeId = edge.getSource();
+        String transformType = nodeTypeMap.get(transformNodeId);
+        String upstreamTable = null;
+        for (DagDefinition.DagEdge ie : edges) {
+            if (ie.getTarget().equals(transformNodeId)) {
+                upstreamTable = sanitize(ie.getSource());
+                break;
+            }
+        }
+        if (upstreamTable == null) upstreamTable = sanitize(transformNodeId);
+        // HDFS 输入含表头时，转换节点的上游同样要过滤
+        String upstreamHeaderFilter = hdfsHeaderFilters.get(transformNodeId) != null
+                ? hdfsHeaderFilters.get(transformNodeId) : hdfsHeaderFilters.get(upstreamTable);
+        String upstreamSource = upstreamHeaderFilter != null
+                ? "(SELECT * FROM " + upstreamTable + " WHERE " + upstreamHeaderFilter + ")"
+                : upstreamTable;
+        Map<String, Object> tp = transformNodeParams.get(transformNodeId);
+        String ts;
+        if ("field_filter".equals(transformType)) {
+            ts = "SELECT " + buildFieldFilterSelect(tp) + " FROM " + upstreamSource;
+        } else if ("field_rename".equals(transformType)) {
+            ts = "SELECT " + buildFieldRenameSelect(tp, findIncomingSourceSchema(transformNodeId, edges, nodeSchemas)) + " FROM " + upstreamSource;
+        } else if ("json_parse".equals(transformType)) {
+            ts = "SELECT " + buildJsonParseSelect(tp, findIncomingSourceSchema(transformNodeId, edges, nodeSchemas)) + " FROM " + upstreamSource;
+        } else if ("dedupe".equals(transformType)) {
+            List<String> dedupeFields = parseCsvFields(tp != null ? tp.get("dedupeFields") : null);
+            if (dedupeFields.isEmpty()) {
+                ts = "SELECT DISTINCT * FROM " + upstreamTable;
+            } else {
+                String incomingSchema = findIncomingSourceSchema(transformNodeId, edges, nodeSchemas);
+                List<String> allCols = parseSchemaFieldNames(incomingSchema);
+                if (allCols.isEmpty()) {
+                    ts = "SELECT DISTINCT " + quoteFieldsList(dedupeFields) + " FROM " + upstreamSource;
+                } else {
+                    String partition = String.join(", ", dedupeFields.stream().map(this::quoteFlinkField).toList());
+                    String orderKey = quoteFlinkField(dedupeFields.get(0));
+                    String colList = String.join(", ", allCols.stream().map(this::quoteFlinkField).toList());
+                    ts = "SELECT " + colList + " FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY " + partition + " ORDER BY " + orderKey + ") AS __rn FROM " + upstreamTable + ") WHERE __rn = 1";
+                }
+            }
+        } else if ("validate".equals(transformType)) {
+            ts = buildValidateSql(tp, upstreamTable);
+        } else if ("route".equals(transformType)) {
+            ts = buildRouteSql(edge, edges, tp, upstreamTable);
+        } else if ("redis_lookup".equals(transformType)) {
+            ts = buildRedisLookupSelect(tp, upstreamTable);
+        } else if ("field_concat".equals(transformType)) {
+            ts = "SELECT *, " + buildFieldConcatSelect(tp) + " FROM " + upstreamSource;
+        } else {
+            ControlRegistry sc = controlService.findByType(transformType);
+            ts = renderTemplate(sc.getFlinkTemplate(), tp, transformNodeId);
+            ts = ts.replace(sanitize(transformNodeId), upstreamTable);
+        }
+        if (ts == null || ts.isBlank()) {
+            throw new IllegalArgumentException("转换节点未生成可执行 SQL: " + transformNodeId);
+        }
+        return ts;
+    }
+
     private String findTransformSql(String transformNodeId, List<DagDefinition.DagEdge> edges, List<DagDefinition.DagNode> nodes) {
         for (DagDefinition.DagNode node : nodes) {
             if (node.getId().equals(transformNodeId)) {
@@ -1913,6 +1949,29 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
 
     private String buildFieldFilterSelect(Map<String, Object> params) {
         return quoteFieldsList(parseFieldList(params));
+    }
+
+    /**
+     * 字段拼接：CONCAT(`a`, `b`) AS `新字段`。
+     * fields 在 DAG 里可能是 JSON 数组或逗号分隔字符串，必须解析成字段列表再逐个加引号，
+     * 直接把 List.toString() 拼进模板会生成 CONCAT([a, b]) 这种方括号非法语法。
+     */
+    private String buildFieldConcatSelect(Map<String, Object> params) {
+        List<String> fields = parseCsvFields(params != null ? params.get("fields") : null);
+        if (fields.isEmpty()) {
+            throw new RuntimeException("字段拼接: 请填写要拼接的字段（逗号分隔或 JSON 数组）");
+        }
+        String newField = params != null && params.get("newFieldName") != null
+                ? params.get("newFieldName").toString().trim() : "";
+        if (newField.isEmpty()) throw new RuntimeException("字段拼接: 请填写新字段名");
+        String separator = params.get("separator") == null ? "," : params.get("separator").toString();
+        List<String> parts = new ArrayList<>();
+        for (int i = 0; i < fields.size(); i++) {
+            if (i > 0 && !separator.isEmpty()) parts.add("'" + escapeSqlLiteral(separator) + "'");
+            // CONCAT 要求参数为字符串，非字符串列需显式 CAST，否则 Flink 会因类型推断失败
+            parts.add("CAST(" + quoteFlinkField(fields.get(i)) + " AS STRING)");
+        }
+        return "CONCAT(" + String.join(", ", parts) + ") AS " + quoteFlinkField(newField);
     }
 
     private String buildFieldRenameSelect(Map<String, Object> params, String incomingSchema) {

@@ -103,6 +103,30 @@ class DagPreflightServiceTest {
     }
 
     @Test
+    void acceptsArrayValueForStringFieldParamsFromLegacyData() {
+        // field_concat.fields 历史数据存的是 JSON 数组，翻译层能解析，预检不应拦下
+        JobService jobs = mock(JobService.class);
+        ControlRegistryService controls = mock(ControlRegistryService.class);
+        DataSourceNodeResolver resolver = mock(DataSourceNodeResolver.class);
+        CurrentUser user = new CurrentUser(2L, "u", "U", "OPERATOR");
+        JobDefinition job = new JobDefinition();
+        job.setParallelism(1);
+        job.setDagJson("{\"parallelism\":1,\"nodes\":[{\"id\":\"in\",\"type\":\"src\",\"label\":\"in\",\"params\":{}},"
+                + "{\"id\":\"fc\",\"type\":\"concat\",\"label\":\"fc\",\"params\":{\"fields\":[\"a\",\"b\"]}},"
+                + "{\"id\":\"out\",\"type\":\"sink\",\"label\":\"out\",\"params\":{}}],"
+                + "\"edges\":[{\"source\":\"in\",\"target\":\"fc\"},{\"source\":\"fc\",\"target\":\"out\"}]}");
+        when(jobs.findByIdForUser(1L, user)).thenReturn(job);
+        when(controls.findAll()).thenReturn(List.of(
+                control("src", "input", "{}"),
+                control("concat", "transform", "{\"type\":\"object\",\"properties\":{\"fields\":{\"type\":\"string\"}}}"),
+                control("sink", "output", "{}")));
+
+        Map<String, Object> result = new DagPreflightService(jobs, controls, new ObjectMapper(), resolver).validate(1L, user);
+
+        assertEquals(true, result.get("valid"), "数组形式的字符串参数不应报类型错误: " + result.get("errors"));
+    }
+
+    @Test
     void rejectsNonBooleanAndBlankOptionalParamsAreTreatedAsAbsent() {
         JobService jobs = mock(JobService.class);
         ControlRegistryService controls = mock(ControlRegistryService.class);

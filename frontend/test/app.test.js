@@ -367,6 +367,58 @@ test('个人资料提供用户名与密码修改入口', () => {
   assert.match(appJs, /async function saveCredential\(\)/);
 });
 
+test('模板中心的模板与 SAMPLE_DAGS 一一对应且分类动态生成', () => {
+  const dagStart = appJs.indexOf('const SAMPLE_DAGS = {');
+  const dagEnd = appJs.indexOf('// 模板中心在 SAMPLE_DAGS');
+  const dagKeys = new Set([...appJs.slice(dagStart, dagEnd).matchAll(/^    '([a-z0-9_]+)': \{/gm)].map(m => m[1]));
+  const metaStart = appJs.indexOf('const BUILTIN_TEMPLATES');
+  const metaBlock = appJs.slice(metaStart, appJs.indexOf('].map(meta =>', metaStart));
+  const metaKeys = [...metaBlock.matchAll(/\{ key: '([a-z0-9_]+)'/g)].map(m => m[1]);
+
+  assert.ok(metaKeys.length >= 12, '模板数量应充足，当前 ' + metaKeys.length);
+  const missing = metaKeys.filter(k => !dagKeys.has(k));
+  assert.deepEqual(missing, [], '模板引用了不存在的 DAG: ' + missing.join(', '));
+  // 分类下拉改为动态生成，避免硬编码分类与模板脱节
+  assert.match(appJs, /const templateCategories = computed\(/);
+  assert.match(html, /v-for="cat in templateCategories"/);
+  assert.doesNotMatch(html, /<el-option label="批量处理" value="批量处理">/, '不应保留硬编码分类');
+});
+
+test('模板路径占位符解析为真实目录', () => {
+  // 模板里的 /data、/test-resources、/output 是容器语义占位，本机需换成绝对路径
+  assert.match(appJs, /const TEMPLATE_PATH_ROOTS = \['\/test-resources', '\/output', '\/data'\]/);
+  assert.match(appJs, /function resolveTemplatePath\(path\)/);
+  assert.match(appJs, /function resolveTemplatePaths\(node\)/);
+  const cloneBody = appJs.slice(appJs.indexOf('function cloneTemplateDag'), appJs.indexOf('async function useTemplate'));
+  assert.match(cloneBody, /resolveTemplatePaths\(node\)/, '应用模板时必须解析路径');
+});
+
+test('AI 示例覆盖主要控件组合', () => {
+  const start = appJs.indexOf('const aiExamples = [');
+  const block = appJs.slice(start, appJs.indexOf('];', start));
+  const count = (block.match(/^\s+'/gm) || []).length;
+  assert.ok(count >= 8, 'AI 示例应有足够数量，当前 ' + count);
+  for (const kw of ['拼接', '去重', '为空', 'excel', 'xml', 'json', 'mysql']) {
+    assert.ok(block.toLowerCase().includes(kw), '示例应覆盖场景: ' + kw);
+  }
+});
+
+test('模板事件绑定的方法都在 setup 返回值中暴露', () => {
+  // 模板引用未暴露的方法会在点击时抛 "xxx is not a function"（loadJobs 曾因此漏出），
+  // 静态扫出这类遗漏比等用户点出来便宜
+  const returnStart = appJs.lastIndexOf('return {');
+  assert.ok(returnStart > 0, '应有 setup 返回对象');
+  const returnBlock = appJs.slice(returnStart, appJs.indexOf('};', returnStart));
+  const exposed = new Set(returnBlock.match(/[A-Za-z_$][\w$]*/g));
+  const boundCalls = new Set();
+  const events = html.matchAll(/@(?:click|change|command|select|input|blur|focus|keyup|clear|remove|close|open)[\w.]*\s*=\s*"([^"]+)"/g);
+  for (const event of events) {
+    for (const call of event[1].matchAll(/([A-Za-z_$][\w$]*)\s*\(/g)) boundCalls.add(call[1]);
+  }
+  const missing = [...boundCalls].filter(name => !exposed.has(name));
+  assert.deepEqual(missing, [], '模板调用了未暴露的方法: ' + missing.join(', '));
+});
+
 test('用户在线状态使用独立 HTTP 心跳并在退出时清理', () => {
   assert.match(appJs, /async heartbeat\(\)/);
   assert.match(appJs, /auth\/presence\/heartbeat/);

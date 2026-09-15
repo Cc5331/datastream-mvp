@@ -6,10 +6,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyMap;
@@ -83,6 +86,8 @@ class DagTranslationServiceTest {
         when(controlService.findByType("xml_json")).thenReturn(control("xml_json", "transform",
                 "SELECT *, ${direction}(`${sourceField}`) AS `${targetField}` FROM ${id}"));
         when(controlService.findByType("redis_lookup")).thenReturn(control("redis_lookup", "transform", ""));
+        when(controlService.findByType("row_filter")).thenReturn(control("row_filter", "transform",
+                "SELECT * FROM ${id} WHERE ${params.condition}"));
     }
 
     private DagDefinition.DagNode node(String id, String type, Map<String, Object> params) {
@@ -178,8 +183,66 @@ class DagTranslationServiceTest {
 
         assertTrue(sql.contains("sale_id"), "上游 schema 应传播");
         assertTrue(sql.contains("merged"), "field_concat 新字段应出现在链路: " + sql);
-        assertTrue(sql.contains("INSERT INTO csv_output_1\nSELECT *, CONCAT(`sale_id`, `amount`) AS `merged` FROM csv_input_1;"),
+        assertTrue(sql.contains("INSERT INTO csv_output_1\nSELECT *, CONCAT(CAST(`sale_id` AS STRING), ',', CAST(`amount` AS STRING)) AS `merged` FROM csv_input_1;"),
                 "应生成完整可执行 INSERT SELECT: " + sql);
+        assertFalse(sql.contains("CONCAT(["), "不得把字段列表的方括号原样拼进 SQL: " + sql);
+    }
+
+    @Test
+    void chainedTransforms_materializeIntermediateNodeAsView() {
+        // 两个 transform 串联时，中间节点原本被跳过，导致下游引用了不存在的表名
+        Map<String, Object> rf = new HashMap<>();
+        rf.put("condition", "cast(`amount` as double) > 10000");
+        Map<String, Object> fc = new HashMap<>();
+        fc.put("fields", "region,channel");
+        fc.put("separator", "-");
+        fc.put("newFieldName", "region_channel");
+        List<DagDefinition.DagNode> nodes = List.of(
+                node("csv_input_1", "csv_input", csvInputParams()),
+                node("rf_1", "row_filter", rf),
+                node("fc_1", "field_concat", fc),
+                node("csv_output_1", "csv_output", csvOutputParams("chained.csv")));
+        List<DagDefinition.DagEdge> edges = List.of(
+                edge("e1", "csv_input_1", "rf_1"),
+                edge("e2", "rf_1", "fc_1"),
+                edge("e3", "fc_1", "csv_output_1"));
+
+        String sql = service.translate(dag("chained", 1, nodes, edges));
+
+        assertTrue(sql.contains("CREATE TEMPORARY VIEW rf_1 AS"),
+                "链中间的 transform 应物化为视图: " + sql);
+        assertTrue(sql.contains("WHERE cast(`amount` as double) > 10000"),
+                "中间节点应生成自己的过滤条件: " + sql);
+        assertTrue(sql.contains("INSERT INTO csv_output_1\nSELECT *, CONCAT(CAST(`region` AS STRING), '-', CAST(`channel` AS STRING)) AS `region_channel` FROM rf_1;"),
+                "末尾 transform 应引用中间视图: " + sql);
+        // 中间视图不能被重复定义
+        assertEquals(1, sql.split("CREATE TEMPORARY VIEW rf_1 AS", -1).length - 1,
+                "中间视图只应渲染一次: " + sql);
+    }
+
+    @Test
+    void fieldConcat_acceptsJsonArrayFieldsWithoutBracketsInSql() {
+        // 前端曾把 fields 存成 JSON 数组，List.toString() 会生成 CONCAT([a, b]) 这种非法语法
+        Map<String, Object> tf = new HashMap<>();
+        List<String> fields = new ArrayList<>();
+        fields.add("product_category");
+        fields.add("channel");
+        tf.put("fields", fields);
+        tf.put("separator", ",");
+        tf.put("newFieldName", "category_channel");
+        List<DagDefinition.DagNode> nodes = List.of(
+                node("csv_input_1", "csv_input", csvInputParams()),
+                node("fc_1", "field_concat", tf),
+                node("csv_output_1", "csv_output", csvOutputParams("concat.csv")));
+        List<DagDefinition.DagEdge> edges = List.of(
+                edge("e1", "csv_input_1", "fc_1"),
+                edge("e2", "fc_1", "csv_output_1"));
+
+        String sql = service.translate(dag("concat-array", 1, nodes, edges));
+
+        assertFalse(sql.contains("["), "SQL 中不应出现方括号: " + sql);
+        assertTrue(sql.contains("CONCAT(CAST(`product_category` AS STRING), ',', CAST(`channel` AS STRING)) AS `category_channel`"),
+                "数组形式 fields 应解析为带引号的字段列表: " + sql);
     }
 
     @Test

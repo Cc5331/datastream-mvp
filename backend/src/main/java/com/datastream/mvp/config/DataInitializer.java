@@ -185,7 +185,7 @@ public class DataInitializer implements CommandLineRunner {
         // MySQL Output
         createControl("mysql_output", "MySQL Output", "output",
                 "Write MySQL",
-                mysqlParamSchema(),
+                mysqlOutputParamSchema(),
                 "CREATE TABLE ${id} (\n  data STRING\n) WITH (\n  'connector' = 'jdbc',\n  'url' = '${url}',\n  'table-name' = '${table}',\n  'username' = '${username}',\n  'password' = '${password}',\n  'driver' = 'com.mysql.cj.jdbc.Driver'\n);",
                 "1.0.0", "built-in");
 
@@ -204,7 +204,7 @@ public class DataInitializer implements CommandLineRunner {
         // Field Concat (transform)
         createControl("field_concat", "Field Concat", "transform",
                 "Concat multiple fields into one",
-                "{\"type\":\"object\",\"properties\":{\"fields\":{\"type\":\"array\",\"title\":\"Fields (comma separated)\",\"default\":\"field1,field2\"},\"separator\":{\"type\":\"string\",\"title\":\"Separator\",\"default\":\",\"},\"newFieldName\":{\"type\":\"string\",\"title\":\"New field name\",\"default\":\"concat_field\"}},\"required\":[\"fields\",\"newFieldName\"]}",
+                "{\"type\":\"object\",\"properties\":{\"fields\":{\"type\":\"string\",\"title\":\"输入字段（逗号分隔）\",\"default\":\"field1,field2\"},\"separator\":{\"type\":\"string\",\"title\":\"分隔符\",\"default\":\",\"},\"newFieldName\":{\"type\":\"string\",\"title\":\"新字段名\",\"default\":\"concat_field\"}},\"required\":[\"fields\",\"newFieldName\"]}",
                 "SELECT *, CONCAT(${fields}) AS ${newFieldName} FROM ${id}",
                 "1.0.0", "built-in");
 
@@ -373,6 +373,19 @@ public class DataInitializer implements CommandLineRunner {
         // 默认值使用占位符（不预填真实密码），提交时由后端解析为环境变量 MYSQL_USERNAME / MYSQL_PASSWORD
         // URL 由 app.mysql.default-url 注入：本机 localhost:3306，容器内 mysql:3306
         return "{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\",\"title\":\"JDBC URL\",\"default\":\"" + defaultMysqlUrl + "\"},\"table\":{\"type\":\"string\",\"title\":\"Table\",\"default\":\"output_table\"},\"username\":{\"type\":\"string\",\"title\":\"User\",\"default\":\"${MYSQL_USERNAME}\"},\"password\":{\"type\":\"string\",\"title\":\"Password\",\"default\":\"${MYSQL_PASSWORD}\"}},\"required\":[\"url\",\"table\",\"username\"]}";
+    }
+
+    /**
+     * MySQL 输出参数 schema：在输入 schema 基础上增加建表策略，
+     * 默认 CREATE_IF_MISSING，使 AI 生成或手工搭建的落库作业无需预先建表。
+     */
+    private String mysqlOutputParamSchema() {
+        String base = mysqlParamSchema();
+        return base.substring(0, base.lastIndexOf("},"))
+                + ",\"createTablePolicy\":{\"type\":\"string\",\"title\":\"建表策略\",\"enum\":[\"CREATE_IF_MISSING\",\"FAIL_IF_MISSING\",\"VALIDATE_EXISTING\"],\"default\":\"CREATE_IF_MISSING\"}"
+                + ",\"writeMode\":{\"type\":\"string\",\"title\":\"写入模式\",\"enum\":[\"append\"],\"default\":\"append\"}"
+                + "},"
+                + "\"required\":[\"url\",\"table\",\"username\"]}";
     }
 
     /**

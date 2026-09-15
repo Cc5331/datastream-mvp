@@ -25,6 +25,10 @@ import java.util.regex.Pattern;
 @Service
 public class MysqlTableCreator {
 
+    private static final String CREATE_IF_MISSING = "CREATE_IF_MISSING";
+    private static final String FAIL_IF_MISSING = "FAIL_IF_MISSING";
+    private static final String VALIDATE_EXISTING = "VALIDATE_EXISTING";
+
     private static final Pattern DB_PATTERN =
             Pattern.compile("jdbc:mysql://[^/]+/([^?;]+)");
     private static final Pattern COLUMN_PATTERN =
@@ -75,22 +79,65 @@ public class MysqlTableCreator {
             throw new RuntimeException("无法从 JDBC URL 解析数据库名，请在 URL 中指定，如 jdbc:mysql://localhost:3306/dataflow?useSSL=false");
         }
 
+        String policy = (params.get("createTablePolicy") == null ? "" : params.get("createTablePolicy").toString())
+                .trim().toUpperCase();
+        // 未显式设置时按自动建表处理，历史 DAG 与 AI 生成的作业无需预先建表
+        if (policy.isEmpty()) policy = CREATE_IF_MISSING;
+        if (!List.of(CREATE_IF_MISSING, FAIL_IF_MISSING, VALIDATE_EXISTING).contains(policy)) {
+            throw new RuntimeException("MySQL 输出 createTablePolicy 不支持: " + policy);
+        }
+
         List<String> columns = parseColumns(sourceFields);
         if (columns.isEmpty()) {
             throw new RuntimeException("MySQL 输出无法获取字段定义，请确认输入/转换节点已正确连线");
         }
 
-        String ddl = "CREATE TABLE IF NOT EXISTS " + quotedTable + " (\n  "
-                + String.join(",\n  ", columns)
-                + "\n) DEFAULT CHARSET=utf8mb4";
-
-        log.info("MySQL auto-create table: {}", ddl);
-        try (Connection conn = DriverManager.getConnection(url, username, password);
-             Statement st = conn.createStatement()) {
-            st.execute(ddl);
-            log.info("MySQL table ensured: `{}`.`{}` ({} columns)", db, table, columns.size());
+        try (Connection conn = DriverManager.getConnection(url, username, password)) {
+            boolean exists = tableExists(conn, db, table);
+            if (exists) {
+                if (VALIDATE_EXISTING.equals(policy)) validateColumns(conn, db, table, sourceFields);
+                else log.info("MySQL table already exists, skip create: `{}`.`{}`", db, table);
+                return;
+            }
+            if (!CREATE_IF_MISSING.equals(policy)) {
+                throw new RuntimeException("MySQL 目标表不存在: " + db + "." + table
+                        + "；如需自动创建请将建表策略设为 CREATE_IF_MISSING");
+            }
+            String ddl = "CREATE TABLE " + quotedTable + " (\n  "
+                    + String.join(",\n  ", columns)
+                    + "\n) DEFAULT CHARSET=utf8mb4";
+            try (Statement st = conn.createStatement()) {
+                st.execute(ddl);
+            }
+            log.info("MySQL table created: `{}`.`{}` ({} columns)", db, table, columns.size());
+        } catch (RuntimeException e) {
+            throw e;
         } catch (Exception e) {
-            throw new RuntimeException("MySQL 自动建表失败: " + e.getMessage() + " | SQL: " + ddl, e);
+            throw new RuntimeException("MySQL 目标表准备失败: " + e.getMessage(), e);
+        }
+    }
+
+    private boolean tableExists(Connection conn, String db, String table) throws Exception {
+        try (java.sql.PreparedStatement ps = conn.prepareStatement(
+                "SELECT 1 FROM information_schema.tables WHERE table_schema = ? AND table_name = ? LIMIT 1")) {
+            ps.setString(1, db);
+            ps.setString(2, table);
+            try (java.sql.ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
+    private void validateColumns(Connection conn, String db, String table, String sourceFields) throws Exception {
+        Set<String> actual = new HashSet<>();
+        try (java.sql.ResultSet rs = conn.getMetaData().getColumns(db, null, table, null)) {
+            while (rs.next()) actual.add(rs.getString("COLUMN_NAME").toLowerCase());
+        }
+        for (String line : sourceFields.split("\\n")) {
+            Matcher m = COLUMN_PATTERN.matcher(line.trim().replaceFirst(",$", ""));
+            if (m.matches() && !actual.contains(m.group(1).replace("`", "").toLowerCase())) {
+                throw new RuntimeException("MySQL 目标表缺少字段: " + m.group(1));
+            }
         }
     }
 

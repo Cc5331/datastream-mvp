@@ -179,7 +179,7 @@
                 </div>
 
                 <div v-show="currentView === 'templates'" class="portal-view">
-                    <div class="page-heading"><div><h2>模板中心</h2><p>从经过校验的内置 DAG 快速开始</p></div><div class="filter-row"><el-input v-model="templateKeyword" clearable placeholder="搜索模板" style="width:220px"><template #prefix><el-icon><search /></el-icon></template></el-input><el-select v-model="templateCategory" clearable placeholder="全部分类" style="width:150px"><el-option label="实时采集" value="实时采集"></el-option><el-option label="批量处理" value="批量处理"></el-option></el-select></div></div>
+                    <div class="page-heading"><div><h2>模板中心</h2><p>从经过校验的内置 DAG 快速开始</p></div><div class="filter-row"><el-input v-model="templateKeyword" clearable placeholder="搜索模板" style="width:220px"><template #prefix><el-icon><search /></el-icon></template></el-input><el-select v-model="templateCategory" clearable placeholder="全部分类" style="width:150px"><el-option v-for="cat in templateCategories" :key="cat" :label="cat" :value="cat"></el-option></el-select></div></div>
                     <div class="card-grid"><article v-for="item in filteredTemplates" :key="item.key" class="enterprise-card template-card"><el-tag size="small">{{ item.category }}</el-tag><h3>{{ item.title }}</h3><p>{{ item.description }}</p><div><el-tag v-for="tag in item.tags" :key="tag" type="info" size="small">{{ tag }}</el-tag></div><footer><el-button @click="openTemplatePreview(item)"><el-icon><zoom-in /></el-icon> 预览</el-button><el-button type="primary" @click="useTemplate(item)"><el-icon><document-add /></el-icon> 使用模板</el-button></footer></article></div>
                     <el-empty v-if="!filteredTemplates.length" description="没有匹配的模板，请调整搜索条件"></el-empty>
                 </div>

@@ -124,7 +124,9 @@ public class DagPreflightService {
                 if (value.isTextual() && value.asText().isBlank()) return;
                 String type = entry.getValue().path("type").asText();
                 boolean typeOk = switch (type) {
-                    case "string" -> value.isTextual(); case "number" -> isNumericLike(value);
+                    // 字段类参数历史上被存成 JSON 数组（如 field_concat.fields），翻译层两种形式都能解析
+                    case "string" -> value.isTextual() || value.isArray();
+                    case "number" -> isNumericLike(value);
                     case "integer" -> isIntegralLike(value); case "boolean" -> isBooleanLike(value);
                     case "array" -> value.isArray(); case "object" -> value.isObject(); default -> true;
                 };

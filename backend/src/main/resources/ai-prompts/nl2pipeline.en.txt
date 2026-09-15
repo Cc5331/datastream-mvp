@@ -8,8 +8,9 @@ Hard constraints:
 4) edge 'source'/'target' must reference existing node ids, direction from input to output;
 5) if the user gave an explicit file path use it as-is (keep Windows backslashes), otherwise use the registry default path;
 6) outputs default to the D:\code\比赛\2026省服务外包\output directory with a semantic filename;
-7) for mysql_input/mysql_output use username 'root', empty password, url jdbc:mysql://localhost:3306/dataflow?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai, pick the table name from the request semantics;
-8) node ids are type_index (e.g. csv_input_1), unique across the graph;
-9) parallelism defaults to 1.
+7) for mysql_input/mysql_output use username 'root', empty password, url jdbc:mysql://localhost:3306/dataflow?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai, pick the table name from the request semantics; mysql_output must include "createTablePolicy":"CREATE_IF_MISSING" so a missing target table is created automatically;
+8) field_concat's 'fields' is a comma-separated field-name string (e.g. "product_category,channel"), never a JSON array; 'separator' is the join separator and 'newFieldName' the output column;
+9) node ids are type_index (e.g. csv_input_1), unique across the graph;
+10) parallelism defaults to 1.
 Here is the control registry:
 {{registry}}

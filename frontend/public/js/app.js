@@ -297,6 +297,8 @@ const CATEGORY_COLORS = {
 
 // ===== 示例作业（一键导入画布）=====
 const DEFAULT_OUTPUT_DIR = '/output';
+// 与后端 app.mysql.default-url 一致（可用 MYSQL_URL 覆盖）；模板不依赖 schema 默认值，必须显式写入
+const MYSQL_JDBC_URL = 'jdbc:mysql://localhost:3306/flink_demo?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai';
 const SAMPLE_DAGS = {
     'datagen2csv': {
         jobName: '示例：Datagen → CSV',
@@ -325,14 +327,162 @@ const SAMPLE_DAGS = {
             { id: 'csv_out_1', type: 'csv_output', label: 'CSV 输出', params: { path: DEFAULT_OUTPUT_DIR + '/sample_filtered.csv', hasHeader: true, delimiter: ',' }, x: 540, y: 140 }
         ],
         edges: [ { id: 'e1', source: 'csv_in_1', target: 'ff_1' }, { id: 'e2', source: 'ff_1', target: 'csv_out_1' } ]
+    },
+    'csv2csv_concat': {
+        jobName: '示例：CSV → 字段拼接 → CSV',
+        parallelism: 1,
+        nodes: [
+            { id: 'csv_in_1', type: 'csv_input', label: 'CSV 输入', params: { path: '/data/sales.csv', hasHeader: true, delimiter: ',' }, x: 120, y: 140 },
+            { id: 'fc_1', type: 'field_concat', label: '字段拼接', params: { fields: 'product_category,channel', separator: '/', newFieldName: 'category_channel' }, x: 330, y: 140 },
+            { id: 'csv_out_1', type: 'csv_output', label: 'CSV 输出', params: { path: DEFAULT_OUTPUT_DIR + '/sample_concat.csv', hasHeader: true, delimiter: ',' }, x: 540, y: 140 }
+        ],
+        edges: [ { id: 'e1', source: 'csv_in_1', target: 'fc_1' }, { id: 'e2', source: 'fc_1', target: 'csv_out_1' } ]
+    },
+    'csv2csv_rename': {
+        jobName: '示例：CSV → 字段改名 → CSV',
+        parallelism: 1,
+        nodes: [
+            { id: 'csv_in_1', type: 'csv_input', label: 'CSV 输入', params: { path: '/test-resources/data/orders.csv', hasHeader: true, delimiter: ',' }, x: 120, y: 140 },
+            { id: 'fr_1', type: 'field_rename', label: '字段改名', params: { mappings: 'order_id=订单号,amount=金额,status=状态' }, x: 330, y: 140 },
+            { id: 'csv_out_1', type: 'csv_output', label: 'CSV 输出', params: { path: DEFAULT_OUTPUT_DIR + '/sample_renamed.csv', hasHeader: true, delimiter: ',' }, x: 540, y: 140 }
+        ],
+        edges: [ { id: 'e1', source: 'csv_in_1', target: 'fr_1' }, { id: 'e2', source: 'fr_1', target: 'csv_out_1' } ]
+    },
+    'csv2csv_rowfilter': {
+        jobName: '示例：CSV → 行过滤 → CSV',
+        parallelism: 1,
+        nodes: [
+            { id: 'csv_in_1', type: 'csv_input', label: 'CSV 输入', params: { path: '/data/sales.csv', hasHeader: true, delimiter: ',' }, x: 120, y: 140 },
+            { id: 'rf_1', type: 'row_filter', label: '行过滤', params: { condition: 'cast(amount as double) > 20000' }, x: 330, y: 140 },
+            { id: 'csv_out_1', type: 'csv_output', label: 'CSV 输出', params: { path: DEFAULT_OUTPUT_DIR + '/sample_rowfilter.csv', hasHeader: true, delimiter: ',' }, x: 540, y: 140 }
+        ],
+        edges: [ { id: 'e1', source: 'csv_in_1', target: 'rf_1' }, { id: 'e2', source: 'rf_1', target: 'csv_out_1' } ]
+    },
+    'csv2csv_dedupe': {
+        jobName: '示例：CSV → 去重 → CSV',
+        parallelism: 1,
+        nodes: [
+            { id: 'csv_in_1', type: 'csv_input', label: 'CSV 输入', params: { path: '/test-resources/data/orders.csv', hasHeader: true, delimiter: ',' }, x: 120, y: 140 },
+            { id: 'dd_1', type: 'dedupe', label: '去重', params: { dedupeFields: 'user_id' }, x: 330, y: 140 },
+            { id: 'csv_out_1', type: 'csv_output', label: 'CSV 输出', params: { path: DEFAULT_OUTPUT_DIR + '/sample_deduped.csv', hasHeader: true, delimiter: ',' }, x: 540, y: 140 }
+        ],
+        edges: [ { id: 'e1', source: 'csv_in_1', target: 'dd_1' }, { id: 'e2', source: 'dd_1', target: 'csv_out_1' } ]
+    },
+    'csv2csv_validate': {
+        jobName: '示例：CSV → 空值校验 → CSV',
+        parallelism: 1,
+        nodes: [
+            { id: 'csv_in_1', type: 'csv_input', label: 'CSV 输入', params: { path: '/test-resources/data/quality_demo.csv', hasHeader: true, delimiter: ',' }, x: 120, y: 140 },
+            { id: 'vd_1', type: 'validate', label: '空值校验', params: { checkFields: 'id,name', ignoreEmpty: true }, x: 330, y: 140 },
+            { id: 'csv_out_1', type: 'csv_output', label: 'CSV 输出', params: { path: DEFAULT_OUTPUT_DIR + '/sample_validated.csv', hasHeader: true, delimiter: ',' }, x: 540, y: 140 }
+        ],
+        edges: [ { id: 'e1', source: 'csv_in_1', target: 'vd_1' }, { id: 'e2', source: 'vd_1', target: 'csv_out_1' } ]
+    },
+    'csv2excel': {
+        jobName: '示例：CSV → Excel',
+        parallelism: 1,
+        nodes: [
+            { id: 'csv_in_1', type: 'csv_input', label: 'CSV 输入', params: { path: '/data/sales.csv', hasHeader: true, delimiter: ',' }, x: 120, y: 140 },
+            { id: 'excel_out_1', type: 'excel_output', label: 'Excel 输出', params: { path: DEFAULT_OUTPUT_DIR + '/sample_output.xlsx', sheetName: '销售数据' }, x: 430, y: 140 }
+        ],
+        edges: [ { id: 'e1', source: 'csv_in_1', target: 'excel_out_1' } ]
+    },
+    'csv2json': {
+        jobName: '示例：CSV → JSON',
+        parallelism: 1,
+        nodes: [
+            { id: 'csv_in_1', type: 'csv_input', label: 'CSV 输入', params: { path: '/data/sales.csv', hasHeader: true, delimiter: ',' }, x: 120, y: 140 },
+            { id: 'json_out_1', type: 'json_output', label: 'JSON 输出', params: { path: DEFAULT_OUTPUT_DIR + '/sample_output.json', mode: 'lines' }, x: 430, y: 140 }
+        ],
+        edges: [ { id: 'e1', source: 'csv_in_1', target: 'json_out_1' } ]
+    },
+    'csv2xml': {
+        jobName: '示例：CSV → XML',
+        parallelism: 1,
+        nodes: [
+            { id: 'csv_in_1', type: 'csv_input', label: 'CSV 输入', params: { path: '/data/sales.csv', hasHeader: true, delimiter: ',' }, x: 120, y: 140 },
+            { id: 'xml_out_1', type: 'xml_output', label: 'XML 输出', params: { path: DEFAULT_OUTPUT_DIR + '/sample_output.xml', rootTag: 'sales', rowTag: 'record' }, x: 430, y: 140 }
+        ],
+        edges: [ { id: 'e1', source: 'csv_in_1', target: 'xml_out_1' } ]
+    },
+    'csv2parquet': {
+        jobName: '示例：CSV → Parquet',
+        parallelism: 1,
+        nodes: [
+            { id: 'csv_in_1', type: 'csv_input', label: 'CSV 输入', params: { path: '/data/sales.csv', hasHeader: true, delimiter: ',' }, x: 120, y: 140 },
+            { id: 'pq_out_1', type: 'parquet_output', label: 'Parquet 输出', params: { path: DEFAULT_OUTPUT_DIR + '/sample_output.parquet', delimiter: ',' }, x: 430, y: 140 }
+        ],
+        edges: [ { id: 'e1', source: 'csv_in_1', target: 'pq_out_1' } ]
+    },
+    'csv2mysql': {
+        jobName: '示例：CSV → MySQL（自动建表）',
+        parallelism: 1,
+        nodes: [
+            { id: 'csv_in_1', type: 'csv_input', label: 'CSV 输入', params: { path: '/data/sales.csv', hasHeader: true, delimiter: ',' }, x: 120, y: 140 },
+            { id: 'mysql_out_1', type: 'mysql_output', label: 'MySQL 输出', params: { url: MYSQL_JDBC_URL, table: 'sales_demo', username: 'root', password: '', createTablePolicy: 'CREATE_IF_MISSING' }, x: 430, y: 140 }
+        ],
+        edges: [ { id: 'e1', source: 'csv_in_1', target: 'mysql_out_1' } ]
+    },
+    'csv2pipeline': {
+        jobName: '示例：CSV → 清洗 → 拼接 → MySQL',
+        parallelism: 2,
+        nodes: [
+            { id: 'csv_in_1', type: 'csv_input', label: 'CSV 输入', params: { path: '/data/sales.csv', hasHeader: true, delimiter: ',' }, x: 100, y: 200 },
+            { id: 'rf_1', type: 'row_filter', label: '金额过滤', params: { condition: 'cast(amount as double) > 10000' }, x: 300, y: 200 },
+            { id: 'fc_1', type: 'field_concat', label: '拼接区域渠道', params: { fields: 'region,channel', separator: ' - ', newFieldName: 'region_channel' }, x: 500, y: 200 },
+            { id: 'mysql_out_1', type: 'mysql_output', label: 'MySQL 输出', params: { url: MYSQL_JDBC_URL, table: 'sales_pipeline', username: 'root', password: '', createTablePolicy: 'CREATE_IF_MISSING' }, x: 700, y: 200 }
+        ],
+        edges: [
+            { id: 'e1', source: 'csv_in_1', target: 'rf_1' },
+            { id: 'e2', source: 'rf_1', target: 'fc_1' },
+            { id: 'e3', source: 'fc_1', target: 'mysql_out_1' }
+        ]
+    },
+    'json2csv': {
+        jobName: '示例：JSON → CSV',
+        parallelism: 1,
+        nodes: [
+            { id: 'json_in_1', type: 'json_input', label: 'JSON 输入', params: { path: '/test-resources/data/sample.json', mode: 'auto' }, x: 120, y: 140 },
+            { id: 'csv_out_1', type: 'csv_output', label: 'CSV 输出', params: { path: DEFAULT_OUTPUT_DIR + '/sample_from_json.csv', hasHeader: true, delimiter: ',' }, x: 430, y: 140 }
+        ],
+        edges: [ { id: 'e1', source: 'json_in_1', target: 'csv_out_1' } ]
+    },
+    'xml2csv': {
+        jobName: '示例：XML → CSV',
+        parallelism: 1,
+        nodes: [
+            { id: 'xml_in_1', type: 'xml_input', label: 'XML 输入', params: { path: '/test-resources/data/orders.xml' }, x: 120, y: 140 },
+            { id: 'csv_out_1', type: 'csv_output', label: 'CSV 输出', params: { path: DEFAULT_OUTPUT_DIR + '/sample_from_xml.csv', hasHeader: true, delimiter: ',' }, x: 430, y: 140 }
+        ],
+        edges: [ { id: 'e1', source: 'xml_in_1', target: 'csv_out_1' } ]
     }
 };
 
 // 模板中心在 SAMPLE_DAGS 的合法 DAG 上叠加展示元数据，不改变 DAG 契约。
+// 所有模板均已按「本机绝对路径」验证可提交运行；path 中的 /data、/test-resources、/output
+// 在套用时由 resolveTemplatePath 解析为真实目录。
 const BUILTIN_TEMPLATES = [
+    // 实时采集
     { key: 'datagen2csv', category: '实时采集', title: '模拟数据写入 CSV', description: '快速搭建 Datagen 到 CSV 的流式采集链路', tags: ['Datagen', 'CSV'] },
     { key: 'datagen2json', category: '实时采集', title: '模拟数据写入 JSON', description: '生成结构化测试数据并输出 JSON Lines', tags: ['Datagen', 'JSON'] },
-    { key: 'csv2csv_filter', category: '批量处理', title: 'CSV 字段筛选', description: '读取 CSV、保留指定字段并写入新文件', tags: ['CSV', '字段过滤'] }
+    // 格式转换
+    { key: 'csv2excel', category: '格式转换', title: 'CSV 转 Excel', description: '读取 CSV 并写出为带工作表名的 xlsx 文件', tags: ['CSV', 'Excel'] },
+    { key: 'csv2json', category: '格式转换', title: 'CSV 转 JSON', description: '把 CSV 数据转换为 JSON Lines 输出', tags: ['CSV', 'JSON'] },
+    { key: 'csv2xml', category: '格式转换', title: 'CSV 转 XML', description: '自定义根元素与行元素的 XML 输出', tags: ['CSV', 'XML'] },
+    { key: 'csv2parquet', category: '格式转换', title: 'CSV 转 Parquet', description: '转换为列式 Parquet 文件，便于下游分析', tags: ['CSV', 'Parquet'] },
+    { key: 'json2csv', category: '格式转换', title: 'JSON 转 CSV', description: '读取 JSON 文件并展平为 CSV', tags: ['JSON', 'CSV'] },
+    { key: 'xml2csv', category: '格式转换', title: 'XML 转 CSV', description: '解析 XML 行元素并输出 CSV', tags: ['XML', 'CSV'] },
+    // 字段处理
+    { key: 'csv2csv_filter', category: '字段处理', title: 'CSV 字段筛选', description: '读取 CSV、保留指定字段并写入新文件', tags: ['CSV', '字段过滤'] },
+    { key: 'csv2csv_concat', category: '字段处理', title: 'CSV 字段拼接', description: '把多个字段拼接为新列（可自定义分隔符）', tags: ['CSV', '字段拼接'] },
+    { key: 'csv2csv_rename', category: '字段处理', title: 'CSV 字段改名', description: '按映射表批量重命名列，便于对接下游', tags: ['CSV', '字段改名'] },
+    // 数据清洗
+    { key: 'csv2csv_rowfilter', category: '数据清洗', title: 'CSV 行过滤', description: '按 SQL WHERE 条件筛掉不需要的数据行', tags: ['CSV', '行过滤'] },
+    { key: 'csv2csv_dedupe', category: '数据清洗', title: 'CSV 按字段去重', description: '按指定字段去重，仅保留首条记录', tags: ['CSV', '去重'] },
+    { key: 'csv2csv_validate', category: '数据清洗', title: 'CSV 空值校验', description: '丢弃必填字段为空的行，沉淀干净数据', tags: ['CSV', '空值校验'] },
+    // 数据落库
+    { key: 'csv2mysql', category: '数据落库', title: 'CSV 写入 MySQL', description: '目标表不存在时自动建表并按上游字段建列', tags: ['CSV', 'MySQL', '自动建表'] },
+    { key: 'csv2pipeline', category: '数据落库', title: '清洗后落库（多节点流水线）', description: '行过滤 → 字段拼接 → MySQL 自动建表，完整清洗链路', tags: ['CSV', 'MySQL', '流水线'] }
 ].map(meta => ({ ...meta, dag: SAMPLE_DAGS[meta.key] }));
 
 // ===== Vue App =====
@@ -423,6 +573,7 @@ const app = createApp({
         const templateCategory = ref('');
         const templatePreviewVisible = ref(false);
         const templatePreview = ref(null);
+        const templateCategories = computed(() => [...new Set(templates.value.map(t => t.category).filter(Boolean))]);
         const filteredTemplates = computed(() => templates.value.filter(item => {
             const keyword = templateKeyword.value.trim().toLowerCase();
             return (!templateCategory.value || item.category === templateCategory.value)
@@ -517,10 +668,18 @@ const app = createApp({
         const aiError = ref('');
         const aiResult = ref(null);
         const aiResultDag = ref(null);
+        // AI 示例按场景分组，均为项目内置数据 + 已验证控件组合，生成后可直接提交
         const aiExamples = [
-            '读取 D:\\code\\比赛\\2026省服务外包\\data\\sales.csv，把 product_category 和 channel 拼接成新列 category_channel，写出到 MySQL 表 ai_demo',
-            '读取 D:\\code\\比赛\\2026省服务外包\\data\\sales.csv，只保留 sale_id/region/amount 三列，写到 D:\\code\\比赛\\2026省服务外包\\output\\ai_filtered.csv',
-            '从 MySQL 表 flink_demo.user_data 读取数据，过滤 id > 1，输出到 JSON 文件'
+            '读取 data/sales.csv，把 product_category 和 channel 拼接成新列 category_channel，写入 MySQL 表 ai_demo',
+            '读取 data/sales.csv，只保留 sale_id、region、amount 三列，输出到 output/ai_filtered.csv',
+            '读取 data/sales.csv，筛选出 amount 大于 20000 的行，写出到 output/ai_high_amount.csv',
+            '读取 data/sales.csv，按 sale_id 去重后输出为 output/ai_deduped.csv',
+            '读取 test-resources/data/orders.csv，把订单号 order_id 和状态 status 拼成新列 order_status，输出到 output/ai_orders.csv',
+            '读取 test-resources/data/quality_demo.csv，丢弃 id 或 name 为空的行，写出到 output/ai_clean.csv',
+            '读取 data/sales.csv 转为 Excel，工作表名叫销售数据，输出到 output/ai_sales.xlsx',
+            '读取 test-resources/data/orders.xml，解析后输出为 output/ai_orders_from_xml.csv',
+            '读取 test-resources/data/sample.json，展平为 CSV 输出到 output/ai_from_json.csv',
+            '读取 data/sales.csv，按 region 和 channel 拼接新列后写入 MySQL 表 ai_region_channel'
         ];
         const alerts = ref([]);
         const alertUnread = ref(0);
@@ -1102,11 +1261,64 @@ const app = createApp({
         function templateNodeCount(item, category) {
             return (item?.dag?.nodes || []).filter(node => category === 'input' ? node.type.endsWith('_input') : node.type.endsWith('_output')).length;
         }
+        // ===== 模板路径占位符解析 =====
+        // 模板里的 /data、/test-resources、/output 是语义占位（容器内才有效），
+        // 本机需要换成控件默认路径里推导出的真实根目录，否则提交时报「文件不存在」。
+        const TEMPLATE_PATH_ROOTS = ['/test-resources', '/output', '/data'];
+
+        function controlDefaultPath(type) {
+            const ctrl = controls.value.find(c => c.type === type);
+            if (!ctrl?.paramSchema) return '';
+            try {
+                const prop = JSON.parse(ctrl.paramSchema)?.properties?.path;
+                return typeof prop?.default === 'string' ? prop.default : '';
+            } catch (_) { return ''; }
+        }
+
+        // 从「控件默认路径」反推项目根目录：默认路径形如 <root>/test-resources/data/sales.csv，
+        // 其中 test-resources / output 本身就是占位符段，定位到它即可截出 <root>。
+        let templateProjectRoot = null;
+        function templateRoot() {
+            if (templateProjectRoot) return templateProjectRoot;
+            for (const type of ['csv_input', 'csv_output', 'json_input', 'json_output']) {
+                const probe = controlDefaultPath(type);
+                if (!probe) continue;
+                const normalized = probe.replace(/\\/g, '/');
+                for (const root of TEMPLATE_PATH_ROOTS) {
+                    const idx = normalized.indexOf(root + '/');
+                    // 控件未加载时推导不出根目录，保持 null 以便下次重试
+                    if (idx > 0) { templateProjectRoot = normalized.slice(0, idx); return templateProjectRoot; }
+                }
+            }
+            return '';
+        }
+
+        // 占位符 → 真实绝对路径：/data/x → <root>/data/x，与容器挂载语义一致
+        function resolveTemplatePath(path) {
+            if (typeof path !== 'string' || !path.startsWith('/')) return path;
+            const projectRoot = templateRoot();
+            if (!projectRoot) return path;
+            return projectRoot + path;
+        }
+
+        function resolveTemplatePaths(node) {
+            if (!node?.params) return node;
+            if (typeof node.params.path === 'string') {
+                node.params.path = resolveTemplatePath(node.params.path);
+            }
+            return node;
+        }
+
         function cloneTemplateDag(item) {
             const dag = JSON.parse(JSON.stringify(item.dag));
             const stamp = Date.now().toString(36);
             const idMap = new Map();
-            dag.nodes.forEach((node, index) => { const id = `tpl_${stamp}_n${index + 1}`; idMap.set(node.id, id); node.id = id; });
+            dag.nodes.forEach((node, index) => {
+                const id = `tpl_${stamp}_n${index + 1}`;
+                idMap.set(node.id, id);
+                node.id = id;
+                resolveTemplatePaths(node);
+            });
             dag.edges.forEach((edge, index) => {
                 edge.id = `tpl_${stamp}_e${index + 1}`;
                 edge.source = idMap.get(edge.source);
@@ -3109,8 +3321,8 @@ const app = createApp({
         });
 
         return {
-            currentView, controls, jobs, selectedJobs, batchOperating, jobSearch, jobStatusFilter, filteredJobs, jobName, parallelism, currentJobName,
-            workbench, workbenchLoading, workbenchError, loadWorkbench, templates, filteredTemplates, templateKeyword, templateCategory, templatePreviewVisible, templatePreview, openTemplatePreview, templateNodeCount, useTemplate,
+            currentView, controls, jobs, selectedJobs, batchOperating, jobSearch, jobStatusFilter, filteredJobs, jobName, parallelism, currentJobName, loadJobs,
+            workbench, workbenchLoading, workbenchError, loadWorkbench, templates, filteredTemplates, templateCategories, templateKeyword, templateCategory, templatePreviewVisible, templatePreview, openTemplatePreview, templateNodeCount, useTemplate,
             DATA_SOURCE_TYPES, savedDataSources, filteredDataSources, nodeDataSourceOptions, dataSourceCatalog, dataSourcesLoading, savedDataSourcesLoading, catalogLoading, savedDataSourcesError, catalogError, dataSourcesError,
             dataSourceKeyword, dataSourceTypeFilter, dataSourceDialogVisible, dataSourceSaving, dataSourceTesting, dataSourceTestResult, dataSourceForm,
             loadDataSources, loadSavedDataSources, loadDataSourceCatalog, dataSourceAddress, assetDisplayName, openJobDetailById, openCreateDataSource, openEditDataSource, onDataSourceTypeChange, saveDataSource, testDataSourceConnection, testSavedDataSource, deleteDataSource,
