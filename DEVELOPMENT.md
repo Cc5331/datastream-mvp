@@ -92,7 +92,7 @@
     │       └── vendor/                 # Vue/ElementPlus/X6/ECharts 本地化依赖
     ├── flink-1.18.1/                   # Flink 发行版副本（本机运行时用 D:\code\flink-1.18.1）
     ├── udf/                            # UDF jar 工程（XmlToJson / JsonToXml / RedisLookup）
-    ├── scripts/                        # init_mysql.sql / test-mysql-flow.ps1
+    ├── scripts/                        # init_mysql.sql / test-mysql-flow.ps1 / gen_db_design_doc.py（生成数据库说明书）
     ├── docker/                         # Dockerfile（flink 镜像、prepare-flink-jars.bat 等）
     ├── docker-compose.yml              # 全容器化编排（MySQL:3307 / Kafka / Flink / 后端 / 前端）
     ├── data/                           # 本机业务库初始化脚本与样例数据（mysql_setup.sql / sales.csv）
@@ -100,7 +100,7 @@
     ├── output/                         # 作业输出目录（CSV/Excel 等，gitignore）
     ├── test-resources/                 # 测试数据（sales.csv / sample_data.xlsx / large 大数据集）与基准脚本
     ├── test-results/                   # 性能基准报告产物
-    ├── docs/                           # 作品演示录像脚本（分镜 / 口播 / 拍前准备 / 应急降级）
+    ├── docs/                           # 作品演示录像脚本 + 数据库设计说明书（docx / ER 图 / H2 与 MySQL DDL）
     ├── start-all.bat / start-docker.bat / stop-docker.bat / start_sql_gw.bat
     ├── deploy-linux.sh / stop-linux.sh
     └── README.md                       # 用户向 README

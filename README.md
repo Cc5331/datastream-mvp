@@ -431,6 +431,9 @@ python test-resources/benchmark.py
 - `DEVELOPMENT.md`：开发维护指南（逻辑框架 / 扩展规范 / 红线 / 回归清单）
 - `AGENTS.md`：AI 助手工作区指令（动代码前先读 DEVELOPMENT.md）
 - `docs/作品演示录像脚本.md`：作品演示录像（技术实现 / 核心功能 / 性能测试）分镜脚本、口播稿与拍前清单
+- `docs/数据库设计说明书.docx`：数据库设计说明书（ER 设计 / 表结构设计 / 索引与约束 / DDL 附录），
+  配套 `docs/数据库-ER图.png`（ER 图）、`docs/schema-h2.sql`、`docs/schema-mysql.sql`（真实建表 DDL）；
+  由 `scripts/gen_db_design_doc.py` 从实体与 DDL 自动生成，改表后重跑即可更新
 - `test-resources/benchmark.py`：性能基准测试脚本
 
 ---
