@@ -237,8 +237,14 @@
 - HealthMonitor 健康扫描默认 **10s**（`app.monitor.health-scan-ms`，旧文档写 30s）；HeartbeatMonitor 心跳探测默认 10s（`app.monitor.heartbeat-scan-ms`）。
 - 失败即时告警：FlinkJobStatusChecker 置 FAILED 的瞬间直接调 HealthMonitor.notifyJobFailed（事件驱动），JobService.submit 失败分支同样即时通知。
 - JobLog 落库，GET /api/jobs/{id}/logs 查询（按时间倒序）。
-- 输出后处理：作业转 COMPLETED（或 CANCELLED）时触发 Excel/Xml/Parquet 转换与 CSV/JSON part 合并；cancel/offline 也会显式调用 finalizeJobOutputs。
-- **自动 COMPLETED 的判定**：真实 jid 的作业「不在 /jobs/overview 里」即被置为 COMPLETED（含 Flink 重启后归档的情况）。这意味着 Flink 重启可能把 RUNNING 作业误判完成，与 HeartbeatMonitor 的 JOB_HEARTBEAT_LOST 语义存在冲突，改这块要一起考虑。
+- 输出后处理：统一走 `finalizeJobOutputs(job)`（内部持作业分片锁 `service/JobLocks`），
+  作业转 COMPLETED/CANCELLED 时触发 Excel/Xml/Parquet 转换与 CSV/JSON part 合并；cancel/offline、Kafka 自动停止、3 分钟补合并也走同一入口。
+- **「不在 overview」的判定（2026-09-15 修正）**：不再一律判成功。轮询发现真实 jid 的作业消失时，
+  先比对**集群一代标识**（`/taskmanagers` 在册 TaskManager 的注册 ID 集合，`clusterGeneration`）：
+  - 标识变化（JM 重启 / TM 重新注册）→ 作业是随集群丢的 → 置 **FAILED** + ERROR 日志 + 立即告警；
+  - 标识未变或取不到 → 视为 Flink 正常结束后移出 overview → 置 COMPLETED（保持既有输出合并）。
+  首次观测不算换代，避免误报；与 HeartbeatMonitor 的 JOB_HEARTBEAT_LOST 语义现已一致。
+- **重复提交防护**：`JobService.submit` 持锁并校验状态，SUBMITTED/RUNNING 再提交返回 409；`cancel` 共用同一把锁。
 
 ---
 
@@ -327,6 +333,10 @@
 18. **模板占位符必须能取到值**：节点 params 只保存用户显式填写的参数，带 `default` 的可选项不落库；模板引用这类参数依赖 `withSchemaDefaults` 按 paramSchema 补默认值，否则 `${xxx}` 会原样进入 Flink SQL。
 19. **Flink Windows 发行版没有 `sql-client.sh`**：只有 `.bat`，需经 `cmd /c` 调用；降级路径已改为先探测存在性再执行，勿改回硬编码 `.sh`。
 20. **index.html 里的图标标签必须写 kebab-case**（`<data-board />` 而非 `<DataBoard />`）。它是 DOM 模板，浏览器会把标签名小写化，Vue 的 capitalize 只能把 `databoard` 还原成 `Databoard`，与注册名 `DataBoard` 不匹配 → **图标静默不渲染、控制台无任何报错**，极难定位。同理避免 `<view />`、`<keyboard />` 这类与原生标签重名的图标（实测不渲染），改用 `<zoom-in />`、`<operation />`。已加回归用例拦截。
+21. **提交作业只能走 `JobService.submit`**：它现在持有作业分片锁（`service/JobLocks`）并校验状态，SUBMITTED/RUNNING 会返回 409。不要再在调度器/依赖服务里自行判断状态后绕过它提交，也不要删掉该状态前置校验——那是「手动提交 + cron + 依赖触发」三路并发时防止重复 Flink 作业的唯一防线。
+22. **输出后处理必须走 `FlinkJobStatusChecker.finalizeJobOutputs`**：合并/转换已收敛到这一个持锁入口（轮询完成、取消、Kafka 自动停止、补合并重试都会调用）。不要在别处直接调 `mergeXxxOutputsIfNeeded` / `convertXxxOutputsIfNeeded`，`mergeCsvParts` 是「先删后写」，并发调用会丢数据。
+23. **权限判断统一走 `security/JobAccess`**：`assertCanAccess` 抛 401/403（ownerId 为空仅 ADMIN 可见），`canAccess` 用于列表过滤。端点角色限制用**类级** `@PreAuthorize`（如 `/api/kafka/**`、`/api/preview/**` 为 ADMIN/OPERATOR），前端入口要同步用 `canEdit` 隐藏，否则 VIEWER 点进去只会拿到 403。
+24. **JWT 与用户状态变更要同步**：`AppUser.tokenVersion` 参与签发（claim `tv`），`JwtAuthFilter` 每请求比对；新增「改密码 / 重置密码 / 登出 / 强制下线」逻辑时必须调用 `UserService.revokeTokens`（或 `bumpTokenVersion`），否则旧 token 在有效期内仍然可用。
 
 ---
 
@@ -349,41 +359,48 @@
 - [ ] 参数面板：改参数 → 应用 → 保存 → 重开，值保持。
 - [ ] 导出 JSON → 导入 JSON → 画布一致。
 
-### 9.4 自动化测试（改完必跑，2026-09-11 实测全绿）
-- [ ] `mvn -B -f pom.xml test` → 5 模块 BUILD SUCCESS，后端 **136** 个用例 0 失败。
-- [ ] `cd frontend; node --test test/app.test.js` → **37** 个用例 0 失败（含控件注册表、按钮图标、数据源 CRUD、账户资料与在线状态、参数类型转换、模板与 AI 示例）。
+### 9.4 自动化测试（改完必跑，2026-09-15 实测全绿）
+- [ ] `mvn -B -f pom.xml test` → 5 模块 BUILD SUCCESS，后端 **156** 个用例 0 失败。
+- [ ] `cd frontend; node --test test/*.test.js` → **41** 个用例 0 失败（控件注册表一致性、按钮图标、数据源 CRUD、账户资料与在线状态、参数类型转换、模板与 AI 示例、端点权限入口隐藏、资源生命周期）。
+- [ ] 改了安全/并发相关代码时的针对性回归：`FlinkJobStatusCheckerTest`（集群换代判定）、`JobLocksTest`（分片锁互斥）、`JobAccessTest`（归属规则）、`JwtUtilTest`（令牌版本）、`JobServiceTest`（重复提交被拒）。
 - [ ] 改了安全配置时的手工验证：未登录访问 `/api/jobs` 返回 401；`/h2-console` 未登录不可访问（默认还是关闭状态）。
 
 ---
 
-## 10. 后续完善路线（2026-09-12 交叉核对后重排）
+## 10. 后续完善路线（2026-09-15 修复后重排）
 
-> 2026-09-11 我列出的 8 条路线，已与并行开发提交（`99ac2fe` 多数据源、`65e1d6e` 告警与 mock 认领、
-> `c404a73` 安全 P0/P1、`7ed8bbf` 平台治理、`fdc6b73` 数据源管理、`34172e0` 预检、`1f190d6` 模板中心、
-> `236e8c9` 账户）逐条比对源码，结论如下（✅ 已完成 / 🟡 部分完成 / ⬜ 仍开放）。
+> 2026-09-11 列出的 8 条路线先与并行开发提交逐条核对（判定标 ✅/🟡/⬜），
+> 随后把其中「仍开放」的 6 项在 2026-09-15 全部修完（提交见文末变更记录：`51538c4` 状态语义、
+> `c9def90` token 吊销、`863d19c` owner 收紧、`73a4e6d` 端点权限、`46a3c7d` 并发安全、`11d42e9` 前端生命周期）。
 
-1. **安全收尾** 🟡
+1. **安全收尾** ✅
    - ✅ Monitor 端点已按 owner 过滤（`MonitorController` 调 `SecurityUtils.currentUser()`），删除趋势需 ADMIN/OPERATOR
    - ✅ `/api/preview/file` 的 allowed-roots 白名单已抽出 `PreviewService.assertAllowedRead`，作业输出预览复用同一份校验（修掉「DAG 里填任意路径读回 .env」）
    - ✅ 用户停用/角色变更**下一请求立即生效**（`JwtAuthFilter` 每请求按 userId 回查数据库并校验 enabled）
-   - ⬜ **token 无吊销**：改密码/登出都不会让已签发 token 失效（无 tokenVersion / passwordChangedAt），需补
-   - ⬜ `KafkaMonitorController`、`PreviewController` 仍只要求登录，无角色限制（任意登录用户可读任意 topic / 预览文件）
-   - ⬜ `JobService.assertCanAccess` 仍是「ownerId 非空才校验」，**ownerId 为空的历史作业对所有登录用户开放**
-2. **Flink 状态语义修正** ⬜
-   - ✅ mock 认领已加时间上限（`MOCK_RESOLVE_MAX_DIFF_MS`，超出则拒绝认领并从候选移除），修掉「认领 976 秒前旧作业」
-   - ⬜ 「不在 `/jobs/overview` 即置 COMPLETED」仍在（`FlinkJobStatusChecker` 约 L216）：Flink 重启或归档会把 RUNNING 作业误判完成，与 HeartbeatMonitor 的 JOB_HEARTBEAT_LOST 语义冲突
-   - ⬜ mock 作业仍无超时兜底状态（集群不通时一直停在 SUBMITTED）
-3. **并发安全** ⬜
-   - ⬜ `JobService.submit` 仍无锁/CAS：手动提交、JobScheduler、DependencyService 可并发触发同一作业
-   - ⬜ 输出合并无锁：`cleanOutputTempDirs`（`DagTranslationService` L83/L743）在提交时清掉同名 `.tmp` / `_temp_csv` 暂存目录，若上一轮运行仍在写同一路径就会丢数据；`mergeCsvParts` 先删后写同样存在窗口
+   - ✅ **token 可吊销**：`AppUser.tokenVersion` + JWT claim `tv`，改密/管理员重置/登出即失效（`UserService.revokeTokens`）
+   - ✅ `KafkaMonitorController`、`PreviewController` 已加类级 ADMIN/OPERATOR 限制（前端入口同步对 VIEWER 隐藏）
+   - ✅ `ownerId` 为空的作业收紧为**仅 ADMIN 可见**，归属校验收敛到 `security/JobAccess`（原四处实现规则不一致）
+2. **Flink 状态语义修正** ✅（mock 超时兜底除外）
+   - ✅ mock 认领已加时间上限（`MOCK_RESOLVE_MAX_DIFF_MS`，超出则拒绝认领并从候选移除）
+   - ✅ 消失判定不再一律成功：新增**集群一代标识**（在册 TaskManager 注册 ID 集合），
+     换代（JM 重启/TM 重新注册）导致的消失判 **FAILED** 并即时告警，未换代才判 COMPLETED
+   - ⬜ 仍未做：mock 作业的超时兜底状态（集群不通时一直停在 SUBMITTED，属可观测性问题）
+3. **并发安全** ✅
+   - ✅ `JobService.submit` 全程持作业分片锁（`service/JobLocks`，64 分片）并新增状态前置校验：
+     SUBMITTED/RUNNING 再提交直接 409，手动/定时/依赖三路并发不再拉起重复 Flink 作业
+   - ✅ `cancel` 与 `submit` 共用同一把锁；5 处重复的输出后处理收敛为 `finalizeJobOutputs(job)`（持锁执行），
+     轮询判定完成、取消、Kafka 自动停止、补合并不再并发操作同一批 part
+   - ⬜ 残留：`cleanOutputTempDirs` 在提交时清同名 `.tmp` / `_temp_csv`（现在同一作业同时只允许一次提交，
+     风险已大幅降低，但「上线作业被监督重启」与「多作业共用同一输出路径」仍建议后续加路径级互斥）
 4. **调度线程池隔离** ✅ 已修：`spring.task.scheduling.pool.size=${APP_SCHEDULING_POOL_SIZE:4}`，2s 采集不再独占唯一调度线程；告警邮件另有独立有界线程池（`AsyncExecutorConfig.alertTaskExecutor`，CallerRunsPolicy）
-5. **补测试空白** 🟡 测试从 18 类 / 71 用例增长到 **33 类 / 136 用例**（新增 `FlinkJobStatusCheckerTest`、`MysqlTableCreatorTest`、`DataSource*Test`、`AvatarStorageServiceTest`、`ClusterHealthServiceTest`、`JobTimelineServiceTest` 等）
+5. **补测试空白** 🟡 测试持续增长（2026-09-15 复核：**33 类 / 136 用例**，本轮再新增 `JobLocksTest`、`JobAccessTest`、`JwtUtilTest` 与多组用例）
    - ⬜ 仍无：`PluginLoaderService`、Parquet / HDFS / Excel 输入输出链路、`JobScheduler`、多用户隔离的端到端用例
-6. **前端工程化** ⬜（且在恶化）：`app.js` 从 2451 行涨到 **3381 行**、`index.html` 1236 → 1423 行；resize 监听不释放、部分 ECharts 不 dispose、死 CSS 仍在
+6. **前端工程化** 🟡 资源泄漏已修（resize 监听句柄化、`disposeAllCharts()` 统一释放、登出停流停轮询）；
+   ⬜ 巨石仍在：`app.js` 3381+ 行、`index.html` 1400+ 行，死 CSS 未清理，建议后续按视图拆分或引入构建步骤
 7. **AI 侧** 🟡：诊断已统一切 DeepSeek（`e694dae`），提示词模板与示例扩充到 16/10（`1f190d6`）；⬜ 模型白名单外的多服务商编排、诊断规则库版本化仍未做
 8. **Docker 收尾** 🟡：compose 已扩到多数据库（PG/Oracle 相关服务、初始化 SQL、healthcheck），修掉容器内 SMTP 与 Kafka bootstrap 缺失；⬜ 仍缺 compose 环境下的一键验收剧本
 
-> 建议下一步优先级：**2（状态语义）→ 1 的 token 吊销与 owner 空白 → 3（并发安全）**——这三项都在「真跑 + 多用户 + 重跑」场景下会直接暴露，且都有明确修法。
+> 下一批优先级建议：**Flink mock 作业超时兜底（可观测性）→ 多用户/调度端到端用例 → app.js 拆分 → compose 验收剧本**。
 
 ---
 
@@ -516,3 +533,4 @@
 | 2026-09-15 | **丰富模板中心与 AI 示例，并修复链式 transform 与模板路径不可用**：模板中心由 3 个扩到 **16 个**（实时采集 / 格式转换 / 字段处理 / 数据清洗 / 数据落库五类，分类下拉改为从模板动态生成），AI 试试模块由 3 条扩到 **10 条**，覆盖拼接、过滤、去重、空值校验、Excel/XML/JSON/Parquet 与 MySQL 落库。**修复三类缺陷**：① **模板路径本机不可用**——模板沿用容器语义的 `/data`、`/test-resources`、`/output` 占位，而 `resolveRuntimePath` 在 Windows 直接返回原值，套用后提交必报「CSV 输入文件不存在」（用探针作业实测复现）；新增 `resolveTemplatePath`，从控件默认路径反推项目根目录再拼占位符，与 compose 的挂载语义一致。② **链式 transform 从未被支持**——边循环对 `transform→transform` 直接 `continue`，导致中间节点（如 row_filter 后的 field_concat）从未生成表，下游引用了不存在的表名；抽出 `buildTransformSql` 供两处复用，链中间节点物化为 `CREATE TEMPORARY VIEW` 并按节点去重，末尾节点仍内联进 INSERT，保持单 transform 作业 SQL 形态不变。③ **MySQL 模板缺 url**——节点 params 不回退 schema 默认值，模板必须显式写入 JDBC URL 与 `createTablePolicy`。**验证**：16 个模板全部真实提交并跑完（串行等待空闲槽位，`csv2pipeline` 的 3000 行过滤后落库 2395 行），产出 CSV/JSON/XML/Excel/Parquet 与 MySQL 表 `sales_demo`(3000)、`sales_pipeline`(2395) 均正确。排查中另确认 `csv2parquet`/`csv2csv_validate` 的失败是 TaskManager **4 个 Slot 被常驻流式作业占满**所致，非模板问题。后端 **136** 测试、前端 **37** 测试全绿 | SAMPLE_DAGS + BUILTIN_TEMPLATES + resolveTemplatePath / DagTranslationService(buildTransformSql + 临时视图) / 前端 index.html + app.test.js / DagTranslationServiceTest / DEVELOPMENT |
 | 2026-09-15 | **账户资料、头像与在线状态闭环**：`AppUser` 新增头像键、签名、展示状态、最近登录/活动与更新时间；`GET/PUT /api/auth/me` 返回并更新完整个人资料，登录记录活动时间，普通用户无法修改用户名/角色/启停状态。头像采用 `backend/data/avatars` 文件存储、数据库仅保存 UUID 键；上传限 JPEG/PNG 2MB，先读图片头校验最大 4096px/总像素后才解码，并通过 subsampling + 512px 归一化重编码清除 EXIF，读取必须携带 JWT，替换/删除清理旧文件。导航栏最右侧改为头像+在线状态点，下拉提供个人资料、快捷状态切换和退出，弹窗支持名称、签名、展示状态与头像操作；头像经 Axios Blob 携带 Bearer token 读取，使用 `avatarVersion` 破缓存并用请求序号避免 Blob URL 竞态泄漏。在线状态分离 `statusPreference` 与服务端推导的 `publicStatus`：前端 60 秒 HTTP 心跳、90 秒超时离线、20 秒内重复心跳不落库，防并发重入，恢复可见/联网时补心跳，退出/401/卸载清理定时器。`JwtAuthFilter` 每次请求以数据库最新用户状态建立权限，管理员降权/停用与名称修改下一请求即生效。真实隔离后端验收：资料更新 `BUSY`、心跳、头像上传→鉴权读取(image/png)→删除全通过。后端 **125** 测试、前端 **33** 测试全绿 | AppUser / AuthController / UserService / AvatarStorageService / AppUserRepository / JwtAuthFilter / SecurityConfig / application.yml / .env.example / 前端 index.html + app.js + style.css + tests / DEVELOPMENT |
 | 2026-09-15 | P0/P1 路线交叉核对（对照并行提交 99ac2fe / 65e1d6e / c404a73 / 7ed8bbf / fdc6b73 / 34172e0 / 1f190d6 / 236e8c9 之后的源码逐条复核，HEAD=8dfde85）：第 10 节路线改为带状态标注（✅ 已完成 / 🟡 部分 / ⬜ 仍开放）并写明证据——**已修**：调度线程池隔离（`spring.task.scheduling.pool.size=4` + 告警邮件独立有界线程池 `AsyncExecutorConfig`）、mock 认领加时间上限（`MOCK_RESOLVE_MAX_DIFF_MS`，修掉认领 976 秒前旧作业）、Monitor 端点按 owner 过滤且删除趋势需 ADMIN/OPERATOR、预览白名单抽为 `PreviewService.assertAllowedRead` 并被作业输出预览复用（堵住读 `.env` 的路径）、`JwtAuthFilter` 每请求回查用户使停用/改角色下一请求即生效、测试从 18 类 71 用例增至 **33 类 136 用例**；**仍开放**：token 无吊销（无 tokenVersion/passwordChangedAt）、`KafkaMonitorController` 与 `PreviewController` 无角色限制、`assertCanAccess` 仍对 ownerId 为空的历史作业放开、Flink 重启时「不在 overview 即 COMPLETED」误判（与 JOB_HEARTBEAT_LOST 语义冲突）、`JobService.submit` 无锁/CAS 与 `cleanOutputTempDirs`+merge 的并发写窗口、`app.js` 从 2451 行涨到 **3381 行**、PluginLoaderService / Parquet / HDFS / JobScheduler 仍无测试。另修正 §9.1 控件数 29→31（新增 pg_output / oracle_output，前后端注册表一致性校验通过） | DEVELOPMENT.md |
+| 2026-09-15 | **P0/P1 六项逐个修复**（承接上一轮交叉核对结论，每项独立提交）：① **Flink 状态语义**（`51538c4`）——新增集群一代标识（`/taskmanagers` 在册 TM 注册 ID 集合 `clusterGeneration`），「不在 overview」不再一律判成功：换代（JM 重启/TM 重新注册）→ FAILED + ERROR 日志 + 事件驱动告警，未换代才 COMPLETED，与 JOB_HEARTBEAT_LOST 语义对齐；探测只在有作业消失时惰性执行一次，不给 5s 热路径加固定开销。② **token 吊销**（`c9def90`）——`AppUser.tokenVersion` + JWT claim `tv` + `JwtAuthFilter` 逐请求比对，改密/管理员重置/登出（`UserService.revokeTokens`）立即失效旧 token，旧 token 无该 claim 按 0 兼容。③ **无归属作业收紧**（`863d19c`）——新增 `security/JobAccess` 作为唯一归属规则（ADMIN 全量、普通用户仅本人、ownerId 为空仅 ADMIN），JobService/DependencyService/LineageService/MonitorService 四处重复实现全部委托，修掉「空归属即放行」。④ **端点权限**（`73a4e6d`）——`/api/kafka/**` 与 `/api/preview/**` 加类级 ADMIN/OPERATOR 限制，前端 Kafka 导航与「预览数据」按钮对 VIEWER 隐藏。⑤ **并发安全**（`46a3c7d`）——新增 `service/JobLocks`（64 分片可重入锁池），`submit` 全程持锁并新增状态前置校验（SUBMITTED/RUNNING 再提交 409），`cancel` 共用同一把锁，5 处重复的输出后处理收敛为持锁的 `finalizeJobOutputs`，杜绝重复 Flink 作业与 part 合并竞态；`online` 遇「已在运行」改为直接接管不再重复提交。⑥ **前端资源生命周期**（`11d42e9`）——resize 监听句柄化（重绑前先移除，修掉 initGraph 重入导致的监听器叠加）、新增 `disposeAllCharts()` 统一释放 4 个 ECharts 与 X6 画布，`onUnmounted` 与 `logout` 都清理监听/图表并停 Kafka 流与轮询。**测试**：新增 `JobLocksTest`(4)、`JobAccessTest`(5)、`JwtUtilTest`(3)、`FlinkJobStatusCheckerTest`(+2)、`JobServiceTest`(+2)、`UserServiceTest`(+3)、`KafkaMonitorControllerTest`(+1) 与前端 `security.test.js`(2)、`lifecycle.test.js`(2)；后端 **156** 用例、前端 **41** 用例全绿；§8 红线补 4 条（提交入口/输出后处理/权限判断/令牌版本），§10 路线同步标注完成状态 | FlinkJobStatusChecker / JobLocks(新) / JobService / JobAccess(新) / JwtUtil+JwtAuthFilter+AppUser / UserService / AuthController / KafkaMonitorController / PreviewController / MonitorService / DependencyService / LineageService / 前端 app.js + index.html + 测试 ×5 / DEVELOPMENT.md |
