@@ -779,6 +779,11 @@ const app = createApp({
             // 因此隐藏状态下直接跳过，等切到画布视图（watch currentView）再初始化。
             if (container.clientWidth === 0 || container.clientHeight === 0) return;
 
+            // 重入保护：容器上只允许存在一个 X6 实例。
+            // initGraph 有多个调用点（含 onMounted 里的无条件调用），重复执行会在同一容器里
+            // 叠加第二个画布，表现为节点/连线重复渲染。
+            if (graph) return;
+
             graph = new X6.Graph({
                 container,
                 width: container.clientWidth,
@@ -884,16 +889,25 @@ const app = createApp({
         }
 
         // 监听放置事件 (使用全局事件)
+        // 注意：本函数有多个调用点（onMounted / 登录成功 / 切到画布视图 / loadDagToCanvas 自动补初始化），
+        // 历史上每次调用都直接 addEventListener 且从不移除 → 一次拖拽会触发 N 个 drop 回调、
+        // 在画布上落下 N 个控件（用户可见现象：拖一个控件出现两个）。因此改为**幂等绑定**：
+        // 保存句柄，重绑前先移除旧监听。
+        let dropHandler = null;
+        let dragoverHandler = null;
         function setupDropHandler() {
             const container = document.getElementById('dag-canvas');
             if (!container) return;
 
-            container.addEventListener('dragover', (e) => {
+            if (dragoverHandler) container.removeEventListener('dragover', dragoverHandler);
+            if (dropHandler) container.removeEventListener('drop', dropHandler);
+
+            dragoverHandler = (e) => {
                 e.preventDefault();
                 e.dataTransfer.dropEffect = 'copy';
-            });
+            };
 
-            container.addEventListener('drop', (e) => {
+            dropHandler = (e) => {
                 e.preventDefault();
                 try {
                     const data = JSON.parse(e.dataTransfer.getData('text/plain'));
@@ -950,7 +964,10 @@ const app = createApp({
                 } catch (err) {
                     console.error('Drop error:', err);
                 }
-            });
+            };
+
+            container.addEventListener('dragover', dragoverHandler);
+            container.addEventListener('drop', dropHandler);
         }
 
         // 按分类获取控件
