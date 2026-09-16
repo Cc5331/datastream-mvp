@@ -99,7 +99,6 @@
                         <template #dropdown><el-dropdown-menu>
                             <el-dropdown-item command="templates"><el-icon><files /></el-icon>模板中心</el-dropdown-item>
                             <el-dropdown-item command="data-sources"><el-icon><coin /></el-icon>数据源中心</el-dropdown-item>
-                            <el-dropdown-item command="controls"><el-icon><grid /></el-icon>控件管理</el-dropdown-item>
                             <el-dropdown-item v-if="canEdit" command="ai"><el-icon><magic-stick /></el-icon>AI 助手</el-dropdown-item>
                         </el-dropdown-menu></template>
                     </el-dropdown>
@@ -760,29 +759,6 @@
                     <div style="display:flex;justify-content:flex-end;margin-top:12px;">
                         <el-pagination v-model:current-page="alertPage" :page-size="alertSize" :total="alertTotal" layout="total, prev, pager, next" @current-change="onAlertPage"></el-pagination>
                     </div>
-                </div>
-
-                <!-- 控件管理视图 -->
-                <div v-show="currentView === 'controls'" class="controls-view">
-                    <el-table :data="controls" style="width:100%; height:100%;" stripe>
-                        <el-table-column prop="type" label="类型标识" width="140"></el-table-column>
-                        <el-table-column prop="name" label="名称" width="120"></el-table-column>
-                        <el-table-column prop="category" label="分类" width="80">
-                            <template #default="scope">
-                                <el-tag :type="scope.row.category==='input'?'success':scope.row.category==='output'?'warning':'info'" size="small">
-                                    {{ scope.row.category }}
-                                </el-tag>
-                            </template>
-                        </el-table-column>
-                        <el-table-column prop="description" label="描述" min-width="200"></el-table-column>
-                        <el-table-column prop="version" label="版本" width="80"></el-table-column>
-                        <el-table-column prop="jarPath" label="来源" width="120"></el-table-column>
-                        <el-table-column prop="enabled" label="启用" width="60">
-                            <template #default="scope">
-                                <el-switch v-model="scope.row.enabled" disabled></el-switch>
-                            </template>
-                        </el-table-column>
-                    </el-table>
                 </div>
 
                 <!-- 实时监控视图 -->

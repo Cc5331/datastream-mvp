@@ -99,7 +99,6 @@ body {
 
 /* ---------- 表格 ---------- */
 .jobs-view { padding:18px; height:100%; overflow:auto; }
-.controls-view { padding:18px; height:100%; overflow:auto; }
 #jobs-table, table { width:100%; border-collapse:collapse; font-size:13px; }
 th, td { padding:9px 12px; text-align:left; border-bottom:1px solid var(--border); }
 th { background:#f8fafc; font-weight:600; color:var(--text-sub); }
