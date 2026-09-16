@@ -435,5 +435,8 @@ python test-resources/benchmark.py
   配套 `docs/数据库-ER图.png`（ER 图）、`docs/schema-h2.sql`、`docs/schema-mysql.sql`（真实建表 DDL）；
   由 `scripts/gen_db_design_doc.py` 从实体与 DDL 自动生成，改表后重跑即可更新
 - `test-resources/benchmark.py`：性能基准测试脚本
+- `scripts/watchdog.ps1` / `watchdog.bat`：后端健康探针 + 看门狗（探 `/api/health`，连续失败自动重启后端）；
+  `-Preflight` 做演示前五项服务预检，`-Once` 供脚本/CI 单次判定
+- `scripts/start-backend.ps1`：单独启动后端（注入 `.env`、独立进程，看门狗内部复用）
 
 ---

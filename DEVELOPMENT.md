@@ -153,11 +153,22 @@
     D:\code\flink-1.18.1\bin\stop-cluster.bat
 
 ### 4.4 常用验证命令
+    curl http://localhost:18080/api/health            # 健康探针（免鉴权、无副作用、真查一次库；DOWN 返 503）
     curl http://localhost:18080/api/jobs              # 作业列表（手工起后端时是 8080）
     curl http://localhost:18080/api/controls          # 控件注册表
     curl http://localhost:18081/jobs/overview         # Flink 作业
     curl http://localhost:18081/taskmanagers          # Flink TaskManager（若 404 说明集群未起）
     mysql -u root -p flink_demo -e "SHOW TABLES;"     # 密码见 .env / MYSQL_PASSWORD
+
+### 4.4.1 健康探针与看门狗（2026-09-16 新增，防"端口在听但不响应"的僵死）
+    # 单次探针：健康退出码 0，不健康 1（适合脚本/CI）
+    powershell -ExecutionPolicy Bypass -File scripts\watchdog.ps1 -Once
+    # 演示前预检：一次检查 前端/后端+DB/Flink/SQL Gateway/Kafka 五项，退出码=失败项数
+    powershell -ExecutionPolicy Bypass -File scripts\watchdog.ps1 -Preflight     # 或双击 scripts\watchdog.bat -Preflight
+    # 常驻看门狗：默认 30s 探一次，连续 3 次失败自动重启后端并写 logs\watchdog.log
+    powershell -ExecutionPolicy Bypass -File scripts\watchdog.ps1
+    # 单独启动后端（注入 .env、独立进程，看门狗内部也用它）
+    powershell -ExecutionPolicy Bypass -File scripts\start-backend.ps1
 
 ### 4.5 构建与测试（改完必跑，见第 9 节）
     mvn -B -f pom.xml test          # 根聚合：全 5 模块；后端 115 个用例（2026-09-14 实测全绿）
@@ -337,6 +348,9 @@
 22. **输出后处理必须走 `FlinkJobStatusChecker.finalizeJobOutputs`**：合并/转换已收敛到这一个持锁入口（轮询完成、取消、Kafka 自动停止、补合并重试都会调用）。不要在别处直接调 `mergeXxxOutputsIfNeeded` / `convertXxxOutputsIfNeeded`，`mergeCsvParts` 是「先删后写」，并发调用会丢数据。
 23. **权限判断统一走 `security/JobAccess`**：`assertCanAccess` 抛 401/403（ownerId 为空仅 ADMIN 可见），`canAccess` 用于列表过滤。端点角色限制用**类级** `@PreAuthorize`（如 `/api/kafka/**`、`/api/preview/**` 为 ADMIN/OPERATOR），前端入口要同步用 `canEdit` 隐藏，否则 VIEWER 点进去只会拿到 403。
 24. **JWT 与用户状态变更要同步**：`AppUser.tokenVersion` 参与签发（claim `tv`），`JwtAuthFilter` 每请求比对；新增「改密码 / 重置密码 / 登出 / 强制下线」逻辑时必须调用 `UserService.revokeTokens`（或 `bumpTokenVersion`），否则旧 token 在有效期内仍然可用。
+25. **`/api/health` 必须保持免鉴权且无副作用**：它是看门狗与容器 healthcheck 的唯一探针，写审计/日志会污染数据，加鉴权会让探针失效。判定健康要同时覆盖「HTTP 链路 + 数据库」，只探端口抓不住僵死。
+26. **`.ps1` 脚本必须存成 UTF-8 with BOM**：Windows PowerShell 5.1 会把无 BOM 的脚本按 GBK 解码，中文注释/字符串变乱码并直接导致 `ParserError`（本仓库 `scripts/*.ps1` 均为 BOM；用编辑器保存时选「UTF-8 with BOM」）。`.bat` 脚本反之——写纯 ASCII，避免 cmd 代码页乱码。
+27. **打包前先停后端**：运行中的后端会锁住 `backend/target/mvp-backend-1.0.0.jar`，`mvn package` 的 repackage 阶段会失败并把 jar 变成 0.5MB 的瘦包（此时线上进程仍在跑旧代码，极易误判「改了没生效」）。正确顺序：停后端 → `mvn -DskipTests package` → `scripts\start-backend.ps1` 拉起。
 
 ---
 
@@ -344,6 +358,9 @@
 
 ### 9.1 服务健康
 - 前端 3000 返回 200、后端 18080（或手工启动的 8080）返回 200、Flink 18081 返回 200（如已启动）。
+- **后端用 `/api/health` 判定**：返回 `{"status":"UP","db":"UP",...}` 且耗时 < 1s；只探端口不够——
+  2026-09-16 出现过「端口在监听、连接能建立，但请求永不响应」的僵死，浏览器登录会一直转圈。
+  一键预检：`powershell -File scripts\watchdog.ps1 -Preflight`（或双击 `scripts\watchdog.bat -Preflight`）。
 - 后端 `/api/controls` 返回与 `DataInitializer` 中 `createControl` 数量一致的控件（当前 **31** 个；重启后 DataInitializer 会清空重建注册表）。
 
 ### 9.2 核心链路（用 test-resources/data/sales.csv、sample_data.xlsx）
@@ -534,3 +551,4 @@
 | 2026-09-15 | **账户资料、头像与在线状态闭环**：`AppUser` 新增头像键、签名、展示状态、最近登录/活动与更新时间；`GET/PUT /api/auth/me` 返回并更新完整个人资料，登录记录活动时间，普通用户无法修改用户名/角色/启停状态。头像采用 `backend/data/avatars` 文件存储、数据库仅保存 UUID 键；上传限 JPEG/PNG 2MB，先读图片头校验最大 4096px/总像素后才解码，并通过 subsampling + 512px 归一化重编码清除 EXIF，读取必须携带 JWT，替换/删除清理旧文件。导航栏最右侧改为头像+在线状态点，下拉提供个人资料、快捷状态切换和退出，弹窗支持名称、签名、展示状态与头像操作；头像经 Axios Blob 携带 Bearer token 读取，使用 `avatarVersion` 破缓存并用请求序号避免 Blob URL 竞态泄漏。在线状态分离 `statusPreference` 与服务端推导的 `publicStatus`：前端 60 秒 HTTP 心跳、90 秒超时离线、20 秒内重复心跳不落库，防并发重入，恢复可见/联网时补心跳，退出/401/卸载清理定时器。`JwtAuthFilter` 每次请求以数据库最新用户状态建立权限，管理员降权/停用与名称修改下一请求即生效。真实隔离后端验收：资料更新 `BUSY`、心跳、头像上传→鉴权读取(image/png)→删除全通过。后端 **125** 测试、前端 **33** 测试全绿 | AppUser / AuthController / UserService / AvatarStorageService / AppUserRepository / JwtAuthFilter / SecurityConfig / application.yml / .env.example / 前端 index.html + app.js + style.css + tests / DEVELOPMENT |
 | 2026-09-15 | P0/P1 路线交叉核对（对照并行提交 99ac2fe / 65e1d6e / c404a73 / 7ed8bbf / fdc6b73 / 34172e0 / 1f190d6 / 236e8c9 之后的源码逐条复核，HEAD=8dfde85）：第 10 节路线改为带状态标注（✅ 已完成 / 🟡 部分 / ⬜ 仍开放）并写明证据——**已修**：调度线程池隔离（`spring.task.scheduling.pool.size=4` + 告警邮件独立有界线程池 `AsyncExecutorConfig`）、mock 认领加时间上限（`MOCK_RESOLVE_MAX_DIFF_MS`，修掉认领 976 秒前旧作业）、Monitor 端点按 owner 过滤且删除趋势需 ADMIN/OPERATOR、预览白名单抽为 `PreviewService.assertAllowedRead` 并被作业输出预览复用（堵住读 `.env` 的路径）、`JwtAuthFilter` 每请求回查用户使停用/改角色下一请求即生效、测试从 18 类 71 用例增至 **33 类 136 用例**；**仍开放**：token 无吊销（无 tokenVersion/passwordChangedAt）、`KafkaMonitorController` 与 `PreviewController` 无角色限制、`assertCanAccess` 仍对 ownerId 为空的历史作业放开、Flink 重启时「不在 overview 即 COMPLETED」误判（与 JOB_HEARTBEAT_LOST 语义冲突）、`JobService.submit` 无锁/CAS 与 `cleanOutputTempDirs`+merge 的并发写窗口、`app.js` 从 2451 行涨到 **3381 行**、PluginLoaderService / Parquet / HDFS / JobScheduler 仍无测试。另修正 §9.1 控件数 29→31（新增 pg_output / oracle_output，前后端注册表一致性校验通过） | DEVELOPMENT.md |
 | 2026-09-15 | **P0/P1 六项逐个修复**（承接上一轮交叉核对结论，每项独立提交）：① **Flink 状态语义**（`51538c4`）——新增集群一代标识（`/taskmanagers` 在册 TM 注册 ID 集合 `clusterGeneration`），「不在 overview」不再一律判成功：换代（JM 重启/TM 重新注册）→ FAILED + ERROR 日志 + 事件驱动告警，未换代才 COMPLETED，与 JOB_HEARTBEAT_LOST 语义对齐；探测只在有作业消失时惰性执行一次，不给 5s 热路径加固定开销。② **token 吊销**（`c9def90`）——`AppUser.tokenVersion` + JWT claim `tv` + `JwtAuthFilter` 逐请求比对，改密/管理员重置/登出（`UserService.revokeTokens`）立即失效旧 token，旧 token 无该 claim 按 0 兼容。③ **无归属作业收紧**（`863d19c`）——新增 `security/JobAccess` 作为唯一归属规则（ADMIN 全量、普通用户仅本人、ownerId 为空仅 ADMIN），JobService/DependencyService/LineageService/MonitorService 四处重复实现全部委托，修掉「空归属即放行」。④ **端点权限**（`73a4e6d`）——`/api/kafka/**` 与 `/api/preview/**` 加类级 ADMIN/OPERATOR 限制，前端 Kafka 导航与「预览数据」按钮对 VIEWER 隐藏。⑤ **并发安全**（`46a3c7d`）——新增 `service/JobLocks`（64 分片可重入锁池），`submit` 全程持锁并新增状态前置校验（SUBMITTED/RUNNING 再提交 409），`cancel` 共用同一把锁，5 处重复的输出后处理收敛为持锁的 `finalizeJobOutputs`，杜绝重复 Flink 作业与 part 合并竞态；`online` 遇「已在运行」改为直接接管不再重复提交。⑥ **前端资源生命周期**（`11d42e9`）——resize 监听句柄化（重绑前先移除，修掉 initGraph 重入导致的监听器叠加）、新增 `disposeAllCharts()` 统一释放 4 个 ECharts 与 X6 画布，`onUnmounted` 与 `logout` 都清理监听/图表并停 Kafka 流与轮询。**测试**：新增 `JobLocksTest`(4)、`JobAccessTest`(5)、`JwtUtilTest`(3)、`FlinkJobStatusCheckerTest`(+2)、`JobServiceTest`(+2)、`UserServiceTest`(+3)、`KafkaMonitorControllerTest`(+1) 与前端 `security.test.js`(2)、`lifecycle.test.js`(2)；后端 **156** 用例、前端 **41** 用例全绿；§8 红线补 4 条（提交入口/输出后处理/权限判断/令牌版本），§10 路线同步标注完成状态 | FlinkJobStatusChecker / JobLocks(新) / JobService / JobAccess(新) / JwtUtil+JwtAuthFilter+AppUser / UserService / AuthController / KafkaMonitorController / PreviewController / MonitorService / DependencyService / LineageService / 前端 app.js + index.html + 测试 ×5 / DEVELOPMENT.md |
+| 2026-09-16 | **健康探针 + 看门狗（专治"端口在听但请求不响应"的僵死）**：起因为当日实测事故——后端 JVM 跑约 24h 后僵死：18080 端口在监听、TCP 能建立、acceptor/poller 正常、工作线程全空闲、CPU 三秒零增长，但**任何请求（含 `/api/auth/login`）永不返回**，浏览器登录一直转圈；线程转储无死锁无阻塞，属进程级僵死，重启即恢复（此前根因排查耗时较长，故补自动化手段）。改动：① 新增 `HealthController`（`GET /api/health`，`SecurityConfig` 中 permitAll）——免鉴权、无副作用（不写审计/日志，避免探针刷满审计表）、**真查一次数据库**，DB 异常返回 503；只探端口抓不住这类故障。② 新增 `scripts/start-backend.ps1`——注入根目录 `.env`（缺 `JWT_SECRET` 直接报错，避免启动即失败）、设置 `SERVER_PORT`/`FLINK_CLUSTER_PORT`/`FLINK_SQL_GATEWAY_PORT`、`Start-Process` 独立进程启动并轮询端口就绪。③ 新增 `scripts/watchdog.ps1` + `watchdog.bat`——周期探 `/api/health` 并记录耗时，连续 N 次（默认 3）失败即判定僵死：停掉占用端口的进程 → 调 start-backend.ps1 重启 → 复检；含重启冷却 60s、每小时上限 5 次、观察模式 `-NoRestart`、单次探针 `-Once`（退出码 0/1）、演示前预检 `-Preflight`（前端/后端+DB/Flink/SQL Gateway/Kafka 五项表格 + 后端耗时）、日志 `logs/watchdog.log`（5MB 自动滚动）、显式禁用系统代理避免本机探测被劫持。**实测**：① 直接杀掉后端 → 2 次探测后判定僵死并自动拉起，复检 UP（18ms）、登录链路正常；② 用「只监听不响应」的假服务占住 18080 **复现原始故障** → 探针 5s 超时命中 → 看门狗杀掉假服务、拉起真后端；③ `-Preflight` 输出 5/6 通过（Kafka 未启动，符合真实状态，退出码=失败项数）。另：§8 红线补 2 条（`.ps1` 必须 UTF-8 with BOM，否则 PS 5.1 按 GBK 解析报错；打包前必须先停后端，否则 jar 被锁会导致 repackage 失败并留下 0.5MB 瘦包） | HealthController + SecurityConfig / scripts/start-backend.ps1 + watchdog.ps1 + watchdog.bat / HealthControllerTest / DEVELOPMENT §4.4·§4.4.1·§9.1·§8 / README |

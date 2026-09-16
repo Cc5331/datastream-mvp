@@ -34,6 +34,8 @@ public class SecurityConfig {
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/auth/login", "/api/auth/register", "/error").permitAll()
+                // 健康探针免鉴权：看门狗/容器 healthcheck 不能依赖账号密码（端点无副作用，见 HealthController）
+                .requestMatchers("/api/health").permitAll()
                 // H2 控制台默认关闭（H2_CONSOLE_ENABLED）；即便开启也不允许匿名访问，仅 ADMIN 可用
                 .requestMatchers("/h2-console/**").hasRole("ADMIN")
                 .anyRequest().authenticated())
