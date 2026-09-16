@@ -357,15 +357,49 @@ docker compose down -v         :: 停止并删除数据卷
 
 ## 九、插件热加载
 
-将实现 ControlPlugin SPI 接口的 JAR 放入 `backend/plugins/` 目录，系统自动加载并注册到前端控件库。
+把实现插件 SPI 的 JAR 放进 `backend/plugins/`，后端启动时扫描并注册到控件注册表（前端控件库随之出现该控件）；
+运行中新增/替换 jar 也会被目录监听捕获并重新加载。
+
+支持两种接口（任选其一，方法签名相同）：
+
+| 接口 | 来源 | 说明 |
+|---|---|---|
+| `com.datastream.plugin.DataStreamPlugin` | `backend/plugin-sdk`（推荐） | 面向第三方的独立 SDK，第三方只需依赖这一个包 |
+| `com.datastream.mvp.plugin.ControlPlugin` | 后端内置 | 历史接口，继续兼容 |
 
 ```java
-// 插件 SDK 示例（backend/plugin-sdk）
-public class RedisLookupPlugin implements DataStreamPlugin {
-    public String getType() { return "redis_lookup"; }
-    public String getName() { return "Redis 异步查询"; }
-    // ...
+// 插件示例（backend/plugin-example，实际最小实现见下方说明）
+public class MyPlugin implements DataStreamPlugin {
+    public String getType() { return "my_transform"; }   // 必须与内置控件不同名
+    public String getName() { return "我的转换"; }
+    public String getCategory() { return "transform"; }
+    public String getDescription() { return "示例插件"; }
+    public String getParamSchema() { return "{\"type\":\"object\",\"properties\":{}}"; }
+    public String getFlinkTemplate() { return "SELECT * FROM ${source}"; }
+    public String getVersion() { return "1.0.0"; }
 }
+```
+
+行为与注意事项：
+
+- **重启不丢**：内置控件按 `type` 增量更新（upsert），插件控件行不会被清空——历史上 `DataInitializer` 的
+  「清库重建」会把插件控件每次启动都删掉，已于 2026-09-16 修复。
+- **jar 被移除后自动清理**：下次启动会删掉"jar 已不在插件目录"的插件控件行，控件库不会留孤儿。
+- **type 必须唯一**：与内置控件同名时**保留内置定义**并在日志给出警告（内置控件在翻译层有专门分支）。
+- **模板要能跑**：插件控件没有翻译层的专门分支，其 `flinkTemplate` 走通用模板渲染，
+  因此必须是可执行 SQL（`${id}` `${path}` 等占位符会被节点参数替换）。
+- **替换 jar 前建议停后端**：JVM 类加载器会持有 jar 文件句柄，运行中直接删除可能被系统拒绝。
+
+验证插件链路（无需改代码，1 分钟）：
+
+```powershell
+# 1) 构建 SDK 与后端
+mvn -q -DskipTests -f backend/plugin-sdk/pom.xml package
+mvn -q -DskipTests -f backend/pom.xml package
+# 2) 把自己的插件 jar 放进 backend/plugins/ 后启动
+powershell -ExecutionPolicy Bypass -File scripts\start-backend.ps1
+# 3) 登录后看控件数：31（内置）+ N（插件）
+curl -H "Authorization: Bearer <token>" http://localhost:18080/api/controls
 ```
 
 ## 十、技术栈

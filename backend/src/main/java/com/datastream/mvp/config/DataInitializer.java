@@ -70,12 +70,26 @@ public class DataInitializer implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
-        if (controlRepo.count() > 0) {
-            log.info("Control registry already initialized, clearing for re-seed...");
-            controlRepo.deleteAll();
-        }
+        seedBuiltInControls();
+        seedUsers();
+        backfillJobOwners();
+        backfillAlertOwners();
+    }
 
-        log.info("Seeding built-in controls...");
+    /** 本次启动由代码注册的内置控件类型（用于清理"已下线"的内置控件） */
+    private final java.util.Set<String> builtInTypes = new java.util.LinkedHashSet<>();
+
+    /**
+     * 内置控件播种：**按 type upsert，绝不 deleteAll**。
+     *
+     * 历史实现是「count>0 就 deleteAll 再重建」，而插件加载器是 @PostConstruct（早于本 CommandLineRunner），
+     * 于是插件注册的控件每次启动都被清空——插件功能名存实亡。现在：
+     * - 已存在的内置控件原地更新（保留管理员设置的 enabled 与 createdAt，避免重启把启停状态重置）；
+     * - 只删除「jarPath=built-in 且已从代码中移除」的陈旧行，插件行（jarPath=jar 名）永不删除。
+     */
+    void seedBuiltInControls() {
+        builtInTypes.clear();
+        log.info("Seeding built-in controls (upsert by type)...");
 
         // Datagen
         createControl("datagen_input", "Datagen", "input",
@@ -285,11 +299,32 @@ public class DataInitializer implements CommandLineRunner {
                 "CREATE TABLE ${id} (\n  data STRING\n) WITH (\n  'connector' = 'filesystem',\n  'path' = '${path}',\n  'format' = 'csv',\n  'sink.parallelism' = '1'\n);",
                 "1.0.0", "built-in");
 
-        log.info("Seeded {} built-in controls", controlRepo.count());
+        log.info("Built-in controls upserted: {} 个{}", builtInTypes.size(), removeStaleBuiltInControls());
 
         seedUsers();
         backfillJobOwners();
         backfillAlertOwners();
+    }
+
+    /**
+     * 清理「曾经是内置、但已从代码移除」的控件行；插件控件（jarPath != built-in）一律保留。
+     * @return 便于日志拼接的说明串
+     */
+    private String removeStaleBuiltInControls() {
+        int removed = 0;
+        int plugins = 0;
+        for (ControlRegistry c : controlRepo.findAll()) {
+            if (!"built-in".equals(c.getJarPath())) {
+                plugins++;
+                continue;
+            }
+            if (!builtInTypes.contains(c.getType())) {
+                controlRepo.delete(c);
+                removed++;
+                log.info("Removed stale built-in control: {}", c.getType());
+            }
+        }
+        return "（清理已下线内置控件 " + removed + " 个，保留插件控件 " + plugins + " 个）";
     }
 
     /**
@@ -408,10 +443,21 @@ public class DataInitializer implements CommandLineRunner {
                 + "\"required\":[\"url\",\"schema\",\"table\"]}";
     }
 
+    /**
+     * 内置控件 upsert：同 type 已存在则原地更新（保留 enabled/createdAt），否则新建。
+     * 这样重复启动不会产生重复行，也不会把管理员设置的启停状态重置。
+     */
     private void createControl(String type, String name, String category, String description,
                                 String paramSchema, String flinkTemplate, String version, String jarPath) {
-        ControlRegistry c = new ControlRegistry();
-        c.setType(type);
+        builtInTypes.add(type);
+        ControlRegistry c = controlRepo.findByType(type).orElse(null);
+        boolean isNew = (c == null);
+        if (isNew) {
+            c = new ControlRegistry();
+            c.setType(type);
+            c.setEnabled(true);
+            c.setCreatedAt(LocalDateTime.now());
+        }
         c.setName(name);
         c.setCategory(category);
         c.setDescription(description);
@@ -419,8 +465,6 @@ public class DataInitializer implements CommandLineRunner {
         c.setFlinkTemplate(flinkTemplate);
         c.setVersion(version);
         c.setJarPath(jarPath);
-        c.setEnabled(true);
-        c.setCreatedAt(LocalDateTime.now());
         c.setUpdatedAt(LocalDateTime.now());
         controlRepo.save(c);
     }

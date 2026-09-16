@@ -21,6 +21,12 @@
     </properties>
 
     <dependencies>
+        <!-- 控件插件 SDK：PluginLoaderService 需识别第三方插件实现的 DataStreamPlugin 接口 -->
+        <dependency>
+            <groupId>com.datastream</groupId>
+            <artifactId>plugin-sdk</artifactId>
+            <version>1.0.0</version>
+        </dependency>
         <!-- Spring Boot -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
