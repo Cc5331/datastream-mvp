@@ -817,6 +817,9 @@ const app = createApp({
 
             // 节点点击
             graph.on('node:click', ({ node }) => {
+                // 切换节点前，先把上一个节点在面板里未点「应用参数」的改动写回，
+                // 否则这些编辑会被静默丢弃（表现为"我明明改了参数，提交时却还是旧值/空值"）。
+                if (selectedNode.value && selectedNode.value !== node) applyParams();
                 selectedNode.value = node;
                 const data = node.getData() || {};
                 const schema = data.paramSchema || {};
@@ -935,8 +938,7 @@ const app = createApp({
                             label: {
                                 text: `${colors.icon} ${data.name}`,
                                 fill: '#303133',
-                                fontSize: 13,
-                                fontWeight: 'bold',
+                                fontSize: 13,                                fontWeight: 'bold',
                                 textAnchor: 'middle',
                                 textVerticalAnchor: 'middle'
                             }
@@ -955,7 +957,9 @@ const app = createApp({
                             type: data.type,
                             name: data.name,
                             category: data.category,
-                            params: {},
+                            // 用 paramSchema 的 default 初始化，保证「面板里看到的」与「节点里存的」一致：
+                            // 之前固定为空对象，用户看到面板里已填好路径、直接点提交却报「缺少必填参数: path」
+                            params: defaultParamsFromSchema(data.paramSchema),
                             paramSchema: data.paramSchema
                         }
                     });
@@ -2267,7 +2271,13 @@ const app = createApp({
             return null;
         }
 
-        async function saveDag() {
+        /**
+         * 保存 DAG。
+         * options.silent = true 时不弹「保存成功」提示（供提交前自动落盘复用，避免连续两个 toast）。
+         * 返回 true 表示确实写入了后端，false 表示被前置校验拦下或失败。
+         */
+        async function saveDag(options = {}) {
+            const silent = options && options.silent === true;
             saving.value = true;
             try {
                 const checkMsg = validateDagForSubmit();
@@ -2293,10 +2303,12 @@ const app = createApp({
                 }
 
                 currentJobName.value = saved.name;
-                ElMessage.success('DAG 已保存 (ID: ' + saved.id + ')');
+                if (!silent) ElMessage.success('DAG 已保存 (ID: ' + saved.id + ')');
                 await loadJobs();
+                return true;
             } catch (err) {
                 ElMessage.error('保存失败: ' + (err.response?.data?.message || err.message));
+                return false;
             } finally {
                 saving.value = false;
             }
@@ -2318,6 +2330,15 @@ const app = createApp({
             const checkMsg = validateDagForSubmit();
             if (checkMsg) {
                 ElMessage.warning(checkMsg);
+                return;
+            }
+            // 提交前先把当前画布落盘：① 应用选中节点面板里未提交的改动；
+            // ② 保存 DAG——因为「提交前检查」是后端基于**已保存的 DAG** 做的，
+            // 不先保存就会出现「画布上明明填了参数，检查却报缺少必填参数」的错位。
+            if (selectedNode.value) applyParams();
+            const saved = await saveDag({ silent: true });
+            if (!saved) {
+                ElMessage.warning('保存失败，已取消提交');
                 return;
             }
             if (!currentJobId) {
@@ -2585,6 +2606,19 @@ const app = createApp({
             currentJobId = null;
             currentJobName.value = '';
             ElMessage.success('示例作业已载入画布：' + dag.jobName);
+        }
+
+        /**
+         * 由控件 paramSchema 的 default 生成节点初始参数。
+         * 拖拽落点、示例作业、模板套用都会用到：节点一旦创建就带着默认值，
+         * 与参数面板展示的内容一致，避免「面板看起来填好了、节点里其实是空的」。
+         */
+        function defaultParamsFromSchema(schema) {
+            const params = {};
+            for (const [key, prop] of Object.entries((schema && schema.properties) || {})) {
+                if (prop && prop.default !== undefined && prop.default !== null) params[key] = prop.default;
+            }
+            return params;
         }
 
         // 应用参数
