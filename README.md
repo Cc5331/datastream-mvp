@@ -480,6 +480,9 @@ python test-resources/benchmark.py
 - `DEVELOPMENT.md`：开发维护指南（逻辑框架 / 扩展规范 / 红线 / 回归清单）
 - `AGENTS.md`：AI 助手工作区指令（动代码前先读 DEVELOPMENT.md）
 - `docs/作品演示录像脚本.md`：作品演示录像（技术实现 / 核心功能 / 性能测试）分镜脚本、口播稿与拍前清单
+- `docs/演示材料/`：成片配套物料——四张卡片（片头 / 技术架构 / 性能测试 / 片尾）、旁白文稿（md + docx，
+  含实测语速核算）、字幕 `作品演示录像.srt`、注册功能与画布拖拽两段口播稿；**成片视频**（174MB / 10MB）
+  因体积原因不进仓库，见仓库 **Releases** 页附件
 - `docs/数据库设计说明书.docx`：数据库设计说明书（ER 设计 / 表结构设计 / 索引与约束 / DDL 附录），
   配套 `docs/数据库-ER图.png`（ER 图）、`docs/schema-h2.sql`、`docs/schema-mysql.sql`（真实建表 DDL）；
   由 `scripts/gen_db_design_doc.py` 从实体与 DDL 自动生成，改表后重跑即可更新
