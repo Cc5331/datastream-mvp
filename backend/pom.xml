@@ -13,7 +13,7 @@
     <artifactId>mvp-backend</artifactId>
     <version>1.0.0</version>
     <name>DataStream MVP Backend</name>
-    <description>数据流任务管理系统 - MVP 后端服务</description>
+    <description>通用流处理任务管理平台 - MVP 后端服务</description>
 
     <properties>
         <java.version>17</java.version>

@@ -1,4 +1,4 @@
-# 数据流任务管理系统（DataStream MVP）
+# 通用流处理任务管理平台（DataStream MVP）
 
 > 基于 **Spring Boot 3.2 + Apache Flink 1.18 + Vue 3 + AntV X6** 的可视化数据流任务编排平台：在画布上拖拽控件搭建 DAG，一键翻译为 Flink 作业并提交 Standalone 集群运行，结果输出到文件或 MySQL。
 

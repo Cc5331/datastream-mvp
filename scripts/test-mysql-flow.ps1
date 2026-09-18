@@ -9,7 +9,7 @@ $mysql = "C:\MySQL\MySQL Server 8.1\bin\mysql.exe"
 if (-not (Test-Path $mysql)) { $mysql = "mysql" }
 
 Write-Output "=========================================="
-Write-Output "数据流任务管理系统 - MySQL 全流程测试脚本"
+Write-Output "通用流处理任务管理平台 - MySQL 全流程测试脚本"
 Write-Output "=========================================="
 Write-Output ""
 

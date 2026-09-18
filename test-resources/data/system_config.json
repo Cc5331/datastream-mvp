@@ -1,5 +1,5 @@
 {
-  "app_name": "数据流任务管理系统",
+  "app_name": "通用流处理任务管理平台",
   "version": "1.0.0",
   "environment": "test",
   "datasources": {

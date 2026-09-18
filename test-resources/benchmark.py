@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-# 数据流任务管理系统 - MVP 基准测试工具
+# 通用流处理任务管理平台 - MVP 基准测试工具
 # 测试场景：CSV 输入 -> CSV 输出（经后端 REST + Flink Standalone 真实提交执行）
 # 测试指标：不同数据量 / 并行度下的吞吐量和资源利用率
 #
@@ -256,7 +256,7 @@ def generate_report(all_results, resource_summaries):
     os.makedirs(TEST_RESULTS_DIR, exist_ok=True)
 
     lines = [
-        "# 数据流任务管理系统 - MVP 性能测试报告\n",
+        "# 通用流处理任务管理平台 - MVP 性能测试报告\n",
         "\n",
         "> 生成时间: %s\n" % datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "> 硬件环境: 32 vCPU / 16G RAM（本次实测机器；Phase 1 目标环境 8 vCPU）\n",
@@ -335,7 +335,7 @@ if __name__ == "__main__":
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     print("=" * 60)
-    print("数据流任务管理系统 - MVP 基准测试")
+    print("通用流处理任务管理平台 - MVP 基准测试")
     print("=" * 60)
     print("后端: %s" % BACKEND_BASE)
     print("psutil: %s" % ("可用" if HAS_PSUTIL else "未安装（资源列显示 -）"))

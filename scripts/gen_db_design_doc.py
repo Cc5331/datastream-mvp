@@ -333,7 +333,7 @@ def draw_er(path):
     f_rel = ImageFont.truetype(CJK_FONT, 18)
     f_legend = ImageFont.truetype(CJK_FONT, 19)
 
-    d.text((40, 26), "数据流任务管理平台 —— 数据库 ER 图（12 张表）", font=f_title, fill="#1f2a44")
+    d.text((40, 26), "通用流处理任务管理平台 —— 数据库 ER 图（12 张表）", font=f_title, fill="#1f2a44")
     d.text((40, 76), "实线=外键逻辑关系（1:N，服务层维护，无物理外键）；job_dependency 为作业间 N:M 依赖边",
            font=f_sub, fill="#5a6478")
 
@@ -541,14 +541,14 @@ def build_doc():
         doc.add_paragraph()
     para(doc, "数据库设计说明书", bold=True, size=30, align=WD_ALIGN_PARAGRAPH.CENTER)
     doc.add_paragraph()
-    para(doc, "可视化数据流任务管理平台（DataStream MVP）", size=15, align=WD_ALIGN_PARAGRAPH.CENTER)
+    para(doc, "可视化通用流处理任务管理平台（DataStream MVP）", size=15, align=WD_ALIGN_PARAGRAPH.CENTER)
     para(doc, "ER 设计 · 表结构设计 · 索引与约束 · DDL 附录", size=12, align=WD_ALIGN_PARAGRAPH.CENTER)
     for _ in range(5):
         doc.add_paragraph()
     make_table(doc,
                ["项目", "内容"],
                [["文档名称", "数据库设计说明书"],
-                ["适用系统", "可视化数据流任务管理平台（画布编排 → Flink SQL → Flink 集群 → 输出/监控/告警）"],
+                ["适用系统", "可视化通用流处理任务管理平台（画布编排 → Flink SQL → Flink 集群 → 输出/监控/告警）"],
                 ["数据库版本", "H2 2.x（开发默认，file 模式）/ MySQL 8.x（生产，InnoDB + utf8mb4）"],
                 ["表数量", "12 张（作业编排 5、监控告警 3、安全权限 2、平台能力 2）"],
                 ["文档版本", "V1.0"],
@@ -560,7 +560,7 @@ def build_doc():
     # ---------- 1 文档说明
     h(doc, "1. 文档说明", 1)
     h(doc, "1.1 目的与范围", 2)
-    para(doc, "本文档描述可视化数据流任务管理平台的数据库设计，包含：实体关系（ER）设计、12 张表的完整表结构、"
+    para(doc, "本文档描述可视化通用流处理任务管理平台的数据库设计，包含：实体关系（ER）设计、12 张表的完整表结构、"
               "索引与约束设计、关键字段的设计取舍，以及 H2 / MySQL 两种部署形态的建表 DDL。"
               "范围覆盖元数据库（作业、版本、日志、调度、趋势、告警、诊断、用户、审计、控件注册表、数据源连接）"
               "的全部持久化结构；不包含 Flink 集群自身的状态存储，也不包含被平台读写的业务目标库（MySQL/PG/Oracle）结构。")
