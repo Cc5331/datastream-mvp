@@ -102,14 +102,13 @@ def card_arch():
         ("执行层", "Flink 1.18 Standalone：JobManager / TaskManager / SQL Gateway，作业真实运行", (255, 170, 80)),
         ("元数据", "H2 / MySQL 12 张表：作业·版本·日志·调度·趋势·告警·诊断·用户·审计", (190, 130, 255)),
     ]
-    y = 250
+    y = 270
     for name, desc, color in layers:
         d.rounded_rectangle([BOX_L, y, BOX_R, y + 150], radius=18, fill=(12, 24, 48), outline=color, width=3)
         d.rounded_rectangle([BOX_L, y, 400, y + 150], radius=18, fill=color)
         d.text((200, y + 48), name, font=font(46, True), fill=(10, 20, 40))
         left_fit(d, desc, 31, y + 46, 440, BOX_R - 440 - 40)
         y += 175
-    center_fit(d, "后端 166 项 + 前端 49 项自动化测试，CI 全模块验证", 30, 990, (150, 180, 220))
     img.save(os.path.join(OUT, "arch.png"))
 
 
