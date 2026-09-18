@@ -152,6 +152,28 @@ window.__u = {
       input.value = value;
       input.dispatchEvent(new Event('input', { bubbles: true }));
       return 'ok';
+  },
+  // 勾选/取消勾选某一行（Element Plus 表格选择列）
+  toggleRow: (username) => {
+      const tr = [...document.querySelectorAll('.users-view .el-table__body-wrapper tbody tr')]
+          .find(r => (r.textContent || '').includes(username));
+      if (!tr) return 'no-row';
+      const box = tr.querySelector('.el-checkbox');
+      if (!box) return 'no-checkbox';
+      if (box.classList.contains('is-disabled')) return 'disabled';
+      box.click();
+      return 'ok';
+  },
+  selectedCount: () => ([...document.querySelectorAll('.users-view .el-table__body-wrapper tbody tr')]
+      .filter(tr => tr.querySelector('.el-checkbox.is-checked')).length),
+  statusOf: (username) => {
+      const tr = [...document.querySelectorAll('.users-view .el-table__body-wrapper tbody tr')]
+          .find(r => (r.textContent || '').includes(username));
+      if (!tr) return 'no-row';
+      const text = tr.textContent || '';
+      if (text.includes('已禁用')) return 'disabled';
+      if (text.includes('启用')) return 'enabled';
+      return 'unknown';
   }
 };
 'ok'
@@ -281,14 +303,87 @@ window.__u = {
         `命中=${JSON.stringify(got)}`);
     if (got.length !== 4) console.log('    最近审计:', JSON.stringify(audit.filter(x => x.startsWith('USER_')).slice(0, 6)));
 
+    // ===== 批量操作 =====
+    const U1 = 'e2e_b1_' + stamp;
+    const U2 = 'e2e_b2_' + stamp;
+    const created = await cdp.eval(`(async () => {
+        const token = localStorage.getItem('token');
+        const mk = async (username) => {
+            const r = await fetch('${API}/api/users', { method:'POST',
+                headers:{ 'Content-Type':'application/json', Authorization:'Bearer ' + token },
+                body: JSON.stringify({ username, password: 'Batch' + ${JSON.stringify(stamp)} + 'a1',
+                    displayName: '批量测试-' + username, role: 'VIEWER', enabled: true }) });
+            return r.status;
+        };
+        await window.__u.search('');
+        return [await mk(${JSON.stringify(U1)}), await mk(${JSON.stringify(U2)})];
+    })()`);
+    await sleep(1500);
+    await cdp.eval(`window.__u.btn('刷新')?.click()`);
+    await sleep(1500);
+
+    const sel1 = await cdp.eval(`window.__u.toggleRow(${JSON.stringify(U1)})`);
+    const sel2 = await cdp.eval(`window.__u.toggleRow(${JSON.stringify(U2)})`);
+    const selCount = await cdp.eval(`window.__u.selectedCount()`);
+    check('可勾选多个账号（已选计数同步）',
+        created.every(s => s === 200 || s === 201) && sel1 === 'ok' && sel2 === 'ok' && selCount === 2,
+        `创建=${JSON.stringify(created)} 勾选=${sel1}/${sel2} 已选=${selCount}`);
+
+    const disClick = await cdp.eval(`window.__u.btn('批量禁用')?.click()`);
+    await sleep(800);
+    const disConfirm = await cdp.eval(`window.__u.confirmBox('确认禁用')`);
+    await sleep(2200);
+    const afterDisable = await cdp.eval(`({ a: window.__u.statusOf(${JSON.stringify(U1)}), b: window.__u.statusOf(${JSON.stringify(U2)}) })`);
+    check('批量禁用生效（两个账号状态均为已禁用）',
+        disConfirm === 'ok' && afterDisable.a === 'disabled' && afterDisable.b === 'disabled',
+        `点击=${disClick === undefined ? 'ok' : disClick} 确认=${disConfirm} 状态=${JSON.stringify(afterDisable)}`);
+
+    await cdp.eval(`window.__u.toggleRow(${JSON.stringify(U1)})`);
+    await cdp.eval(`window.__u.toggleRow(${JSON.stringify(U2)})`);
+    await cdp.eval(`window.__u.btn('批量启用')?.click()`);
+    await sleep(800);
+    await cdp.eval(`window.__u.confirmBox('确认启用')`);
+    await sleep(2200);
+    const afterEnable = await cdp.eval(`({ a: window.__u.statusOf(${JSON.stringify(U1)}), b: window.__u.statusOf(${JSON.stringify(U2)}) })`);
+    check('批量启用生效（两个账号恢复启用）',
+        afterEnable.a === 'enabled' && afterEnable.b === 'enabled', JSON.stringify(afterEnable));
+
+    await cdp.eval(`window.__u.toggleRow(${JSON.stringify(U1)})`);
+    await cdp.eval(`window.__u.toggleRow(${JSON.stringify(U2)})`);
+    await cdp.eval(`window.__u.btn('批量删除')?.click()`);
+    await sleep(800);
+    const delNames = await cdp.eval(`(() => { const box = [...document.querySelectorAll('.el-message-box')].filter(d=>d.offsetParent!==null).pop();
+        return box ? (box.textContent||'').includes(${JSON.stringify(U1)}) : false; })()`);
+    const batchDelConfirm = await cdp.eval(`window.__u.confirmBox('确认删除')`);
+    await sleep(2500);
+    const afterBatchDelete = await cdp.eval(`({ a: window.__u.statusOf(${JSON.stringify(U1)}), b: window.__u.statusOf(${JSON.stringify(U2)}) })`);
+    check('批量删除生效（确认框列出账号名，删除后两行均消失）',
+        delNames === true && batchDelConfirm === 'ok' && afterBatchDelete.a === 'no-row' && afterBatchDelete.b === 'no-row',
+        `确认框含账号名=${delNames} 确认=${batchDelConfirm} 结果=${JSON.stringify(afterBatchDelete)}`);
+
+    // 批量操作审计
+    const batchAudit = await cdp.eval(`(async () => {
+        const token = localStorage.getItem('token');
+        const r = await fetch('${API}/api/audit?page=0&size=50', { headers: { Authorization: 'Bearer ' + token } });
+        const d = await r.json();
+        return (d.content || []).map(x => x.action + '|' + (x.detail || ''));
+    })()`);
+    const batchGot = ['USER_BATCH_STATUS', 'USER_BATCH_DELETE'].filter(a => batchAudit.some(x => x.startsWith(a + '|')));
+    check('批量操作写入审计（USER_BATCH_STATUS / USER_BATCH_DELETE）', batchGot.length === 2,
+        `命中=${JSON.stringify(batchGot)}`);
+    if (batchGot.length !== 2) console.log('    最近审计:', JSON.stringify(batchAudit.filter(x => x.startsWith('USER_')).slice(0, 6)));
+
     // 清理（幂等）：确保测试账号不残留
     const cleaned = await cdp.eval(`(async () => {
         const token = localStorage.getItem('token');
         const list = await (await fetch('${API}/api/users', { headers: { Authorization: 'Bearer ' + token } })).json();
-        const u = (list || []).find(x => x.username === ${JSON.stringify(NEW_USER)});
-        if (!u) return 'none';
-        const r = await fetch('${API}/api/users/' + u.id, { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } });
-        return 'deleted:' + r.status;
+        const targets = (list || []).filter(x => [${JSON.stringify(NEW_USER)}, ${JSON.stringify(U1)}, ${JSON.stringify(U2)}].includes(x.username));
+        let n = 0;
+        for (const u of targets) {
+            const r = await fetch('${API}/api/users/' + u.id, { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } });
+            if (r.status === 204) n += 1;
+        }
+        return 'deleted ' + n + '/' + targets.length;
     })()`);
     console.log('  清理测试账号:', cleaned);
 

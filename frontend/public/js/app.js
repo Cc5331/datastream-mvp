@@ -163,6 +163,14 @@ const api = {
     async deleteUser(id) {
         await axios.delete(`${API_BASE}/users/${id}`);
     },
+    async batchUpdateUserStatus(ids, enabled) {
+        const res = await axios.post(`${API_BASE}/users/batch-status`, { ids, enabled });
+        return res.data;
+    },
+    async batchDeleteUsers(ids) {
+        const res = await axios.post(`${API_BASE}/users/batch-delete`, { ids });
+        return res.data;
+    },
     async getDependencies(jobId) {
         const res = await axios.get(`${API_BASE}/jobs/${jobId}/dependencies`);
         return res.data;
@@ -1780,8 +1788,7 @@ const app = createApp({
             resetPwdTarget.value = row;
             resetPwdValue.value = '';
             resetPwdVisible.value = true;
-        }
-        async function saveResetUserPassword() {
+        }        async function saveResetUserPassword() {
             const pwd = resetPwdValue.value;
             if (pwd.length < 8 || !/[A-Za-z]/.test(pwd) || !/\d/.test(pwd)) {
                 ElMessage.warning('密码至少 8 位，且须同时包含字母和数字');
@@ -1796,6 +1803,69 @@ const app = createApp({
                 ElMessage.error('重置失败: ' + (err.response?.data?.message || err.response?.data?.error || err.message));
             } finally {
                 resetPwdSaving.value = false;
+            }
+        }
+
+        // ---- 批量操作（启用 / 禁用 / 删除）：与作业批量上线同一套交互 ----
+        const selectedUsers = ref([]);
+        const userBatchOperating = ref(false);
+        const userTableRef = ref(null);
+        function onUserSelectionChange(rows) { selectedUsers.value = rows || []; }
+        function clearUserSelection() {
+            selectedUsers.value = [];
+            userTableRef.value?.clearSelection();
+        }
+        function showUserBatchResult(action, result) {
+            const nameOf = (id) => users.value.find(u => u.id === id)?.username || ('#' + id);
+            const succeeded = (result?.succeeded || []).length;
+            const failed = result?.failed || [];
+            if (failed.length) {
+                const detail = failed.map(item => `${nameOf(item.id)}：${item.message}`).join('；');
+                ElMessage.warning(`批量${action}完成：成功 ${succeeded}，失败 ${failed.length}。${detail}`);
+            } else {
+                ElMessage.success(`已成功${action} ${succeeded} 个账号`);
+            }
+        }
+        async function batchUpdateSelectedUsers(enabled) {
+            if (!selectedUsers.value.length) { ElMessage.warning('请先勾选要操作的账号'); return; }
+            const action = enabled ? '启用' : '禁用';
+            try {
+                await ElMessageBox.confirm(
+                    `确认${action}选中的 ${selectedUsers.value.length} 个账号？${enabled ? '' : '禁用后这些账号将无法登录。'}`,
+                    `批量${action}确认`, { type: 'warning', confirmButtonText: `确认${action}`, cancelButtonText: '取消' }
+                );
+            } catch (_) { return; }
+            userBatchOperating.value = true;
+            try {
+                const result = await api.batchUpdateUserStatus(selectedUsers.value.map(u => u.id), enabled);
+                showUserBatchResult(action, result);
+                clearUserSelection();
+                await loadUsers();
+            } catch (err) {
+                ElMessage.error(`批量${action}失败: ` + (err.response?.data?.message || err.response?.data?.error || err.message));
+            } finally {
+                userBatchOperating.value = false;
+            }
+        }
+        async function batchDeleteSelectedUsers() {
+            if (!selectedUsers.value.length) { ElMessage.warning('请先勾选要删除的账号'); return; }
+            const names = selectedUsers.value.map(u => u.displayName || u.username).join('、');
+            try {
+                await ElMessageBox.confirm(
+                    `确认删除选中的 ${selectedUsers.value.length} 个账号？\n${names}\n\n删除后立即无法登录（历史审计记录保留）。`,
+                    '批量删除确认', { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' }
+                );
+            } catch (_) { return; }
+            userBatchOperating.value = true;
+            try {
+                const result = await api.batchDeleteUsers(selectedUsers.value.map(u => u.id));
+                showUserBatchResult('删除', result);
+                clearUserSelection();
+                await loadUsers();
+            } catch (err) {
+                ElMessage.error('批量删除失败: ' + (err.response?.data?.message || err.response?.data?.error || err.message));
+            } finally {
+                userBatchOperating.value = false;
             }
         }
 
@@ -3616,6 +3686,8 @@ const app = createApp({
         users, usersLoading, userKeyword, userRoleFilter, userPage, userSize, userDialogVisible, userDialogMode, userForm, userSaving,
         resetPwdVisible, resetPwdSaving, resetPwdTarget, resetPwdValue, filteredUsers, pagedUsers, adminCount, roleLabel, roleTagType, isSelf,
         loadUsers, openCreateUser, openEditUser, saveUser, confirmDeleteUser, openResetUserPassword, saveResetUserPassword,
+        selectedUsers, userBatchOperating, userTableRef, onUserSelectionChange, clearUserSelection,
+        batchUpdateSelectedUsers, batchDeleteSelectedUsers,
             depDialogVisible, depJob, depCandidates, depSelected, depLoading, depSaving, openDepDialog, saveDeps,
             workflowJobs, workflowEdges, workflowLoading, workflowError, workflowUpdated, loadWorkflow,
             lineageDialogVisible, lineageJob, lineageAssets, lineageLoading, openLineageDialog,

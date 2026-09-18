@@ -11,7 +11,11 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 @Service
 @RequiredArgsConstructor
@@ -208,6 +212,50 @@ public class UserService {
         }
         protectLastAdmin(user, null, false);
         userRepo.delete(user);
+    }
+
+    /**
+     * 批量启用/禁用。逐项独立处理：单项失败（当前登录账号、最后一个启用管理员、用户不存在）
+     * 只记入 failed，不影响其它项——与作业批量（JobController.runBatch）语义保持一致。
+     * 注意：本方法**不加** @Transactional，让 update/delete 各自成事务，
+     * 否则内层抛异常会把外层事务标记为 rollback-only，捕获后仍会整体回滚。
+     */
+    public Map<String, Object> batchUpdateStatus(List<Long> ids, boolean enabled, Long currentUserId) {
+        return runBatch(ids, id -> {
+            if (!enabled && id.equals(currentUserId)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "不能禁用当前登录账号");
+            }
+            update(id, new UpdateUserRequest(null, null, enabled));
+        });
+    }
+
+    /** 批量删除同 batchUpdateStatus：逐项处理，protected 规则由 delete 内部保证。 */
+    public Map<String, Object> batchDelete(List<Long> ids, Long currentUserId) {
+        return runBatch(ids, id -> delete(id, currentUserId));
+    }
+
+    private Map<String, Object> runBatch(List<Long> ids, java.util.function.Consumer<Long> action) {
+        if (ids == null || ids.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请选择至少一个用户");
+        }
+        List<Long> succeeded = new ArrayList<>();
+        List<Map<String, Object>> failed = new ArrayList<>();
+        for (Long id : ids.stream().filter(Objects::nonNull).distinct().toList()) {
+            try {
+                action.accept(id);
+                succeeded.add(id);
+            } catch (Exception e) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("id", id);
+                item.put("message", e.getMessage() == null ? "操作失败" : e.getMessage());
+                failed.add(item);
+            }
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("succeeded", succeeded);
+        result.put("failed", failed);
+        result.put("total", succeeded.size() + failed.size());
+        return result;
     }
 
     private AppUser find(Long id) {

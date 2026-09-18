@@ -67,8 +67,50 @@ test('模板用到的名字都在 setup 返回值里暴露', () => {
     'userPage', 'userSize', 'userDialogVisible', 'userDialogMode', 'userForm', 'userSaving',
     'resetPwdVisible', 'resetPwdSaving', 'resetPwdTarget', 'resetPwdValue', 'adminCount',
     'roleLabel', 'roleTagType', 'isSelf', 'loadUsers', 'openCreateUser', 'openEditUser',
-    'saveUser', 'confirmDeleteUser', 'openResetUserPassword', 'saveResetUserPassword']) {
+    'saveUser', 'confirmDeleteUser', 'openResetUserPassword', 'saveResetUserPassword',
+    'selectedUsers', 'userBatchOperating', 'userTableRef', 'onUserSelectionChange',
+    'clearUserSelection', 'batchUpdateSelectedUsers', 'batchDeleteSelectedUsers']) {
     const re = new RegExp(`(^|[\\s,])${name}(,|\\s|$)`, 'm');
     assert.ok(re.test(appJs.slice(appJs.lastIndexOf('return {'))), `setup 返回值缺少 ${name}`);
   }
 });
+
+// ===== 批量操作 =====
+
+test('表格支持勾选，且当前登录账号不可勾选', () => {
+  assert.match(html, /<el-table-column type="selection"[^>]*:selectable="row => !isSelf\(row\)"/,
+    '勾选列需排除当前登录账号（避免自我禁用/删除）');
+  assert.match(html, /@selection-change="onUserSelectionChange"/);
+  assert.match(html, /ref="userTableRef"/, '需要表格 ref 以便批量后清空选择');
+});
+
+test('批量操作栏：启用 / 禁用 / 删除 / 清空选择，未勾选时禁用', () => {
+  assert.match(html, /已选 \{\{ selectedUsers\.length \}\} 个/);
+  assert.match(html, /@click="batchUpdateSelectedUsers\(true\)"/);
+  assert.match(html, /@click="batchUpdateSelectedUsers\(false\)"/);
+  assert.match(html, /@click="batchDeleteSelectedUsers"/);
+  assert.match(html, /@click="clearUserSelection"/);
+  // 未勾选时按钮应 disabled（三处批量按钮都带该判断）
+  const bar = html.slice(html.indexOf('已选 {{ selectedUsers.length }}'), html.indexOf('ref="userTableRef"'));
+  assert.equal((bar.match(/:disabled="!selectedUsers\.length"/g) || []).length, 4,
+    '批量启用/禁用/删除/清空四个按钮都应在未勾选时禁用');
+});
+
+test('批量走独立的后端端点，且逐项结果会被展示（成功 N / 失败 M + 原因）', () => {
+  assert.match(appJs, /async batchUpdateUserStatus\(ids, enabled\)[\s\S]{0,140}?\/users\/batch-status/);
+  assert.match(appJs, /async batchDeleteUsers\(ids\)[\s\S]{0,140}?\/users\/batch-delete/);
+  assert.match(appJs, /function showUserBatchResult\(action, result\)/);
+  assert.match(appJs, /批量\$\{action\}完成：成功 \$\{succeeded\}，失败 \$\{failed\.length\}/,
+    '部分失败时要把逐项原因提示出来，不能只报个数');
+});
+
+test('批量删除必须先确认，且列出被删账号名', () => {
+  const fn = appJs.slice(appJs.indexOf('async function batchDeleteSelectedUsers()'));
+  const body = fn.slice(0, 900);
+  assert.match(body, /ElMessageBox\.confirm\(/, '批量删除需二次确认');
+  assert.match(body, /const names = selectedUsers\.value\.map\(u => u\.displayName \|\| u\.username\)\.join\('、'\)/,
+    '确认框需列出将被删除的账号名');
+  assert.match(body, /if \(!selectedUsers\.value\.length\) \{ ElMessage\.warning\('请先勾选要删除的账号'\); return; \}/,
+    '空选直接拦下');
+});
+

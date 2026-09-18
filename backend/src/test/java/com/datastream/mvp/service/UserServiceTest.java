@@ -8,6 +8,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -207,6 +209,72 @@ class UserServiceTest {
         assertEquals(10, user.getTokenVersion());
         assertEquals("hash", user.getPasswordHash(), "登出吊销不应改动密码");
         verify(userRepo).save(user);
+    }
+
+    // ===== 批量操作（前端「用户管理」批量启用/禁用/删除）=====
+
+    @Test
+    void batchDeleteReportsSelfAndStillDeletesOthers() {
+        when(userRepo.findById(1L)).thenReturn(Optional.of(user(1L, AppUser.UserRole.ADMIN, true)));
+        AppUser other = user(2L, AppUser.UserRole.VIEWER, true);
+        when(userRepo.findById(2L)).thenReturn(Optional.of(other));
+
+        Map<String, Object> result = service.batchDelete(List.of(1L, 2L), 1L);
+
+        assertEquals(List.of(2L), result.get("succeeded"), "另一个用户应删除成功");
+        assertEquals(2, result.get("total"));
+        List<Map<String, Object>> failed = castList(result.get("failed"));
+        assertEquals(1, failed.size());
+        assertEquals(1L, failed.get(0).get("id"));
+        assertTrue(String.valueOf(failed.get(0).get("message")).contains("不能删除当前登录账号"));
+        verify(userRepo).delete(other);
+        verify(userRepo, never()).delete(argThat(u -> u != null && Long.valueOf(1L).equals(u.getId())));
+    }
+
+    @Test
+    void batchDeleteProtectsLastEnabledAdmin() {
+        AppUser admin = user(1L, AppUser.UserRole.ADMIN, true);
+        when(userRepo.findById(3L)).thenReturn(Optional.of(admin));
+        when(userRepo.countByRoleAndEnabledTrue(AppUser.UserRole.ADMIN)).thenReturn(1L);
+
+        Map<String, Object> result = service.batchDelete(List.of(3L), 9L);
+
+        assertEquals(List.of(), result.get("succeeded"));
+        List<Map<String, Object>> failed = castList(result.get("failed"));
+        assertEquals(1, failed.size());
+        assertTrue(String.valueOf(failed.get(0).get("message")).contains("至少一个启用的管理员"));
+        verify(userRepo, never()).delete(any());
+    }
+
+    @Test
+    void batchStatusDisablesOthersButRejectsSelf() {
+        AppUser self = user(1L, AppUser.UserRole.ADMIN, true);
+        AppUser other = user(2L, AppUser.UserRole.OPERATOR, true);
+        when(userRepo.findById(1L)).thenReturn(Optional.of(self));
+        when(userRepo.findById(2L)).thenReturn(Optional.of(other));
+        when(userRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Map<String, Object> result = service.batchUpdateStatus(List.of(1L, 2L), false, 1L);
+
+        assertEquals(List.of(2L), result.get("succeeded"), "禁用他人成功、禁用自己被拒");
+        assertTrue(self.isEnabled(), "当前登录账号不应被禁用");
+        assertFalse(other.isEnabled());
+        List<Map<String, Object>> failed = castList(result.get("failed"));
+        assertTrue(String.valueOf(failed.get(0).get("message")).contains("不能禁用当前登录账号"));
+    }
+
+    @Test
+    void batchRejectsEmptySelection() {
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                () -> service.batchDelete(List.of(), 1L));
+        assertEquals(400, ex.getStatusCode().value());
+        assertThrows(ResponseStatusException.class,
+                () -> service.batchUpdateStatus(null, false, 1L));
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> castList(Object value) {
+        return (List<Map<String, Object>>) value;
     }
 
     private AppUser user(Long id, AppUser.UserRole role, boolean enabled) {

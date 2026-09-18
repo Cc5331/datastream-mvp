@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/users")
@@ -21,6 +22,9 @@ public class UserController {
     private final UserService userService;
 
     public record ResetPasswordRequest(String password) {}
+
+    /** 批量请求：ids 为待操作用户 id；enabled 仅批量状态接口使用（true=启用，false=禁用） */
+    public record BatchUsersRequest(List<Long> ids, Boolean enabled) {}
 
     @GetMapping
     public List<UserService.UserView> list() {
@@ -53,6 +57,24 @@ public class UserController {
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         userService.delete(id, currentUser().id());
         return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * 批量启用/禁用。逐项独立处理，返回 {succeeded:[id], failed:[{id,message}], total}，
+     * 前端据此提示"成功 N 失败 M + 原因"（与作业批量上线/下线同一套交互）。
+     */
+    @PostMapping("/batch-status")
+    @Audit(action = "USER_BATCH_STATUS", targetType = "USER",
+            detail = "'批量更新用户状态 ' + (#request.ids() == null ? 0 : #request.ids().size()) + ' 个'")
+    public Map<String, Object> batchStatus(@RequestBody BatchUsersRequest request) {
+        return userService.batchUpdateStatus(request.ids(), Boolean.TRUE.equals(request.enabled()), currentUser().id());
+    }
+
+    @PostMapping("/batch-delete")
+    @Audit(action = "USER_BATCH_DELETE", targetType = "USER",
+            detail = "'批量删除用户 ' + (#request.ids() == null ? 0 : #request.ids().size()) + ' 个'")
+    public Map<String, Object> batchDelete(@RequestBody BatchUsersRequest request) {
+        return userService.batchDelete(request.ids(), currentUser().id());
     }
 
     private CurrentUser currentUser() {
