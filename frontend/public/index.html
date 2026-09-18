@@ -116,6 +116,7 @@
                         <el-button size="small">管理 <el-icon class="dropdown-arrow"><arrow-down /></el-icon></el-button>
                         <template #dropdown><el-dropdown-menu>
                             <el-dropdown-item command="audit"><el-icon><document /></el-icon>操作审计</el-dropdown-item>
+                    <el-dropdown-item v-if="user.role === 'ADMIN'" command="users"><el-icon><user-filled /></el-icon>用户管理</el-dropdown-item>
                             <el-dropdown-item v-if="user.role === 'ADMIN'" command="admin-overview"><el-icon><data-analysis /></el-icon>运营总览</el-dropdown-item>
                         </el-dropdown-menu></template>
                     </el-dropdown>
@@ -550,6 +551,108 @@
                     </el-table>
                     <el-pagination v-if="auditTotal > auditSize" background layout="prev, pager, next, total" :total="auditTotal"
                         :page-size="auditSize" :current-page="auditPage + 1" @current-change="onAuditPage" style="margin-top:10px; justify-content:flex-end;"></el-pagination>
+                </div>
+
+                <!-- 用户管理视图（仅 ADMIN；后端 /api/users 已做类级 ADMIN 限制与审计） -->
+                <div v-show="currentView === 'users'" class="portal-view users-view">
+                    <div class="page-heading">
+                        <div><h2>👥 用户管理</h2><p>创建、编辑、重置密码与删除账号 · 仅管理员可见 · 全部操作记入审计 · 启用中的管理员 {{ adminCount }} 个</p></div>
+                        <div style="display:flex; gap:8px;">
+                            <el-button @click="loadUsers"><el-icon><refresh /></el-icon> 刷新</el-button>
+                            <el-button type="primary" @click="openCreateUser"><el-icon><plus /></el-icon> 新建用户</el-button>
+                        </div>
+                    </div>
+                    <div class="audit-filter enterprise-card">
+                        <el-input v-model="userKeyword" placeholder="搜索用户名 / 显示名" clearable style="max-width:240px;"></el-input>
+                        <el-select v-model="userRoleFilter" placeholder="全部角色" clearable style="width:150px;">
+                            <el-option label="管理员 ADMIN" value="ADMIN"></el-option>
+                            <el-option label="操作员 OPERATOR" value="OPERATOR"></el-option>
+                            <el-option label="观察员 VIEWER" value="VIEWER"></el-option>
+                        </el-select>
+                        <span>共 {{ filteredUsers.length }} 个账号</span>
+                    </div>
+                    <el-table :data="pagedUsers" v-loading="usersLoading" stripe size="small" style="width:100%;">
+                        <el-table-column prop="id" label="ID" width="70"></el-table-column>
+                        <el-table-column prop="username" label="用户名" width="160">
+                            <template #default="scope">
+                                <span>{{ scope.row.username }}</span>
+                                <el-tag v-if="isSelf(scope.row)" size="small" type="success" style="margin-left:6px;">当前登录</el-tag>
+                            </template>
+                        </el-table-column>
+                        <el-table-column prop="displayName" label="显示名" min-width="140" show-overflow-tooltip></el-table-column>
+                        <el-table-column label="角色" width="120">
+                            <template #default="scope">
+                                <el-tag size="small" :type="roleTagType(scope.row.role)">{{ roleLabel(scope.row.role) }}</el-tag>
+                            </template>
+                        </el-table-column>
+                        <el-table-column label="状态" width="90">
+                            <template #default="scope">
+                                <el-tag size="small" :type="scope.row.enabled === false ? 'info' : 'success'">
+                                    {{ scope.row.enabled === false ? '已禁用' : '启用' }}
+                                </el-tag>
+                            </template>
+                        </el-table-column>
+                        <el-table-column prop="createdAt" label="创建时间" width="180"></el-table-column>
+                        <el-table-column label="操作" width="260">
+                            <template #default="scope">
+                                <el-button size="small" @click="openEditUser(scope.row)"><el-icon><edit-pen /></el-icon> 编辑</el-button>
+                                <el-button size="small" @click="openResetUserPassword(scope.row)"><el-icon><key /></el-icon> 重置密码</el-button>
+                                <el-button size="small" type="danger" :disabled="isSelf(scope.row)" @click="confirmDeleteUser(scope.row)">
+                                    <el-icon><delete /></el-icon> 删除
+                                </el-button>
+                            </template>
+                        </el-table-column>
+                    </el-table>
+                    <el-pagination v-if="filteredUsers.length > userSize" background layout="prev, pager, next, total"
+                        :total="filteredUsers.length" :page-size="userSize" :current-page="userPage"
+                        @current-change="p => userPage = p" style="margin-top:10px; justify-content:flex-end;"></el-pagination>
+
+                    <!-- 新建 / 编辑用户 -->
+                    <el-dialog v-model="userDialogVisible" :title="userDialogMode === 'create' ? '新建用户' : '编辑用户'" width="460px">
+                        <el-form label-width="88px">
+                            <el-form-item label="用户名" required>
+                                <el-input v-model="userForm.username" :disabled="userDialogMode === 'edit'" maxlength="32"
+                                    placeholder="3–32 位字母、数字或下划线"></el-input>
+                            </el-form-item>
+                            <el-form-item label="显示名" required>
+                                <el-input v-model="userForm.displayName" maxlength="50" placeholder="姓名或称呼"></el-input>
+                            </el-form-item>
+                            <el-form-item v-if="userDialogMode === 'create'" label="初始密码" required>
+                                <el-input v-model="userForm.password" type="password" show-password maxlength="128"
+                                    placeholder="至少 8 位，须同时包含字母和数字"></el-input>
+                            </el-form-item>
+                            <el-form-item label="角色">
+                                <el-select v-model="userForm.role" style="width:100%;">
+                                    <el-option label="管理员 ADMIN（全部权限）" value="ADMIN"></el-option>
+                                    <el-option label="操作员 OPERATOR（可编辑与运行，无用户管理）" value="OPERATOR"></el-option>
+                                    <el-option label="观察员 VIEWER（只读）" value="VIEWER"></el-option>
+                                </el-select>
+                            </el-form-item>
+                            <el-form-item label="启用">
+                                <el-switch v-model="userForm.enabled"></el-switch>
+                                <span style="margin-left:8px; color:#909399; font-size:12px;">禁用后该账号无法登录</span>
+                            </el-form-item>
+                        </el-form>
+                        <template #footer>
+                            <el-button @click="userDialogVisible = false"><el-icon><close /></el-icon> 取消</el-button>
+                            <el-button type="primary" :loading="userSaving" @click="saveUser">
+                                <el-icon><check /></el-icon> {{ userDialogMode === 'create' ? '创建' : '保存' }}
+                            </el-button>
+                        </template>
+                    </el-dialog>
+
+                    <!-- 重置密码 -->
+                    <el-dialog v-model="resetPwdVisible" title="重置密码" width="420px">
+                        <p style="margin:0 0 12px; color:#606266;">
+                            为「{{ resetPwdTarget?.displayName || resetPwdTarget?.username }}」设置新密码；重置后该账号的旧登录态立即失效。
+                        </p>
+                        <el-input v-model="resetPwdValue" type="password" show-password maxlength="128"
+                            placeholder="至少 8 位，须同时包含字母和数字"></el-input>
+                        <template #footer>
+                            <el-button @click="resetPwdVisible = false"><el-icon><close /></el-icon> 取消</el-button>
+                            <el-button type="primary" :loading="resetPwdSaving" @click="saveResetUserPassword"><el-icon><key /></el-icon> 确认重置</el-button>
+                        </template>
+                    </el-dialog>
                 </div>
 
                 <!-- AI 助手视图 -->

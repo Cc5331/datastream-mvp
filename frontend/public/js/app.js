@@ -144,6 +144,25 @@ const api = {
         const res = await axios.get(`${API_BASE}/audit`, { params });
         return res.data;
     },
+    // ===== 用户管理（仅 ADMIN，后端 /api/users 类级 @PreAuthorize 限制）=====
+    async getUsers() {
+        const res = await axios.get(`${API_BASE}/users`);
+        return res.data;
+    },
+    async createUser(payload) {
+        const res = await axios.post(`${API_BASE}/users`, payload);
+        return res.data;
+    },
+    async updateUser(id, payload) {
+        const res = await axios.put(`${API_BASE}/users/${id}`, payload);
+        return res.data;
+    },
+    async resetUserPassword(id, password) {
+        await axios.put(`${API_BASE}/users/${id}/password`, { password });
+    },
+    async deleteUser(id) {
+        await axios.delete(`${API_BASE}/users/${id}`);
+    },
     async getDependencies(jobId) {
         const res = await axios.get(`${API_BASE}/jobs/${jobId}/dependencies`);
         return res.data;
@@ -1628,6 +1647,156 @@ const app = createApp({
             auditKeyword.value = '';
             Object.assign(auditFilters, { username: '', action: '', targetType: '', targetId: '', ip: '', range: [] });
             loadAudit(0);
+        }
+
+        // ===== 用户管理（增删查改，仅 ADMIN；后端 /api/users 已做类级 @PreAuthorize + 审计）=====
+        const users = ref([]);
+        const usersLoading = ref(false);
+        const userKeyword = ref('');
+        const userRoleFilter = ref('');
+        const userPage = ref(1);
+        const userSize = ref(10);
+        const userDialogVisible = ref(false);
+        const userDialogMode = ref('create');           // create | edit
+        const userSaving = ref(false);
+        const userForm = reactive({ id: null, username: '', displayName: '', password: '', role: 'VIEWER', enabled: true });
+        const resetPwdVisible = ref(false);
+        const resetPwdSaving = ref(false);
+        const resetPwdTarget = ref(null);
+        const resetPwdValue = ref('');
+        const ROLE_LABELS = { ADMIN: '管理员', OPERATOR: '操作员', VIEWER: '观察员' };
+        const roleLabel = (role) => ROLE_LABELS[role] || role;
+        const roleTagType = (role) => (role === 'ADMIN' ? 'danger' : role === 'OPERATOR' ? 'warning' : 'info');
+        const isSelf = (row) => !!row && row.id === user.value?.id;
+        // 启用中的管理员数量：界面据此提示"最后一个管理员不可删除/降级"（后端也会拒绝）
+        const adminCount = computed(() => users.value.filter(u => u.role === 'ADMIN' && u.enabled !== false).length);
+
+        const filteredUsers = computed(() => {
+            const kw = userKeyword.value.trim().toLowerCase();
+            return users.value.filter(u => {
+                if (userRoleFilter.value && u.role !== userRoleFilter.value) return false;
+                if (!kw) return true;
+                return String(u.username || '').toLowerCase().includes(kw)
+                    || String(u.displayName || '').toLowerCase().includes(kw);
+            });
+        });
+        const pagedUsers = computed(() => {
+            const start = (userPage.value - 1) * userSize.value;
+            return filteredUsers.value.slice(start, start + userSize.value);
+        });
+        watch([userKeyword, userRoleFilter, userSize], () => { userPage.value = 1; });
+
+        async function loadUsers() {
+            if (user.value?.role !== 'ADMIN') {
+                currentView.value = 'workbench';
+                ElMessage.warning('用户管理仅管理员可访问，已返回工作台');
+                return;
+            }
+            usersLoading.value = true;
+            try {
+                const list = await api.getUsers();
+                users.value = (list || []).slice().sort((a, b) => (a.id || 0) - (b.id || 0));
+                const maxPage = Math.max(1, Math.ceil(filteredUsers.value.length / userSize.value));
+                if (userPage.value > maxPage) userPage.value = maxPage;
+            } catch (err) {
+                if (!(err.response && err.response.status === 401)) {
+                    ElMessage.error('加载用户列表失败: ' + (err.response?.data?.message || err.response?.data?.error || err.message));
+                }
+            } finally {
+                usersLoading.value = false;
+            }
+        }
+
+        function openCreateUser() {
+            userDialogMode.value = 'create';
+            Object.assign(userForm, { id: null, username: '', displayName: '', password: '', role: 'VIEWER', enabled: true });
+            userDialogVisible.value = true;
+        }
+        function openEditUser(row) {
+            userDialogMode.value = 'edit';
+            Object.assign(userForm, {
+                id: row.id, username: row.username, displayName: row.displayName || '',
+                password: '', role: row.role, enabled: row.enabled !== false
+            });
+            userDialogVisible.value = true;
+        }
+        async function saveUser() {
+            const username = userForm.username.trim();
+            const displayName = userForm.displayName.trim();
+            if (userDialogMode.value === 'create') {
+                if (!/^[A-Za-z0-9_]{3,32}$/.test(username)) {
+                    ElMessage.warning('用户名须为 3–32 位字母、数字或下划线');
+                    return;
+                }
+                if (!displayName) { ElMessage.warning('请填写显示名称'); return; }
+                if (userForm.password.length < 8 || !/[A-Za-z]/.test(userForm.password) || !/\d/.test(userForm.password)) {
+                    ElMessage.warning('密码至少 8 位，且须同时包含字母和数字');
+                    return;
+                }
+            } else if (!displayName) { ElMessage.warning('请填写显示名称'); return; }
+
+            userSaving.value = true;
+            try {
+                if (userDialogMode.value === 'create') {
+                    await api.createUser({
+                        username, password: userForm.password, displayName,
+                        role: userForm.role, enabled: userForm.enabled
+                    });
+                    ElMessage.success('用户已创建：' + username);
+                } else {
+                    await api.updateUser(userForm.id, {
+                        displayName, role: userForm.role, enabled: userForm.enabled
+                    });
+                    ElMessage.success('用户已更新：' + username);
+                }
+                userDialogVisible.value = false;
+                await loadUsers();
+            } catch (err) {
+                const verb = userDialogMode.value === 'create' ? '创建' : '更新';
+                ElMessage.error(verb + '失败: ' + (err.response?.data?.message || err.response?.data?.error || err.message));
+            } finally {
+                userSaving.value = false;
+            }
+        }
+
+        async function confirmDeleteUser(row) {
+            if (isSelf(row)) { ElMessage.warning('不能删除当前登录账号'); return; }
+            try {
+                await ElMessageBox.confirm(
+                    `确认删除用户「${row.displayName || row.username}」？删除后该账号立即无法登录（历史审计记录保留）。`,
+                    '删除用户', { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' }
+                );
+            } catch (_) { return; }
+            try {
+                await api.deleteUser(row.id);
+                ElMessage.success('用户已删除：' + row.username);
+                await loadUsers();
+            } catch (err) {
+                ElMessage.error('删除失败: ' + (err.response?.data?.message || err.response?.data?.error || err.message));
+            }
+        }
+
+        function openResetUserPassword(row) {
+            resetPwdTarget.value = row;
+            resetPwdValue.value = '';
+            resetPwdVisible.value = true;
+        }
+        async function saveResetUserPassword() {
+            const pwd = resetPwdValue.value;
+            if (pwd.length < 8 || !/[A-Za-z]/.test(pwd) || !/\d/.test(pwd)) {
+                ElMessage.warning('密码至少 8 位，且须同时包含字母和数字');
+                return;
+            }
+            resetPwdSaving.value = true;
+            try {
+                await api.resetUserPassword(resetPwdTarget.value.id, pwd);
+                ElMessage.success('密码已重置，该账号原有登录态已失效');
+                resetPwdVisible.value = false;
+            } catch (err) {
+                ElMessage.error('重置失败: ' + (err.response?.data?.message || err.response?.data?.error || err.message));
+            } finally {
+                resetPwdSaving.value = false;
+            }
         }
 
         // 打开帮助中心并定位到指定标签
@@ -3332,6 +3501,7 @@ const app = createApp({
             else if (v === 'monitor') { loadMonitor(); startMonitorPolling(); nextTick(initTrendChart); }
             else if (v === 'kafka') { loadKafkaTopics(); nextTick(initKafkaChart); }
             else if (v === 'audit') { loadAudit(); }
+            else if (v === 'users') { loadUsers(); }
             else if (v === 'workflow') { loadWorkflow(); }
             else if (v === 'alerts') { loadAlerts(); }
             else if (v === 'ai') { loadAiModels(); }
@@ -3443,6 +3613,9 @@ const app = createApp({
             registerUsername, registerDisplayName, registerPassword, registerPasswordConfirm, registerAgreed, registerError, registerLoading,
             login, register, switchAuthMode, logout, onlyMine, helpTab, openHelp,
             auditRows, auditTotal, auditPage, auditSize, auditKeyword, auditFilters, auditLoading, loadAudit, onAuditPage, resetAuditFilters,
+        users, usersLoading, userKeyword, userRoleFilter, userPage, userSize, userDialogVisible, userDialogMode, userForm, userSaving,
+        resetPwdVisible, resetPwdSaving, resetPwdTarget, resetPwdValue, filteredUsers, pagedUsers, adminCount, roleLabel, roleTagType, isSelf,
+        loadUsers, openCreateUser, openEditUser, saveUser, confirmDeleteUser, openResetUserPassword, saveResetUserPassword,
             depDialogVisible, depJob, depCandidates, depSelected, depLoading, depSaving, openDepDialog, saveDeps,
             workflowJobs, workflowEdges, workflowLoading, workflowError, workflowUpdated, loadWorkflow,
             lineageDialogVisible, lineageJob, lineageAssets, lineageLoading, openLineageDialog,
