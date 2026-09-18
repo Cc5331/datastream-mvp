@@ -9,6 +9,7 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'public/index.html'), 'utf8');
 const appJs = fs.readFileSync(path.join(root, 'public/js/app.js'), 'utf8');
+const css = fs.readFileSync(path.join(root, 'public/css/style.css'), 'utf8');
 
 test('顶栏入口：用户管理仅 ADMIN 可见，且指向 users 视图', () => {
   assert.match(html, /v-if="user\.role === 'ADMIN'" command="users"/,
@@ -84,16 +85,36 @@ test('表格支持勾选，且当前登录账号不可勾选', () => {
   assert.match(html, /ref="userTableRef"/, '需要表格 ref 以便批量后清空选择');
 });
 
-test('批量操作栏：启用 / 禁用 / 删除 / 清空选择，未勾选时禁用', () => {
-  assert.match(html, /已选 \{\{ selectedUsers\.length \}\} 个/);
+test('批量操作栏独立成行，且未勾选时四个按钮都禁用', () => {
+  assert.match(html, /<div class="users-batch-bar">/, '批量栏需独立容器');
+  assert.match(html, /已选 <b>\{\{ selectedUsers\.length \}\}<\/b> 个/);
   assert.match(html, /@click="batchUpdateSelectedUsers\(true\)"/);
   assert.match(html, /@click="batchUpdateSelectedUsers\(false\)"/);
   assert.match(html, /@click="batchDeleteSelectedUsers"/);
   assert.match(html, /@click="clearUserSelection"/);
-  // 未勾选时按钮应 disabled（三处批量按钮都带该判断）
-  const bar = html.slice(html.indexOf('已选 {{ selectedUsers.length }}'), html.indexOf('ref="userTableRef"'));
+  const bar = html.slice(html.indexOf('<div class="users-batch-bar">'), html.indexOf('ref="userTableRef"'));
   assert.equal((bar.match(/:disabled="!selectedUsers\.length"/g) || []).length, 4,
     '批量启用/禁用/删除/清空四个按钮都应在未勾选时禁用');
+  // 回归：批量按钮曾塞进 .audit-filter（6 列 grid）导致换行挤压、按钮被裁掉
+  const filter = html.slice(html.indexOf('class="audit-filter enterprise-card"'),
+    html.indexOf('<div class="users-batch-bar">'));
+  assert.ok(!/batchUpdateSelectedUsers|batchDeleteSelectedUsers/.test(filter),
+    '筛选卡片里不应含批量按钮（会被网格挤到换行）');
+  assert.match(css, /\.users-batch-bar \{ display:flex/, 'style.css 需有批量栏样式');
+});
+
+test('角色筛选含「全部角色」显式选项', () => {
+  const start = html.indexOf('v-model="userRoleFilter"');
+  const sel = html.slice(start, html.indexOf('</el-select>', start));
+  assert.match(sel, /<el-option label="全部角色" value=""><\/el-option>/, '需提供「全部角色」选项');
+  assert.match(sel, /label="管理员 ADMIN"/);
+  assert.match(sel, /label="观察员 VIEWER"/);
+});
+
+test('创建时间复用既有 fmtDateTime（后端 ISO 带微秒会换行）', () => {
+  // 复用既有 helper，不要再定义第二个 fmtDateTime（曾因重复声明导致整份 app.js 语法错误）
+  assert.equal((appJs.match(/function fmtDateTime\(/g) || []).length, 1, 'fmtDateTime 只应有一处定义');
+  assert.match(html, /\{\{ fmtDateTime\(scope\.row\.createdAt\) \}\}/, '创建时间列需用格式化后的值');
 });
 
 test('批量走独立的后端端点，且逐项结果会被展示（成功 N / 失败 M + 原因）', () => {

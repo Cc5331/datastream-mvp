@@ -3684,7 +3684,7 @@ const app = createApp({
             login, register, switchAuthMode, logout, onlyMine, helpTab, openHelp,
             auditRows, auditTotal, auditPage, auditSize, auditKeyword, auditFilters, auditLoading, loadAudit, onAuditPage, resetAuditFilters,
         users, usersLoading, userKeyword, userRoleFilter, userPage, userSize, userDialogVisible, userDialogMode, userForm, userSaving,
-        resetPwdVisible, resetPwdSaving, resetPwdTarget, resetPwdValue, filteredUsers, pagedUsers, adminCount, roleLabel, roleTagType, isSelf,
+        resetPwdVisible, resetPwdSaving, resetPwdTarget, resetPwdValue, filteredUsers, pagedUsers, adminCount, roleLabel, roleTagType, isSelf, fmtDateTime,
         loadUsers, openCreateUser, openEditUser, saveUser, confirmDeleteUser, openResetUserPassword, saveResetUserPassword,
         selectedUsers, userBatchOperating, userTableRef, onUserSelectionChange, clearUserSelection,
         batchUpdateSelectedUsers, batchDeleteSelectedUsers,
