@@ -1,6 +1,12 @@
 /**
- * 截图核对：用户管理页「角色筛选下拉 + 批量操作栏」布局。
- * 用法：node scripts/shot-users-page.cjs [输出 png]
+ * 通用页面截图/核对脚本（Edge + CDP）：打开顶栏某个菜单项对应的视图并截图。
+ *
+ * 用法：
+ *   node scripts/shot-page.cjs "控件管理" [输出.png]
+ *   node scripts/shot-page.cjs "用户管理" output/_video_work/users-page.png
+ *   默认：菜单项「用户管理」，输出 output/_video_work/page.png
+ *
+ * 会打印：视图标题、表格行数、被断言元素存在性，便于无人值守核对布局。
  */
 const { spawn } = require('child_process');
 const http = require('http');
@@ -14,7 +20,9 @@ const WebSocket = require(process.env.DSH_WS_NODE_MODULES
 const EDGE = process.env.EDGE_PATH || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const APP = process.env.VERIFY_APP || 'http://127.0.0.1:3000';
 const API = process.env.VERIFY_API || 'http://127.0.0.1:18080';
-const OUT = process.argv[2] || path.join(__dirname, '..', 'output', '_video_work', 'users-page.png');
+const MENU = process.argv[2] || '用户管理';
+const ROOT = path.resolve(__dirname, '..');
+const OUT = process.argv[3] || path.join(ROOT, 'output', '_video_work', 'page.png');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 const pickFreePort = (start = 9500) => new Promise(resolve => {
@@ -83,59 +91,55 @@ class Cdp {
 
     await cdp.send('Page.navigate', { url: APP });
     await sleep(2500);
-    await cdp.eval(`(async () => {
+    const role = await cdp.eval(`(async () => {
         const r = await fetch('${API}/api/auth/login', { method:'POST', headers:{'Content-Type':'application/json'},
             body: JSON.stringify({ username:'admin', password:'admin123' }) });
+        if (!r.ok) return 'HTTP ' + r.status;
         const d = await r.json();
         localStorage.setItem('token', d.token);
         return d.user.role;
     })()`);
+    if (role !== 'ADMIN') { console.error('登录失败: ' + role); browser.kill(); process.exit(2); }
     await cdp.send('Page.navigate', { url: APP });
     await sleep(3000);
 
-    // 打开「管理 → 用户管理」
-    await cdp.eval(`(() => {
-        const t = [...document.querySelectorAll('button')].filter(b => b.offsetParent !== null)
-            .find(b => (b.textContent || '').trim().startsWith('管理'));
-        t.click();
-        const item = [...document.querySelectorAll('.el-dropdown-menu__item')]
-            .find(i => (i.textContent || '').includes('用户管理'));
-        item.click();
-        return 'ok';
+    // 依次尝试每个顶栏下拉，点到包含目标菜单项的那个
+    const opened = await cdp.eval(`(() => {
+        const triggers = [...document.querySelectorAll('.el-dropdown')].filter(d => d.offsetParent !== null);
+        for (const t of triggers) {
+            const btn = t.querySelector('button');
+            if (!btn) continue;
+            btn.click();
+            const item = [...document.querySelectorAll('.el-dropdown-menu__item')]
+                .find(i => (i.textContent || '').replace(/\\s+/g, '').includes(${JSON.stringify(MENU)}));
+            if (item) { item.click(); return 'clicked:' + (btn.textContent || '').trim(); }
+        }
+        return 'not-found';
     })()`);
-    await sleep(2000);
-    // 勾选两个账号，展示批量栏可用态
-    await cdp.eval(`(() => {
-        const boxes = [...document.querySelectorAll('.users-view .el-table__body-wrapper tbody tr .el-checkbox')]
-            .filter(b => !b.classList.contains('is-disabled'));
-        boxes.slice(0, 2).forEach(b => b.click());
-        return boxes.length;
+    await sleep(2200);
+
+    const info = await cdp.eval(`(() => {
+        const view = [...document.querySelectorAll('.portal-view, .controls-view, .jobs-view, .monitor-view')]
+            .find(v => v.offsetParent !== null);
+        const heading = view ? (view.querySelector('h2')?.textContent || '').trim() : '';
+        const rows = view ? view.querySelectorAll('.el-table__body-wrapper tbody tr').length : 0;
+        const hint = view ? (view.querySelector('.controls-hint')?.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 120) : '';
+        const stats = view ? (view.querySelector('.page-heading p')?.textContent || '').replace(/\\s+/g, ' ').trim() : '';
+        return { viewClass: view ? view.className : 'none', heading, rows, stats, hint };
     })()`);
-    await sleep(500);
-    // 展开角色筛选下拉
-    await cdp.eval(`(() => {
-        const sel = [...document.querySelectorAll('.users-view .el-select')].filter(e => e.offsetParent !== null)[0];
-        sel.querySelector('input')?.click();
-        sel.click();
-        return 'ok';
-    })()`);
-    await sleep(900);
 
     const shot = await cdp.send('Page.captureScreenshot', { format: 'png' });
     fs.mkdirSync(path.dirname(OUT), { recursive: true });
     fs.writeFileSync(OUT, Buffer.from(shot.data, 'base64'));
-    const info = await cdp.eval(`(() => {
-        const opts = [...document.querySelectorAll('.el-select-dropdown__item')].filter(e => e.offsetParent !== null)
-            .map(e => (e.textContent || '').trim());
-        const bar = document.querySelector('.users-batch-bar');
-        const btns = bar ? [...bar.querySelectorAll('button')].map(b => (b.textContent || '').trim() + (b.disabled ? '(禁用)' : '')) : [];
-        return { roleOptions: opts, batchButtons: btns, barVisible: !!bar && bar.offsetParent !== null };
-    })()`);
-    console.log('  角色下拉选项:', JSON.stringify(info.roleOptions));
-    console.log('  批量栏可见:', info.barVisible, ' 按钮:', JSON.stringify(info.batchButtons));
+
+    console.log('  菜单打开:', opened);
+    console.log('  视图:', info.viewClass, '| 标题:', info.heading);
+    console.log('  统计行:', info.stats);
+    console.log('  表格行数:', info.rows);
+    if (info.hint) console.log('  提示:', info.hint + '…');
     console.log('  截图:', OUT, Math.round(fs.statSync(OUT).size / 1024) + ' KB');
 
     try { cdp.ws.close(); } catch (_) {}
     browser.kill();
-    process.exit(0);
+    process.exit(opened.startsWith('clicked') ? 0 : 1);
 })().catch(e => { console.error('ERROR:', e.message); process.exit(3); });

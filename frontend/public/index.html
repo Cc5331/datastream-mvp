@@ -99,6 +99,7 @@
                         <template #dropdown><el-dropdown-menu>
                             <el-dropdown-item command="templates"><el-icon><files /></el-icon>模板中心</el-dropdown-item>
                             <el-dropdown-item command="data-sources"><el-icon><coin /></el-icon>数据源中心</el-dropdown-item>
+                            <el-dropdown-item command="controls"><el-icon><grid /></el-icon>控件管理</el-dropdown-item>
                             <el-dropdown-item v-if="canEdit" command="ai"><el-icon><magic-stick /></el-icon>AI 助手</el-dropdown-item>
                         </el-dropdown-menu></template>
                     </el-dropdown>
@@ -876,6 +877,58 @@
                     <div style="display:flex;justify-content:flex-end;margin-top:12px;">
                         <el-pagination v-model:current-page="alertPage" :page-size="alertSize" :total="alertTotal" layout="total, prev, pager, next" @current-change="onAlertPage"></el-pagination>
                     </div>
+                </div>
+
+                <!-- 控件管理视图（只读：注册表由后端 DataInitializer + 插件加载器维护） -->
+                <div v-show="currentView === 'controls'" class="controls-view">
+                    <div class="page-heading">
+                        <div>
+                            <h2>🧩 控件管理</h2>
+                            <p>控件注册表只读视图 · 共 <b>{{ controls.length }}</b> 个（输入 {{ controlStats.input }} / 转换 {{ controlStats.transform }} / 输出 {{ controlStats.output }}） · 内置 {{ controlStats.builtin }} + 插件 {{ controlStats.plugin }} · 当前启用 {{ controlStats.enabled }}</p>
+                        </div>
+                        <el-button :loading="controlsLoading" @click="loadControls"><el-icon><refresh /></el-icon> 刷新</el-button>
+                    </div>
+                    <div class="audit-filter enterprise-card">
+                        <el-input v-model="controlKeyword" placeholder="搜索类型 / 名称 / 描述" clearable style="max-width:260px;"></el-input>
+                        <el-select v-model="controlCategoryFilter" placeholder="全部分类" clearable style="width:170px;">
+                            <el-option label="全部分类" value=""></el-option>
+                            <el-option label="输入 input" value="input"></el-option>
+                            <el-option label="转换 transform" value="transform"></el-option>
+                            <el-option label="输出 output" value="output"></el-option>
+                        </el-select>
+                        <span>命中 {{ controlRows.length }} 个</span>
+                    </div>
+                    <p class="controls-hint">
+                        注册表在服务启动时由后端 <code>DataInitializer</code> 按 type upsert（保留管理员设置的启用状态），
+                        插件 jar 放入 <code>backend/plugins/</code> 后重启即自动注册；本页为<b>只读视图</b>，
+                        新增/修改控件请通过代码或插件 jar，避免"改了不生效"。编辑控件请走
+                        <code>GET/POST/PUT/DELETE /api/controls</code>（仅 ADMIN）。
+                    </p>
+                    <el-table :data="controlRows" v-loading="controlsLoading" stripe size="small" style="width:100%;">
+                        <el-table-column prop="type" label="类型标识" width="150"></el-table-column>
+                        <el-table-column prop="name" label="名称" width="150"></el-table-column>
+                        <el-table-column label="分类" width="110">
+                            <template #default="scope">
+                                <el-tag :type="scope.row.category === 'input' ? 'success' : scope.row.category === 'output' ? 'warning' : 'info'" size="small">
+                                    {{ scope.row.category }}
+                                </el-tag>
+                            </template>
+                        </el-table-column>
+                        <el-table-column prop="description" label="描述" min-width="260" show-overflow-tooltip></el-table-column>
+                        <el-table-column prop="version" label="版本" width="80"></el-table-column>
+                        <el-table-column label="来源" width="130">
+                            <template #default="scope">
+                                <el-tag :type="isPluginControl(scope.row) ? 'danger' : 'info'" size="small">
+                                    {{ isPluginControl(scope.row) ? '插件 ' + scope.row.jarPath : '内置' }}
+                                </el-tag>
+                            </template>
+                        </el-table-column>
+                        <el-table-column label="启用" width="80">
+                            <template #default="scope">
+                                <el-switch v-model="scope.row.enabled" disabled></el-switch>
+                            </template>
+                        </el-table-column>
+                    </el-table>
                 </div>
 
                 <!-- 实时监控视图 -->

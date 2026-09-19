@@ -99,6 +99,9 @@ body {
 
 /* ---------- 表格 ---------- */
 .jobs-view { padding:18px; height:100%; overflow:auto; }
+.controls-view { padding:18px; height:100%; overflow:auto; }
+.controls-view .controls-hint { margin:14px 0 0; padding:10px 14px; background:#f8fafc; border:1px solid var(--border); border-radius:10px; color:#64748b; font-size:12px; line-height:1.7; }
+.controls-view .controls-hint code { padding:1px 5px; background:#eef2f7; border-radius:4px; color:#1d4ed8; }
 #jobs-table, table { width:100%; border-collapse:collapse; font-size:13px; }
 th, td { padding:9px 12px; text-align:left; border-bottom:1px solid var(--border); }
 th { background:#f8fafc; font-weight:600; color:var(--text-sub); }

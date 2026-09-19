@@ -1006,15 +1006,46 @@ const app = createApp({
             return controls.value.filter(c => c.category === category && c.enabled !== false);
         }
 
+        // ===== 控件注册表视图（控件管理页 + 画布控件库共用）=====
+        const controlsLoading = ref(false);
+        const controlKeyword = ref('');
+        const controlCategoryFilter = ref('');
+
         // 加载控件
         async function loadControls() {
+            controlsLoading.value = true;
             try {
                 controls.value = await api.getControls();
             } catch (err) {
                 console.warn('从后端加载控件失败，使用内置控件');
                 controls.value = getBuiltinControls();
+            } finally {
+                controlsLoading.value = false;
             }
         }
+
+        // ===== 控件管理（只读注册表视图）=====
+        const isPluginControl = (row) => !!(row && row.jarPath && row.jarPath !== 'built-in');
+        const controlRows = computed(() => {
+            const kw = controlKeyword.value.trim().toLowerCase();
+            return controls.value.filter(c => {
+                if (controlCategoryFilter.value && c.category !== controlCategoryFilter.value) return false;
+                if (!kw) return true;
+                return [c.type, c.name, c.description]
+                    .some(v => String(v || '').toLowerCase().includes(kw));
+            });
+        });
+        const controlStats = computed(() => {
+            const byCat = (cat) => controls.value.filter(c => c.category === cat).length;
+            return {
+                input: byCat('input'),
+                transform: byCat('transform'),
+                output: byCat('output'),
+                builtin: controls.value.filter(c => !isPluginControl(c)).length,
+                plugin: controls.value.filter(isPluginControl).length,
+                enabled: controls.value.filter(c => c.enabled !== false).length
+            };
+        });
 
         // 内置控件（后端不可用时的降级）
         function getBuiltinControls() {
@@ -3566,6 +3597,7 @@ const app = createApp({
                 });
             }
             else if (v === 'data-sources') { loadDataSources(); }
+            else if (v === 'controls') { loadControls(); }
             else if (v === 'admin-overview') { loadAdminOverview(); }
             else if (v === 'cluster') { startClusterPolling(); }
             else if (v === 'monitor') { loadMonitor(); startMonitorPolling(); nextTick(initTrendChart); }
@@ -3661,6 +3693,7 @@ const app = createApp({
             selectedNode, nodeParams, nodeParamSchema, jobErrors,
             previewVisible, previewLoading, previewData, previewRows, previewNode,
             controlsByCategory, onDragStart, saveDag, submitJob,
+        controlsLoading, controlKeyword, controlCategoryFilter, controlRows, controlStats, isPluginControl,
             exportDag, importDagTrigger, importDag, clearCanvas, newCanvas, applyParams, paramProxy, setParam,
             openJob, submitJobById, deleteJob, deleteJobFromDetail, viewLogs, statusTag, undoDag, redoDag, canUndo, canRedo,
             openJobDetail, onJobMore, jobCols, jobDetailVisible, jobDetailRow,
