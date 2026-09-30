@@ -47,6 +47,7 @@ public class JobService {
     private final JobDependencyRepository dependencyRepo;
     private final PreviewService previewService;
     private final DataSourceNodeResolver dataSourceNodeResolver;
+    private final KafkaMonitorService kafkaMonitorService;
 
     @Value("${app.mysql.default-username:root}")
     private String defaultMysqlUsername;
@@ -494,6 +495,31 @@ public class JobService {
                     com.fasterxml.jackson.databind.JsonNode n = nodes.get(ni);
                     String type = n.has("type") ? n.get("type").asText() : "";
                     com.fasterxml.jackson.databind.JsonNode params = n.get("params");
+
+                    // Kafka 输出预览：没有文件可读，改为实时抽样该 topic 的消息
+                    // （此前会落到兜底分支报 "No output node found in DAG"，实拍时点了看不到任何数据）
+                    if ("kafka_output".equals(type) && params != null) {
+                        String topic = params.has("topic") ? params.get("topic").asText() : "";
+                        if (topic == null || topic.isBlank()) {
+                            result.add("Kafka 输出未配置 topic");
+                            return result;
+                        }
+                        java.util.List<String> samples = new java.util.ArrayList<>();
+                        try {
+                            kafkaMonitorService.streamTopic(topic, true, 10, 4000, m -> {
+                                if (samples.size() < 10) samples.add(String.valueOf(m.get("value")));
+                            });
+                        } catch (Exception e) {
+                            log.warn("Kafka 预览失败: {}", e.getMessage());
+                        }
+                        if (samples.isEmpty()) {
+                            result.add("Kafka 输出 topic「" + topic + "」暂无消息（作业运行并写入后可见）");
+                        } else {
+                            result.addAll(samples);
+                            result.add("(来自 Kafka topic " + topic + "，最多 10 条)");
+                        }
+                        return result;
+                    }
 
                     // MySQL output preview - query MySQL directly
                     if ("mysql_output".equals(type) && params != null) {

@@ -245,6 +245,31 @@ class DagTranslationServiceTest {
                 "数组形式 fields 应解析为带引号的字段列表: " + sql);
     }
 
+    /**
+     * 字段拼接控件的开箱即用路径：前端 paramSchema 默认值就是 fields="field1,field2"、separator=","，
+     * 用户拖出控件直接提交（不改任何参数）时也必须生成合法 CONCAT，不能被翻译层判成「没填字段」。
+     */
+    @Test
+    void fieldConcat_usesSchemaDefaultsWhenUserKeepsPlaceholderValues() {
+        Map<String, Object> tf = new HashMap<>();
+        tf.put("fields", "field1,field2");
+        tf.put("separator", ",");
+        tf.put("newFieldName", "concat_field");
+        List<DagDefinition.DagNode> nodes = List.of(
+                node("csv_input_1", "csv_input", csvInputParams()),
+                node("fc_1", "field_concat", tf),
+                node("csv_output_1", "csv_output", csvOutputParams("concat-default.csv")));
+        List<DagDefinition.DagEdge> edges = List.of(
+                edge("e1", "csv_input_1", "fc_1"),
+                edge("e2", "fc_1", "csv_output_1"));
+
+        String sql = service.translate(dag("concat-default", 1, nodes, edges));
+
+        assertTrue(sql.contains("CONCAT(CAST(`field1` AS STRING), ',', CAST(`field2` AS STRING)) AS `concat_field`"),
+                "默认参数应生成合法 CONCAT: " + sql);
+        assertTrue(sql.contains("concat_field"), "新字段应进入 schema 传播链（下游输出表要有该列）: " + sql);
+    }
+
     @Test
     void jsonLinesToJsonOutput_generatesJsonTables() {
         Map<String, Object> in = new HashMap<>();

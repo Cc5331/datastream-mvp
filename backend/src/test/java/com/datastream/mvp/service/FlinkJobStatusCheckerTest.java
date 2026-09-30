@@ -5,6 +5,8 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
 
+import java.time.LocalDateTime;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -62,5 +64,39 @@ class FlinkJobStatusCheckerTest {
         // 任一时刻取不到集群信息时不判定，避免误报
         assertEquals(false, FlinkJobStatusChecker.generationChanged("tm-1", null));
         assertEquals(false, FlinkJobStatusChecker.generationChanged(null, null));
+    }
+
+    /**
+     * 占位 ID 作业超期未被认领 → 必须落 FAILED。
+     * 否则作业永久停在 SUBMITTED：界面无失败原因、重新提交被 409 拒绝（实测踩过）。
+     */
+    @Test
+    void placeholderJob_isFailedAfterResolveWindow() {
+        long now = System.currentTimeMillis();
+        long window = 5 * 60 * 1000L;
+        // 占位 ID + 提交中 + 已超过窗口 → 判超期
+        assertTrue(FlinkJobStatusChecker.placeholderGiveUp(
+                        JobDefinition.JobStatus.SUBMITTED, "flink-job-abc",
+                        LocalDateTime.now().minusMinutes(30), now, window),
+                "占位作业超期未认领应判 FAILED");
+        // 刚提交不久 → 还在认领窗口内，不能动它
+        assertEquals(false, FlinkJobStatusChecker.placeholderGiveUp(
+                        JobDefinition.JobStatus.SUBMITTED, "flink-job-abc",
+                        LocalDateTime.now().minusSeconds(5), now, window),
+                "窗口内的占位作业不应被判失败（可能马上被认领）");
+        // 真实 Flink Job ID → 不归此逻辑管
+        assertEquals(false, FlinkJobStatusChecker.placeholderGiveUp(
+                        JobDefinition.JobStatus.SUBMITTED, "9f0c47f29f17f81703168ee9d0c39803",
+                        LocalDateTime.now().minusHours(2), now, window),
+                "真实作业 ID 不应被判超期");
+        // 已是终态 → 不重复处理
+        assertEquals(false, FlinkJobStatusChecker.placeholderGiveUp(
+                        JobDefinition.JobStatus.FAILED, "flink-job-abc",
+                        LocalDateTime.now().minusHours(2), now, window),
+                "终态作业不应被再次改写");
+        // submittedAt 缺失 → 无法判断时间，按超期处理（避免永久卡住）
+        assertTrue(FlinkJobStatusChecker.placeholderGiveUp(
+                        JobDefinition.JobStatus.SUBMITTED, "mock-x", null, now, window),
+                "缺少提交时间时应保守判超期，不能永久卡 SUBMITTED");
     }
 }

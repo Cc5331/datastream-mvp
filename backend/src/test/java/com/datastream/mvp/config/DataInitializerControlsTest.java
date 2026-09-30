@@ -5,6 +5,8 @@ import com.datastream.mvp.repository.AlertRecordRepository;
 import com.datastream.mvp.repository.AppUserRepository;
 import com.datastream.mvp.repository.ControlRegistryRepository;
 import com.datastream.mvp.repository.JobDefinitionRepository;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -140,5 +142,24 @@ class DataInitializerControlsTest {
         assertTrue(firstRun >= 31, "内置控件数量不少于 31（当前 31 个），实际 " + firstRun);
         // 每次播种都要把内置定义写回去（保证代码里的改动生效）
         verify(controlRepo, atLeast(firstRun)).save(any());
+    }
+
+    /**
+     * 字段拼接（转换控件区域）必须由真实播种链路产出：画布「转换」页签按 category=transform 渲染，
+     * 只改常量不生效——必须确认写进注册表的行就是 transform 分组、名字为「字段拼接」。
+     */
+    @Test
+    void seedRegistersFieldConcatInTransformGroup() throws Exception {
+        initializer.seedBuiltInControls();
+
+        ControlRegistry concat = table.get("field_concat");
+        assertNotNull(concat, "应播种 field_concat 控件");
+        assertEquals("字段拼接", concat.getName());
+        assertEquals("transform", concat.getCategory(), "必须落在转换控件区域");
+        JsonNode schema = new ObjectMapper().readTree(concat.getParamSchema());
+        assertEquals("string", schema.path("properties").path("fields").path("type").asText(),
+                "fields 必须是逗号分隔字符串（array 型拿不到默认值，拖出来就是空的）");
+        assertEquals("field1,field2", schema.path("properties").path("fields").path("default").asText());
+        assertTrue(schema.path("required").toString().contains("newFieldName"), "新字段名为必填");
     }
 }

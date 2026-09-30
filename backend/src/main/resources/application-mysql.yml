@@ -26,10 +26,10 @@ flink:
   home: ${FLINK_HOME:D:\\code\\flink-1.18.1}
   cluster:
     host: ${FLINK_CLUSTER_HOST:localhost}
-    port: ${FLINK_CLUSTER_PORT:8081}
+    port: ${FLINK_CLUSTER_PORT:18081}
   sql-gateway:
     host: ${FLINK_SQL_GATEWAY_HOST:}
-    port: ${FLINK_SQL_GATEWAY_PORT:8083}
+    port: ${FLINK_SQL_GATEWAY_PORT:18083}
   parallelism:
     default: 1
 

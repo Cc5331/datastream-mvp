@@ -229,11 +229,54 @@ public class FlinkJobStatusChecker {
                     }
                     markMissingJob(job, clusterRestartedThisCycle, flinkJobId);
                 }
+
+                // 占位 ID（flink-job-…）的作业：上面的"从 overview 消失"分支用 !needsResolution
+                // 把它整个跳过了，于是它永远拿不到终态 —— 界面既看不到失败原因，也无法重新提交
+                // （409「作业正在运行中」）。超过认领窗口仍未被 Flink 认领 → 判 FAILED 并说明原因。
+                if (!jobFoundInFlink && needsResolution
+                        && placeholderGiveUp(job.getStatus(), flinkJobId, job.getSubmittedAt(),
+                                             System.currentTimeMillis(), MOCK_RESOLVE_MAX_DIFF_MS)) {
+                    log.warn("Job {} 的占位 ID {} 超过 {}ms 仍未被 Flink 认领，判为 FAILED",
+                            job.getId(), flinkJobId, MOCK_RESOLVE_MAX_DIFF_MS);
+                    job.setStatus(JobStatus.FAILED);
+                    job.setUpdatedAt(LocalDateTime.now());
+                    job.setCompletedAt(LocalDateTime.now());
+                    jobRepo.save(job);
+                    JobLog l = new JobLog();
+                    l.setJobId(job.getId());
+                    l.setLevel("ERROR");
+                    l.setMessage("作业未在 Flink 集群中找到对应实例：提交时集群可能不可达"
+                            + "（请确认 flink.cluster.port 与本机 Flink 端口一致，本机为 18081），"
+                            + "或作业从未真正提交。确认集群已启动后重新提交即可。");
+                    l.setTimestamp(LocalDateTime.now());
+                    logRepo.save(l);
+                    healthMonitor.notifyJobFailed(job);
+                }
             }
             finalizeRecentlyCompletedJobs();
         } catch (Exception e) {
             log.debug("Job status sync: {}", e.getMessage());
         }
+    }
+
+    /**
+     * 占位 ID 作业是否已超期仍未认领 → 应落 FAILED。
+     *
+     * 背景：状态轮询里「从 overview 消失」的分支用 !needsResolution 把占位作业整个跳过，
+     * 于是它永远拿不到终态：界面看不到失败原因、重新提交被 409「正在运行中」拒绝。
+     * 判据抽成静态方法以便单测覆盖。
+     */
+    static boolean placeholderGiveUp(JobDefinition.JobStatus status, String flinkJobId,
+                                     LocalDateTime submittedAt, long nowMs, long windowMs) {
+        boolean needsResolution = flinkJobId != null && (flinkJobId.startsWith("flink-job-")
+                || flinkJobId.startsWith("mock-") || flinkJobId.startsWith("sql-submitted-"));
+        if (!needsResolution) return false;
+        if (status != JobDefinition.JobStatus.SUBMITTED && status != JobDefinition.JobStatus.RUNNING) {
+            return false;
+        }
+        if (submittedAt == null) return true;
+        long submitMs = submittedAt.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli();
+        return (nowMs - submitMs) > windowMs;
     }
 
     /**
@@ -1015,6 +1058,42 @@ public class FlinkJobStatusChecker {
     /**
      * Fetch Flink job error details and save as ERROR log
      */
+    /**
+     * 把已知的 Flink 错误签名翻译成能照做的中文提示。
+     * Flink 的根因常常藏在多层包装异常里，用户看到的就是一坨栈，看不出该改什么。
+     */
+    static String humanizeFlinkError(String raw) {
+        if (raw == null || raw.isBlank()) return "";
+        StringBuilder sb = new StringBuilder();
+        if (raw.contains("UnknownTopicOrPartition") || raw.contains("Failed to get metadata for topics")
+                || raw.contains("This server does not host this topic-partition")) {
+            sb.append("\n\n[定位提示] Kafka topic 不存在或 broker 不认识它："
+                    + "请检查 kafka 输入/输出节点填的 topic 名称是否与 broker 上一致"
+                    + "（默认值 test-topic 通常并不存在），确认后重新提交。");
+        }
+        if (raw.contains("Timed out waiting for a node assignment") || raw.contains("describeTopics")) {
+            sb.append("\n\n[定位提示] Kafka 连接被重定向到宿主机解析不了的地址："
+                    + "宿主机运行 Flink 时 Bootstrap 必须用宿主机监听端口（本机 localhost:29092），"
+                    + "填 9092 会在运行期超时。");
+        }
+        if (raw.contains("Could not find any factory for identifier")
+                || raw.contains("Unable to create a source for reading table")) {
+            sb.append("\n\n[定位提示] Flink 缺少对应 connector jar：请把连接器放进 FLINK_HOME/lib 后重启集群。");
+        }
+        if (raw.contains("Column") && raw.contains("not found")) {
+            sb.append("\n\n[定位提示] SQL 里的字段在上游 schema 中不存在：请核对控件里的字段名/字段拼接配置。");
+        }
+        if (raw.contains("Failed to fetchResults") || raw.contains("Failed to execute the operation")) {
+            // 实测 Flink 1.18.1：语句在「校验期」失败（如字段不存在、语法错）时，SQL Gateway 的
+            // FetchResults 直接返回 HTTP 500 且响应体为空，operation status 也只回 {"status":"ERROR"}，
+            // 真实报文只落在 SQL Gateway 自己的日志里。这里给出可照做的定位路径。
+            sb.append("\n\n[定位提示] 该报文不含根因（Flink SQL Gateway 在校验期失败时不回传异常详情）。"
+                    + "请查看 SQL Gateway 日志中同一时刻的 \"Failed to execute the operation\" 段，"
+                    + "其中 Caused by 才是真实原因；常见如字段未在输入节点声明（可先在画布上「校验」让平台提前拦下）。");
+        }
+        return sb.length() == 0 ? "" : sb.toString();
+    }
+
     private void fetchFlinkJobError(JobDefinition job, String flinkJobId) {
         if (flinkJobId == null || flinkJobId.startsWith("flink-job-") || flinkJobId.startsWith("mock-")) {
             return;
@@ -1058,7 +1137,8 @@ public class FlinkJobStatusChecker {
                 JobLog el = new JobLog();
                 el.setJobId(job.getId());
                 el.setLevel("ERROR");
-                el.setMessage("Flink error: " + (rootExc.length() > 2000 ? rootExc.substring(0, 2000) : rootExc));
+                el.setMessage("Flink error: " + (rootExc.length() > 2000 ? rootExc.substring(0, 2000) : rootExc)
+                        + humanizeFlinkError(rootExc));
                 el.setTimestamp(java.time.LocalDateTime.now());
                 logRepo.save(el);
                 log.info("Saved Flink error detail for job {}: {}...", job.getId(),

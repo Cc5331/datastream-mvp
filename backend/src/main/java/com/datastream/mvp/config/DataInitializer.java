@@ -204,21 +204,23 @@ public class DataInitializer implements CommandLineRunner {
                 "1.0.0", "built-in");
 
         // Kafka Input
-        createControl("kafka_input", "Kafka Input", "input",
-                "Read Kafka",
-                "{\"type\":\"object\",\"properties\":{\"topic\":{\"type\":\"string\",\"title\":\"Topic\",\"default\":\"test-topic\"},\"bootstrapServers\":{\"type\":\"string\",\"title\":\"Bootstrap\",\"default\":\"localhost:9092\"},\"fieldsConfig\":{\"type\":\"string\",\"title\":\"Fields config (JSON)\",\"default\":\"[{\\\"name\\\":\\\"key\\\",\\\"type\\\":\\\"STRING\\\"},{\\\"name\\\":\\\"value\\\",\\\"type\\\":\\\"STRING\\\"}]\"},\"autoStop\":{\"type\":\"boolean\",\"title\":\"体验模式：消费完自动停止\",\"default\":false},\"stopAfterSeconds\":{\"type\":\"number\",\"title\":\"自动停止延迟（秒）\",\"default\":30}},\"required\":[\"topic\",\"bootstrapServers\"]}",
+        createControl("kafka_input", "Kafka 输入", "input",
+                "从 Kafka 主题读取消息流",
+                "{\"type\":\"object\",\"properties\":{\"topic\":{\"type\":\"string\",\"title\":\"主题（Topic）\",\"default\":\"test-topic\"},\"bootstrapServers\":{\"type\":\"string\",\"title\":\"Bootstrap 地址（宿主机 localhost:29092 / 容器内 kafka:9092）\",\"default\":\"localhost:29092\"},\"fieldsConfig\":{\"type\":\"string\",\"title\":\"字段定义（JSON 数组）\",\"default\":\"[{\\\"name\\\":\\\"key\\\",\\\"type\\\":\\\"STRING\\\"},{\\\"name\\\":\\\"value\\\",\\\"type\\\":\\\"STRING\\\"}]\"},\"autoStop\":{\"type\":\"boolean\",\"title\":\"体验模式：消费完自动停止\",\"default\":false},\"stopAfterSeconds\":{\"type\":\"number\",\"title\":\"自动停止延迟（秒）\",\"default\":30}},\"required\":[\"topic\",\"bootstrapServers\"]}",
                 "",
                 "1.0.0", "built-in");
         // Kafka Output
-        createControl("kafka_output", "Kafka Output", "output",
-                "Write Kafka",
-                "{\"type\":\"object\",\"properties\":{\"topic\":{\"type\":\"string\",\"title\":\"Topic\",\"default\":\"test-topic\"},\"bootstrapServers\":{\"type\":\"string\",\"title\":\"Bootstrap\",\"default\":\"localhost:9092\"},\"fieldsConfig\":{\"type\":\"string\",\"title\":\"字段定义（JSON 数组）\",\"default\":\"[{\\\"name\\\":\\\"key\\\",\\\"type\\\":\\\"STRING\\\"},{\\\"name\\\":\\\"value\\\",\\\"type\\\":\\\"STRING\\\"}]\"}},\"required\":[\"topic\",\"bootstrapServers\"]}",
+        createControl("kafka_output", "Kafka 输出", "output",
+                "将数据写入 Kafka 主题",
+                "{\"type\":\"object\",\"properties\":{\"topic\":{\"type\":\"string\",\"title\":\"主题（Topic）\",\"default\":\"test-topic\"},\"bootstrapServers\":{\"type\":\"string\",\"title\":\"Bootstrap 地址（宿主机 localhost:29092 / 容器内 kafka:9092）\",\"default\":\"localhost:29092\"},\"fieldsConfig\":{\"type\":\"string\",\"title\":\"字段定义（JSON 数组）\",\"default\":\"[{\\\"name\\\":\\\"key\\\",\\\"type\\\":\\\"STRING\\\"},{\\\"name\\\":\\\"value\\\",\\\"type\\\":\\\"STRING\\\"}]\"}},\"required\":[\"topic\",\"bootstrapServers\"]}",
                 "",
                 "1.0.0", "built-in");
-        // Field Concat (transform)
-        createControl("field_concat", "Field Concat", "transform",
-                "Concat multiple fields into one",
-                "{\"type\":\"object\",\"properties\":{\"fields\":{\"type\":\"string\",\"title\":\"输入字段（逗号分隔）\",\"default\":\"field1,field2\"},\"separator\":{\"type\":\"string\",\"title\":\"分隔符\",\"default\":\",\"},\"newFieldName\":{\"type\":\"string\",\"title\":\"新字段名\",\"default\":\"concat_field\"}},\"required\":[\"fields\",\"newFieldName\"]}",
+        // Field Concat (transform)：字段拼接控件（转换控件区域）
+        // fields 必须是「逗号分隔的字段名字符串」而不是 array：前端参数面板对 array 型不给默认值，
+        // 拖拽出来的节点会缺 fields，提交时翻译层直接报「请填写要拼接的字段」。
+        createControl("field_concat", "字段拼接", "transform",
+                "把多个字段按分隔符拼接成一个新字段（CONCAT，输出列 = 上游全部字段 + 新字段）",
+                "{\"type\":\"object\",\"properties\":{\"fields\":{\"type\":\"string\",\"title\":\"输入字段（逗号分隔）\",\"default\":\"field1,field2\",\"placeholder\":\"如 product_category,channel（按上游字段名，逗号分隔）\"},\"separator\":{\"type\":\"string\",\"title\":\"分隔符\",\"default\":\",\"},\"newFieldName\":{\"type\":\"string\",\"title\":\"新字段名\",\"default\":\"concat_field\"}},\"required\":[\"fields\",\"newFieldName\"]}",
                 "SELECT *, CONCAT(${fields}) AS ${newFieldName} FROM ${id}",
                 "1.0.0", "built-in");
 

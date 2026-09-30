@@ -71,6 +71,42 @@ public class MonitorService {
     }
 
     /**
+     * 启动期自检：Flink 指标链路是否具备可用条件。
+     *
+     * 为什么需要：监控面板的吞吐/背压曲线与 `THROUGHPUT_ZERO` 告警全部依赖算子的
+     * `numRecordsOutPerSecond` 之类指标，而这些指标由 TaskManager 上报、经 JobManager 聚合后
+     * 才能通过 `/jobs/{id}/vertices/{vid}/metrics` 取到。实测故障：集群不经 start-all.bat 启动时
+     * 读不到 conf/flink-conf.yaml，指标全链路为空 → 「吞吐趋势」全程 0 且平台毫无报错，极难定位。
+     *
+     * 注意判定口径：Flink 对「指标不存在」与「集群不可用」都返回空数组，因此不能在无作业时
+     * 用指标端点本身判定（会误报）。这里用「集群可达 + TaskManager 数 > 0」作为确定性前置条件 ——
+     * 没有 TaskManager 就一定没有算子指标。
+     */
+    @PostConstruct
+    void checkFlinkMetricsAvailability() {
+        String base = "http://" + flinkHost + ":" + flinkPort;
+        try {
+            HttpResponse<String> resp = httpClient.send(
+                    HttpRequest.newBuilder().uri(URI.create(base + "/overview"))
+                            .timeout(Duration.ofSeconds(5)).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            JsonNode ov = objectMapper.readTree(resp.body() == null ? "{}" : resp.body());
+            int tms = ov.path("taskmanagers").asInt(-1);
+            int slots = ov.path("slots-total").asInt(-1);
+            if (tms > 0 && slots > 0) {
+                log.info("Flink 指标自检: TaskManager {} 个 / Slot {} 个，指标链路就绪（{}）", tms, slots, base);
+            } else {
+                log.warn("Flink 指标自检: 集群可达但无可用 TaskManager（taskmanagers={}, slots-total={}，{}）—— "
+                        + "算子指标不会有数据，监控面板的吞吐趋势将持续为 0", tms, slots, base);
+            }
+        } catch (Exception e) {
+            log.warn("Flink 指标自检: 无法访问集群 {}（{}）—— 集群未启动时属正常；"
+                    + "若集群在跑仍报此警告，请确认它是经 start-all.bat 启动的（该脚本导出 FLINK_CONF_DIR，"
+                    + "集群才会读到 conf/flink-conf.yaml，指标才会注册）", base, e.getMessage());
+        }
+    }
+
+    /**
      * 监控总览。cu 为 null 时不做归属过滤（仅供系统级 AI 诊断聚合使用）；
      * 传入当前用户时，非管理员只能看到自己创建的作业（无归属作业仅管理员可见）。
      */

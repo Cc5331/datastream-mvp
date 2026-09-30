@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -27,6 +28,7 @@ public class DagPreflightService {
     private final ControlRegistryService controlService;
     private final ObjectMapper objectMapper;
     private final DataSourceNodeResolver dataSourceNodeResolver;
+    private final KafkaMonitorService kafkaMonitorService;
 
     public Map<String, Object> validate(Long id, CurrentUser user) {
         JobDefinition job = jobService.findByIdForUser(id, user);
@@ -70,6 +72,9 @@ public class DagPreflightService {
                 if ("input".equals(control.getCategory())) inputs.add(nodeId);
                 if ("output".equals(control.getCategory())) outputs.add(nodeId);
                 validateParams(nodeId, node.path("params"), control.getParamSchema(), errors);
+                if ("kafka_input".equals(type) || "kafka_output".equals(type)) {
+                    validateKafkaTopic(node, errors, warnings);
+                }
             }
         }
         if (inputs.isEmpty()) errors.add("DAG 至少需要一个输入控件");
@@ -101,7 +106,179 @@ public class DagPreflightService {
         Set<String> reachable = reachableFrom(inputs, graph);
         for (String input : inputs) if (!canReachAny(input, outputs, graph)) errors.add("输入节点无法到达输出: " + input);
         for (String output : outputs) if (!reachable.contains(output)) errors.add("输出节点不可从输入到达: " + output);
+
+        validateFieldReferences(nodes, edges, controls, byId, errors);
         return result(errors, warnings);
+    }
+
+    /**
+     * 字段引用校验：DAG 里引用的字段必须能在「该节点可达的输入节点」声明的 schema 中找到。
+     *
+     * 为什么需要：翻译层完全信任节点 params 里的字段名（例如 redis_lookup 的 keyField 直接渲染成
+     * redis_lookup(..., CAST(`id` AS STRING))），而输入节点声明什么字段就只有一个表什么列。
+     * 字段写错时平台会一路放行到 Flink，在 CREATE VIEW 阶段被 Calcite 拦下，用户只看到
+     * "Flink SQL 第 N 条语句执行失败: Failed to fetchResults"（实测 Flink 1.18.1 的 Gateway
+     * REST 在语句校验期失败时只回 {"status":"ERROR"}，result 接口直接 HTTP 500 空 body，
+     * 真实报文只落在 Gateway 日志里），定位成本极高。这里提前给出可照做的错误。
+     *
+     * 判定口径：只以「该节点上游可达的输入节点」声明的字段为准 —— 字段若由上游转换节点产生
+     * （如字段拼接的新字段），在输入 schema 里同样找不到，因此必须排除可达输入中不存在的情况，
+     * 避免把合法 DAG 误判为错误。
+     */
+    private void validateFieldReferences(JsonNode nodes, JsonNode edges, Map<String, ControlRegistry> controls,
+                                         Map<String, JsonNode> byId, List<String> errors) {
+        // 输入节点 -> 它声明的字段（只有 input 类控件有确定的来源 schema）
+        Map<String, Set<String>> inputFields = new LinkedHashMap<>();
+        Map<String, String> nodeType = new LinkedHashMap<>();
+        Map<String, String> nodeLabel = new LinkedHashMap<>();
+        for (JsonNode n : nodes) {
+            String id = n.path("id").asText("");
+            String type = n.path("type").asText("");
+            if (id.isEmpty()) continue;
+            nodeType.put(id, type);
+            String label = n.path("label").asText("");
+            nodeLabel.put(id, label.isEmpty() ? id : label);
+            ControlRegistry c = controls.get(type);
+            if (c != null && "input".equals(c.getCategory())) {
+                Set<String> f = declaredFields(n.path("params"));
+                if (!f.isEmpty()) inputFields.put(id, f);
+            }
+        }
+        if (inputFields.isEmpty()) return;   // 无可校验的声明式 schema（如库表输入）时不妄下结论
+
+        // 反向邻接：target -> 直接上游
+        Map<String, Set<String>> parents = new LinkedHashMap<>();
+        for (JsonNode e : edges) {
+            String s = e.path("source").asText(""), t = e.path("target").asText("");
+            if (!s.isEmpty() && !t.isEmpty()) parents.computeIfAbsent(t, k -> new LinkedHashSet<>()).add(s);
+        }
+
+        for (JsonNode n : nodes) {
+            String id = n.path("id").asText("");
+            String type = nodeType.getOrDefault(id, "");
+            JsonNode params = n.path("params");
+            for (String field : referencedFields(type, params)) {
+                Set<String> reachableIn = new LinkedHashSet<>();
+                collectReachableInputs(id, parents, inputFields, reachableIn, new HashSet<>());
+                if (reachableIn.isEmpty()) continue;                        // 拿不到声明式来源，放行
+                boolean anyDeclares = reachableIn.stream().anyMatch(k -> inputFields.get(k).contains(field));
+                if (!anyDeclares) {
+                    errors.add("节点「" + nodeLabel.getOrDefault(id, id) + "」引用的字段 `" + field
+                            + "` 在上游输入声明的字段中不存在（可用字段：" + String.join(", ", inputFields.get(reachableIn.iterator().next()))
+                            + "）；请核对输入节点的「字段定义」或该控件里的字段名");
+                }
+            }
+        }
+    }
+
+    /**
+     * 某节点 params 里引用到的「上游字段名」。
+     * 注意只收「输入侧」字段：targetField / newFieldName 之类是转换节点**新产出**的字段，
+     * 它们本来就不在上游 schema 里，误当成引用会制造假告警。
+     */
+    private List<String> referencedFields(String type, JsonNode params) {
+        List<String> out = new ArrayList<>();
+        if (params == null || params.isMissingNode() || !params.isObject()) return out;
+        if ("redis_lookup".equals(type)) {
+            addField(out, params, "keyField");
+        } else if ("xml_json".equals(type) || "json_parse".equals(type)) {
+            addField(out, params, "sourceField");
+        } else if ("field_filter".equals(type)) {
+            for (String f : splitCsv(params.path("fields").asText(""))) out.add(f);
+        } else if ("field_rename".equals(type)) {
+            for (String pair : splitCsv(params.path("mappings").asText(""))) {
+                int idx = pair.indexOf(':');
+                out.add((idx > 0 ? pair.substring(0, idx) : pair).trim());
+            }
+        }
+        return out;
+    }
+
+    private void addField(List<String> out, JsonNode params, String key) {
+        String v = params.path(key).asText("").trim();
+        if (!v.isEmpty()) out.add(v);
+    }
+
+    private List<String> splitCsv(String raw) {
+        List<String> out = new ArrayList<>();
+        if (raw == null) return out;
+        for (String part : raw.split(",")) {
+            String t = part.trim();
+            if (!t.isEmpty()) out.add(t);
+        }
+        return out;
+    }
+
+    /** 输入节点 params 里声明的字段名（fieldsConfig 形如 [{"name":"id","type":"INT"}]） */
+    private Set<String> declaredFields(JsonNode params) {
+        Set<String> out = new LinkedHashSet<>();
+        if (params == null || !params.isObject()) return out;
+        String fc = params.path("fieldsConfig").asText("");
+        if (fc.isBlank()) return out;
+        try {
+            JsonNode arr = objectMapper.readTree(fc);
+            if (arr.isArray()) {
+                for (JsonNode f : arr) {
+                    String name = f.path("name").asText("").trim();
+                    if (!name.isEmpty()) out.add(name);
+                }
+            }
+        } catch (Exception ignore) {
+            // fieldsConfig 非法由参数校验负责报告，这里不重复报错
+        }
+        return out;
+    }
+
+    private void collectReachableInputs(String nodeId, Map<String, Set<String>> parents,
+                                        Map<String, Set<String>> inputFields, Set<String> acc, Set<String> seen) {
+        if (!seen.add(nodeId)) return;
+        if (inputFields.containsKey(nodeId)) { acc.add(nodeId); return; }
+        for (String p : parents.getOrDefault(nodeId, Set.of())) {
+            collectReachableInputs(p, parents, inputFields, acc, seen);
+        }
+    }
+
+    /**
+     * Kafka 节点校验：topic 必须真实存在。
+     *
+     * 为什么要挡在提交前：Flink 的 kafka source 在建表阶段不校验 topic，
+     * 直到运行期才发现 → 作业提交成功再 FAILED，日志里只有一坨
+     * "UnknownTopicOrPartitionException ... Recovery is suppressed by NoRestartBackoffTimeStrategy"，
+     * 用户完全看不出是 topic 名字写错了（实测：默认值 test-topic 就会踩）。
+     */
+    private void validateKafkaTopic(JsonNode node, List<String> errors, List<String> warnings) {
+        JsonNode params = node.path("params");
+        String label = node.path("label").asText(node.path("id").asText("节点"));
+        String topic = params.path("topic").asText("").trim();
+        String bs = params.path("bootstrapServers").asText("").trim();
+        if (topic.isEmpty()) {
+            errors.add(label + "：未填写 Kafka topic");
+            return;
+        }
+        if (bs.isEmpty()) {
+            errors.add(label + "：未填写 Bootstrap 地址");
+            return;
+        }
+        List<KafkaMonitorService.TopicInfo> topics;
+        try {
+            topics = kafkaMonitorService.listTopics();
+        } catch (Exception e) {
+            warnings.add(label + "：无法连接 Kafka（" + bs + "）以校验 topic 是否存在：" + e.getMessage()
+                    + "。broker 不可达时作业会在运行期失败。");
+            return;
+        }
+        boolean exists = topics.stream().anyMatch(t -> topic.equals(t.name()));
+        if (!exists) {
+            StringBuilder sample = new StringBuilder();
+            for (KafkaMonitorService.TopicInfo t : topics) {
+                if (sample.length() > 0) sample.append("、");
+                if (sample.length() > 90) { sample.append("…"); break; }
+                sample.append(t.name());
+            }
+            errors.add(label + "：Kafka topic「" + topic + "」不存在（broker " + bs + "）。"
+                    + (sample.length() == 0 ? "当前 broker 上没有任何 topic。" : "可用 topic：" + sample + "。")
+                    + "请改成已存在的 topic（或先在 broker 上创建它）—— 否则作业会提交成功但在运行期失败。");
+        }
     }
 
     private void validateParams(String nodeId, JsonNode params, String schemaText, List<String> errors) {

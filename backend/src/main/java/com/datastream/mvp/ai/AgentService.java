@@ -417,6 +417,16 @@ public class AgentService {
             hit = rule("数据库连接失败（MySQL 拒绝连接）", evidence,
                     List.of("确认 MySQL 服务已启动（netstat -ano | findstr :3306）", "检查 JDBC URL 主机与端口", "确认用户名/密码正确"),
                     Map.of(), jobName);
+        } else if (lower.contains("using password: no")) {
+            // 确定性信号：MySQL 只有收到空密码才会回 "using password: NO"。
+            // 必须排在 "access denied for user" 兜底分支之前，否则会被误判成「密码错/库不存在」，
+            // 把用户引向改密码、建库、授权，而真实原因是后端进程没拿到 MYSQL_PASSWORD。
+            hit = rule("MySQL 输出凭据未注入（后端以空密码连接）", evidence,
+                    List.of("确认后端是经 scripts/start-backend.ps1 或 start-all.bat 启动的（它们会加载根目录 .env）",
+                            "检查启动日志是否有「MySQL 输出凭据自检: ... passwordSet=false」",
+                            "一条命令定位：powershell -File scripts\\diag-mysql-output.ps1",
+                            "不要把密码明文填进 DAG 节点参数，凭据只走环境变量"),
+                    Map.of(), jobName);
         } else if (lower.contains("access denied for user") || lower.contains("unknown database")) {
             hit = rule("数据库账号权限 / 库不存在", evidence,
                     List.of("确认 MySQL 用户名密码正确", "确认数据库名已创建（CREATE DATABASE ...）", "给用户授权访问该库"),

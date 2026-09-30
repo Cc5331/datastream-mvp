@@ -423,7 +423,7 @@ public class DagTranslationService {
                 StringBuilder excelDdl = new StringBuilder();
                 excelDdl.append("CREATE TABLE ").append(sanitize(node.getId())).append(" (\n");
                 if (sourceFields != null) {
-                    excelDdl.append(sourceFields).append("\n");
+                    excelDdl.append(quoteColumnDefs(sourceFields)).append("\n");
                 } else {
                     excelDdl.append("  data STRING\n");
                 }
@@ -454,7 +454,7 @@ public class DagTranslationService {
                 StringBuilder parquetDdl = new StringBuilder();
                 parquetDdl.append("CREATE TABLE ").append(sanitize(node.getId())).append(" (\n");
                 if (sourceFields != null) {
-                    parquetDdl.append(sourceFields).append("\n");
+                    parquetDdl.append(quoteColumnDefs(sourceFields)).append("\n");
                 } else {
                     parquetDdl.append("  data STRING\n");
                 }
@@ -486,7 +486,7 @@ public class DagTranslationService {
                 StringBuilder xmlDdl = new StringBuilder();
                 xmlDdl.append("CREATE TABLE ").append(sanitize(node.getId())).append(" (\n");
                 if (sourceFields != null) {
-                    xmlDdl.append(sourceFields).append("\n");
+                    xmlDdl.append(quoteColumnDefs(sourceFields)).append("\n");
                 } else {
                     xmlDdl.append("  data STRING\n");
                 }
@@ -853,10 +853,15 @@ public class DagTranslationService {
             }
             throw new RuntimeException("Flink 提交失败：" + (result.error == null ? "未产生 Flink 作业" : result.error));
         }
-        // 离线演示模式：集群不可达时用占位 ID，前端仍可演示编辑/保存，上线会被 isFlinkClusterAvailable 拦截
-        String mockJobId = "flink-job-" + UUID.randomUUID().toString();
-        log.warn("Flink cluster not available at {}:{}, using offline placeholder ID: {}", flinkHost, flinkPort, mockJobId);
-        return mockJobId;
+        // 集群不可达时**不再静默造占位作业**：占位 ID 会让作业永久停在 SUBMITTED、
+        // 界面上看不到任何输入输出数据、重新提交还被 409「正在运行中」拒绝（实测踩过，
+        // 根因常是后端启动漏传 -DFLINK_CLUSTER_PORT，端口退回默认值）。
+        // 这里直接抛可操作的错误 → JobService 把作业标 FAILED，并留下能看懂的日志。
+        String hint = "Flink 集群不可达（" + flinkHost + ":" + flinkPort + "），作业未提交。请检查："
+                + "① Flink 是否已启动；② 后端启动参数 -DFLINK_CLUSTER_PORT 是否与实例端口一致"
+                + "（本机 start-all.bat 用 18081 / SQL Gateway 18083；容器内为 8081 / 8083）。";
+        log.warn(hint);
+        throw new RuntimeException(hint);
     }
 
     private String pollFlinkJob(int maxWaitSec) {
@@ -936,6 +941,14 @@ public class DagTranslationService {
             return gatewayResult;
         }
 
+        // SQL 本身执行失败（不是网关不可达）：立即失败，不再降级 ——
+        // 否则会白跑 sql-client.sh + REST 轮询 1~2 分钟，最后报"三条路径均未产生作业"，把真实错误吞掉
+        if (gatewayResult.error != null && gatewayResult.error.startsWith("Flink SQL 第")) {
+            log.warn("SQL 执行失败，直接返回失败结果（不降级）: {}", gatewayResult.error);
+            Files.deleteIfExists(tempSqlFile);
+            return gatewayResult;
+        }
+
         log.info("SQL Gateway down, trying sql-client script...");
         String jobId = trySqlClientScript(tempSqlFile);
         if (jobId != null) { log.info("Job via sql-client.sh: {}", jobId); Files.deleteIfExists(tempSqlFile); return SubmitResult.ok(jobId); }
@@ -948,6 +961,85 @@ public class DagTranslationService {
         return SubmitResult.failed(gatewayResult.error != null
                 ? gatewayResult.error
                 : "三条提交路径（SQL Gateway / sql-client / REST 轮询）均未产生 Flink 作业");
+    }
+
+    /** 从 FetchResults 取失败语句的真实异常摘要（去掉堆栈，只留首段可读信息） */
+    private String fetchOperationError(java.net.http.HttpClient hc, String gatewayUrl, String session, String opHandle) {
+        String fromResults = readFetchResultsBody(hc, gatewayUrl, session, opHandle);
+        if (fromResults != null && !isUninformativeGatewayError(fromResults)) return fromResults;
+        // 实测（Flink 1.18.1）：语句校验期失败时，FetchResults 会返回 HTTP 500 且响应体为空，
+        // 真正的异常只出现在 Gateway 自己的日志里。此时再用 operation status 兜底一次，
+        // 否则上层只能拿到无信息量的 "Failed to fetchResults"，用户无从定位。
+        String fromStatus = readOperationStatusErrors(hc, gatewayUrl, session, opHandle);
+        if (fromStatus != null && !fromStatus.isBlank()) return fromStatus;
+        return fromResults;
+    }
+
+    /** "Failed to fetchResults" 之类的传输层噪音：不含任何 SQL 根因，需要继续兜底 */
+    private boolean isUninformativeGatewayError(String msg) {
+        if (msg == null) return true;
+        String m = msg.toLowerCase();
+        return m.isBlank()
+                || m.contains("failed to fetchresults")
+                || m.contains("获取详细错误失败")
+                || m.contains("failed to execute the operation");
+    }
+
+    private String readFetchResultsBody(java.net.http.HttpClient hc, String gatewayUrl, String session, String opHandle) {
+        try {
+            String r = hc.send(java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(gatewayUrl + "/v1/sessions/" + session + "/operations/" + opHandle + "/result/0"))
+                    .GET().build(), java.net.http.HttpResponse.BodyHandlers.ofString()).body();
+            if (r == null || r.isBlank()) return null;
+            String msg = r;
+            try {
+                JsonNode j = objectMapper.readTree(r);
+                if (j.has("errors") && j.get("errors").isArray()) {
+                    StringBuilder sb = new StringBuilder();
+                    for (JsonNode e : j.get("errors")) sb.append(e.asText()).append(" ");
+                    msg = sb.toString();
+                } else if (j.has("results") && j.get("results").isArray()) {
+                    StringBuilder sb = new StringBuilder();
+                    for (JsonNode e : j.get("results")) sb.append(e.asText()).append(" ");
+                    msg = sb.toString();
+                }
+            } catch (Exception ignore) {
+                // 保持原始响应文本
+            }
+            return cleanGatewayMessage(msg);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 兜底：operation status 有时携带 errors 字段（FetchResults 已经 500 时仍可用） */
+    private String readOperationStatusErrors(java.net.http.HttpClient hc, String gatewayUrl, String session, String opHandle) {
+        try {
+            String r = hc.send(java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(gatewayUrl + "/v1/sessions/" + session + "/operations/" + opHandle + "/status"))
+                    .GET().build(), java.net.http.HttpResponse.BodyHandlers.ofString()).body();
+            if (r == null || r.isBlank()) return null;
+            JsonNode j = objectMapper.readTree(r);
+            if (j.has("errors") && j.get("errors").isArray() && j.get("errors").size() > 0) {
+                StringBuilder sb = new StringBuilder();
+                for (JsonNode e : j.get("errors")) sb.append(e.asText()).append(" ");
+                return cleanGatewayMessage(sb.toString());
+            }
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 去掉换行/堆栈，截断到 600 字符，保留首段可读信息 */
+    private String cleanGatewayMessage(String raw) {
+        if (raw == null) return null;
+        String msg = raw.replace("\\r\\n", " ").replace("\\n", " ").replace("\r", " ").replace("\n", " ").replace("\t", " ").trim();
+        int stack = msg.indexOf("at org.apache");
+        if (stack > 0) msg = msg.substring(0, stack);
+        int serverSide = msg.indexOf("<Exception on server side:");
+        if (serverSide >= 0) msg = msg.substring(serverSide + "<Exception on server side:".length()).trim();
+        return msg.length() > 600 ? msg.substring(0, 600) : msg;
     }
 
     private SubmitResult trySqlGateway(String flinkSql, int parallelism) {
@@ -1037,9 +1129,14 @@ public class DagTranslationService {
                         // 失败状态必须立即暴露：否则会一直轮询到耗尽，最终报出误导性的
                         // “未接受任何 INSERT 语句”，把真实错误（如表不存在、SQL 非法）吞掉
                         if ("ERROR".equals(os) || "FAILED".equals(os) || "CANCELED".equals(os)) {
-                            String detail = oj.has("errors") ? oj.get("errors").toString() : op;
+                            // 状态接口只回 {"status":"ERROR"}，真实异常要去 FetchResults 取，
+                            // 否则用户只看到一句无信息量的 ERROR，无法定位（实测痛点）
+                            String detail = fetchOperationError(hc, gatewayUrl, sh, oh);
+                            if (detail == null || detail.isBlank()) {
+                                detail = oj.has("errors") ? oj.get("errors").toString() : op;
+                            }
                             String err = "Flink SQL 第 " + (i+1) + " 条语句执行失败(" + os + "): "
-                                    + detail.substring(0, Math.min(300, detail.length()));
+                                    + detail.substring(0, Math.min(500, detail.length()));
                             log.warn(err);
                             throw new RuntimeException(err);
                         }
@@ -1344,7 +1441,7 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
                     JsonNode f = fa.get(i);
                     String fn = f.has("name") ? f.get("name").asText() : "field" + i;
                     String ft = f.has("type") ? f.get("type").asText() : "STRING";
-                    schemaBuilder.append("  ").append(fn).append(" ").append(ft);
+                    schemaBuilder.append("  ").append(quoteFlinkField(fn)).append(" ").append(ft);
                     if (i < fa.size() - 1) schemaBuilder.append(",\n");
                 }
             } else {
@@ -1490,7 +1587,7 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
     private String generateHdfsOutputDDL(String tableName, String path, String delimiter, String fields) {
         StringBuilder ddl = new StringBuilder();
         ddl.append("CREATE TABLE ").append(tableName).append(" (\n");
-        ddl.append(fields).append("\n");
+        ddl.append(quoteColumnDefs(fields)).append("\n");
         ddl.append(") WITH (\n");
         ddl.append("  'connector' = 'filesystem',\n");
         ddl.append("  'path' = '").append(path.replace("'", "''")).append("',\n");
@@ -1897,6 +1994,41 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
         return "`" + name.replace("`", "``") + "`";
     }
 
+    /**
+     * 给多行「列名 类型」列定义里的列名加反引号（已加则跳过）。
+     *
+     * 为什么必须做：Flink SQL 里 key / value / order / group / timestamp 等是保留字，
+     * 裸列名会直接语法错误 —— kafka_input / kafka_output 的默认字段名正是 key / value，
+     * 不做这层处理这两类控件的作业永远提交不成功（实测：裸名 ERROR，加反引号 FINISHED）。
+     */
+    private String quoteColumnDefs(String defs) {
+        if (defs == null || defs.isBlank()) return defs;
+        StringBuilder out = new StringBuilder();
+        String[] lines = defs.split("\n", -1);
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            String trimmed = line.trim();
+            if (trimmed.isEmpty()) {
+                out.append(line);
+                if (i < lines.length - 1) out.append("\n");
+                continue;
+            }
+            int indentLen = line.indexOf(trimmed.charAt(0));
+            String indent = line.substring(0, Math.max(0, indentLen));
+            boolean comma = trimmed.endsWith(",");
+            String core = (comma ? trimmed.substring(0, trimmed.length() - 1) : trimmed).trim();
+            int sp = core.indexOf(' ');
+            String name = sp < 0 ? core : core.substring(0, sp);
+            String rest = sp < 0 ? "" : core.substring(sp);
+            if (!(name.startsWith("`") && name.endsWith("`") && name.length() > 1)) {
+                name = "`" + name.replace("`", "``") + "`";
+            }
+            out.append(indent).append(name).append(rest).append(comma ? "," : "");
+            if (i < lines.length - 1) out.append("\n");
+        }
+        return out.toString();
+    }
+
     private String filterSchemaFields(String incomingSchema, List<String> keep) {
         if (incomingSchema == null) throw new RuntimeException("字段过滤: 无法获取上游字段，请确认连线");
         List<String> available = parseSchemaFieldNames(incomingSchema);
@@ -2071,7 +2203,7 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
     private String generateMysqlInputDDL(String tableName, String url, String table, String username, String password, String fields) {
         StringBuilder ddl = new StringBuilder();
         ddl.append("CREATE TABLE ").append(tableName).append(" (\n");
-        ddl.append(fields).append("\n");
+        ddl.append(quoteColumnDefs(fields)).append("\n");
         ddl.append(") WITH (\n");
         ddl.append("  'connector' = 'jdbc',\n");
         ddl.append("  'url' = '").append(url.replace("'", "''")).append("',\n");
@@ -2088,7 +2220,7 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
     private String generateJdbcInputDDL(String tableName, String url, String table, String username, String password, String fields, String driver) {
         StringBuilder ddl = new StringBuilder();
         ddl.append("CREATE TABLE ").append(tableName).append(" (\n");
-        ddl.append(fields).append("\n");
+        ddl.append(quoteColumnDefs(fields)).append("\n");
         ddl.append(") WITH (\n");
         ddl.append("  'connector' = 'jdbc',\n");
         ddl.append("  'url' = '").append(url.replace("'", "''")).append("',\n");
@@ -2106,7 +2238,7 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
     private String generateJdbcOutputDDL(String tableName, String url, String targetTable,
                                          String username, String password, String fields,
                                          String driver, int batchSize) {
-        return "CREATE TABLE " + tableName + " (\n" + fields + "\n) WITH (\n"
+        return "CREATE TABLE " + tableName + " (\n" + quoteColumnDefs(fields) + "\n) WITH (\n"
                 + "  'connector' = 'jdbc',\n"
                 + "  'url' = '" + escapeSqlLiteral(url) + "',\n"
                 + "  'table-name' = '" + escapeSqlLiteral(targetTable) + "',\n"
@@ -2215,7 +2347,7 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
                 JsonNode f = fa.get(i);
                 String fn = f.has("name") ? f.get("name").asText() : "field" + i;
                 String ft = f.has("type") ? f.get("type").asText() : "STRING";
-                sb.append("  ").append(fn).append(" ").append(ft);
+                sb.append("  ").append(quoteFlinkField(fn)).append(" ").append(ft);
                 if (i < fa.size()-1) sb.append(",\n");
             }
             return sb.toString();
@@ -2349,7 +2481,7 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
                     JsonNode f = fa.get(i);
                     String fn = f.has("name") ? f.get("name").asText() : "field" + i;
                     String ft = f.has("type") ? f.get("type").asText() : "STRING";
-                    ddl.append("  ").append(fn).append(" ").append(ft);
+                    ddl.append("  ").append(quoteFlinkField(fn)).append(" ").append(ft);
                     if (i < fa.size()-1) ddl.append(",");
                     ddl.append("\n");
                 }
@@ -2395,7 +2527,7 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
                     JsonNode f = fa.get(i);
                     String fn = f.has("name") ? f.get("name").asText() : "field" + i;
                     String ft = f.has("type") ? f.get("type").asText() : "STRING";
-                    ddl.append("  ").append(fn).append(" ").append(ft);
+                    ddl.append("  ").append(quoteFlinkField(fn)).append(" ").append(ft);
                     if (i < fa.size() - 1) ddl.append(",");
                     ddl.append("\n");
                 }
@@ -2426,7 +2558,7 @@ private java.util.Set<String> getCurrentJobIds(java.net.http.HttpClient httpClie
         StringBuilder ddl = new StringBuilder();
         ddl.append("CREATE TABLE ").append(tableName).append(" (\n");
         if (sourceFields != null && !sourceFields.isEmpty()) {
-            ddl.append(sourceFields).append("\n");
+            ddl.append(quoteColumnDefs(sourceFields)).append("\n");
         } else {
             ddl.append("  data STRING\n");
         }

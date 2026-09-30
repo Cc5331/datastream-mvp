@@ -34,12 +34,6 @@ public class MysqlTableCreator {
     private static final Pattern COLUMN_PATTERN =
             Pattern.compile("^`?([^`\\s]+)`?\\s+([A-Za-z0-9_() ]+)$");
 
-    @Value("${app.mysql.default-username:root}")
-    private String defaultMysqlUsername;
-
-    @Value("${app.mysql.default-password:}")
-    private String defaultMysqlPassword;
-
     private static final Set<String> RESERVED = new HashSet<>(Arrays.asList(
             "order", "group", "select", "from", "where", "insert", "update", "delete", "drop",
             "create", "table", "index", "key", "primary", "foreign", "constraint", "unique",
@@ -50,6 +44,33 @@ public class MysqlTableCreator {
             "when", "then", "else", "end", "between", "exists", "distinct", "cast", "convert",
             "date", "time", "timestamp", "year", "binary", "text", "enum", "key", "interval"
     ));
+
+    @Value("${app.mysql.default-username:root}")
+    private String defaultMysqlUsername;
+
+    @Value("${app.mysql.default-url:}")
+    private String defaultMysqlUrl;
+
+    @Value("${app.mysql.default-password:}")
+    private String defaultMysqlPassword;
+
+    /**
+     * 启动期凭据自检：MySQL 输出的凭据只在环境变量里（不入库），
+     * 若后端未经 start-all.bat 启动（录屏/演示脚本、IDE、手敲 java -jar），
+     * MYSQL_PASSWORD 会缺失，提交时才以 "using password: NO" 的形式暴露，排查成本高。
+     * 这里启动即打印一行，便于一眼判断（不输出密码本身）。
+     */
+    @jakarta.annotation.PostConstruct
+    void logCredentialPresence() {
+        boolean passwordSet = defaultMysqlPassword != null && !defaultMysqlPassword.isEmpty();
+        log.info("MySQL 输出凭据自检: url={} user={} passwordSet={}",
+                defaultMysqlUrl, defaultMysqlUsername, passwordSet);
+        if (!passwordSet) {
+            log.warn("MYSQL_PASSWORD 未注入（passwordSet=false）：MySQL 输出作业将报 "
+                    + "\"Access denied ... (using password: NO)\"。"
+                    + "请用 start-all.bat 启动后端，或先加载仓库根目录 .env（见 scripts/restart-backend.ps1）");
+        }
+    }
 
     /**
      * 根据上游字段定义自动创建 MySQL 表。
@@ -63,8 +84,16 @@ public class MysqlTableCreator {
         }
         String url = JdbcUrlUtil.normalize(str(params.get("url")));
         String table = str(params.get("table")).trim();
+        // 凭据来源标注：MySQL 报 "using password: NO" 时，八成是运行环境没拿到 MYSQL_PASSWORD，
+        // 该日志可按列名直接区分「节点显式填了密码」「回退到环境变量」「回退值本身就是空」
+        boolean nodeHasPassword = !str(params.get("password")).trim().isEmpty();
         String username = resolveCredential(str(params.get("username")), defaultMysqlUsername);
         String password = resolveCredential(str(params.get("password")), defaultMysqlPassword);
+        String credentialSource = nodeHasPassword
+                ? "节点参数"
+                : (password == null || password.isEmpty() ? "环境变量(为空!)" : "环境变量");
+        log.info("MySQL output prepare: url={} table=`{}` user={} passwordSource={} passwordSet={}",
+                url, table, username, credentialSource, password != null && !password.isEmpty());
 
         if (url.isEmpty()) {
             throw new RuntimeException("MySQL 输出缺少 JDBC URL");
