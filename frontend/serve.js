@@ -27,6 +27,10 @@ const BACKEND = {
     port: parseInt(process.env.BACKEND_PORT || '8080', 10)
 };
 const PORT = parseInt(process.env.PORT || '3000', 10);
+function safeDestroy(stream) {
+  try { if (stream && !stream.destroyed) stream.destroy(); } catch (_) {}
+}
+
 function proxyApi(req, res, url) {
   const opts = {
     hostname: BACKEND.host,
@@ -35,16 +39,37 @@ function proxyApi(req, res, url) {
     method: req.method,
     headers: Object.assign({}, req.headers, { host: BACKEND.host + ':' + BACKEND.port })
   };
+  const isStream = /\/api\/kafka\/stream|text\/event-stream/.test(req.url || '');
   const proxyReq = http.request(opts, function(proxyRes) {
-    res.writeHead(proxyRes.statusCode, proxyRes.headers);
+    if (!res.headersSent) {
+      res.writeHead(proxyRes.statusCode, proxyRes.headers);
+    }
     proxyRes.pipe(res);
+    proxyRes.on('error', function() { safeDestroy(res); });
   });
+  // SSE 是长连接：不要用默认 socket 超时把它掐断
+  if (isStream) proxyReq.setTimeout(0);
   proxyReq.on('error', function(err) {
-    res.writeHead(502, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Backend unreachable: ' + err.message }));
+    // 关键修复：SSE 已开始推流时响应头已发出，再 writeHead 会抛 ERR_HTTP_HEADERS_SENT
+    // 并带着整个前端进程一起退出（Kafka 可视化页一开就挂的根因）。
+    if (res.headersSent) { safeDestroy(res); return; }
+    try {
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Backend unreachable: ' + err.message }));
+    } catch (_) { safeDestroy(res); }
   });
+  req.on('error', function() { safeDestroy(proxyReq); });
+  res.on('error', function() { safeDestroy(proxyReq); });
+  res.on('close', function() { if (!res.writableEnded) safeDestroy(proxyReq); });
   req.pipe(proxyReq);
 }
+
+process.on('uncaughtException', function (e) {
+  console.error('[serve] uncaughtException (已忽略，保持服务存活):', e && e.message);
+});
+process.on('unhandledRejection', function (e) {
+  console.error('[serve] unhandledRejection (已忽略):', e && e.message);
+});
 
 http.createServer((req, res) => {
     // Proxy API requests to backend

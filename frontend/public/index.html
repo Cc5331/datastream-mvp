@@ -327,7 +327,7 @@
                                 <el-form-item v-for="(param, key) in (nodeParamSchema?.properties || {})" :key="key" :label="param.title || key">
                                     <!-- 根据类型渲染不同控件 -->
                                     <el-input v-if="param.type === 'string' && !param.enum"
-                                              v-model="nodeParams[key]" :placeholder="param.default || ''"></el-input>
+                                              v-model="nodeParams[key]" :placeholder="param.placeholder || param.default || ''"></el-input>
                                     <el-input-number v-if="param.type === 'integer' || param.type === 'number'"
                                               :model-value="paramProxy(key, param)" :default-value="param.default"
                                               @update:model-value="setParam(key, $event)"></el-input-number>
