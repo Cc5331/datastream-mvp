@@ -64,3 +64,8 @@ test-results/benchmark-output/
 backend/_start_backend.cmd
 backend/_job_backup_*.json
 backend/_matrix_jobs.json
+
+
+# ===== 演示视频生产（2026-09-24 新增，竞赛材料保密，整个目录不入库）=====
+video/
+.video-study/

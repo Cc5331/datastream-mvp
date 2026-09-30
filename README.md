@@ -106,7 +106,7 @@ start-all.bat
 ### 方式三：Docker 全容器化
 
 ```bat
-start-docker.bat        :: 一键构建并启动 12 个容器（MySQL / PostgreSQL / Redis / Kafka / HDFS×2 / Flink×3 / 后端 / 前端；Oracle 为可选 profile）
+start-docker.bat        :: 一键构建并启动 12 个常驻容器（MySQL / PostgreSQL / Redis + redis-init / Kafka / HDFS×2 / Flink×3 / 后端 / 前端；第 13 个服务 Oracle 为可选 profile）
 docker compose ps       :: 查看状态，全部应为 healthy
 ```
 
@@ -196,7 +196,7 @@ mvn spring-boot:run -Dspring-boot.run.profiles=mysql
 start-docker.bat
 ```
 
-脚本自动完成：① 同步本机 UDF / 连接器 jar 到 `docker/flink/lib/`；② 构建后端、前端、Flink 三个镜像；③ 启动全部 12 个容器并等待健康检查通过（Oracle 需 `--profile oracle` 另启）。
+脚本自动完成：① 同步本机 UDF / 连接器 jar 到 `docker/flink/lib/`；② 构建后端、前端、Flink 三个镜像；③ 启动全部 12 个常驻容器并等待健康检查通过（`docker-compose.yml` 共定义 13 个服务，其中 Oracle 需 `--profile oracle` 另起）。
 
 也可手动执行：
 
@@ -342,7 +342,7 @@ docker compose down -v         :: 停止并删除数据卷
 
 ```
 项目根目录
-├── backend/                 # Spring Boot 后端（14 个 Controller / 35 个 Service）
+├── backend/                 # Spring Boot 后端（15 个 Controller / 34 个 @Service）
 │   ├── src/main/java/com/datastream/mvp/
 │   │   ├── MvpBackendApplication.java
 │   │   ├── config/          # DataInitializer（控件种子）/ WebConfig / 异常处理
@@ -355,13 +355,13 @@ docker compose down -v         :: 停止并删除数据卷
 │   ├── plugins/             # 热加载插件目录
 │   └── pom.xml
 ├── frontend/
-│   ├── public/              # 静态 SPA（14 个视图，index.html / css / js/app.js）
+│   ├── public/              # 静态 SPA（15 个视图，index.html / css / js/app.js）
 │   ├── serve.js             # 静态服务 + /api 反向代理（端口 3000）
 │   └── package.json
 ├── flink/                   # Git Bash 包装脚本与配置示例
 ├── flink-1.18.1/            # 本地实际运行的 Flink 发行版（也可位于 D:\code\flink-1.18.1）
 ├── docker/flink/            # Flink 自定义镜像（Dockerfile + UDF / 连接器 jar）
-├── docker-compose.yml       # 全容器化编排（7 个服务）
+├── docker-compose.yml       # 全容器化编排（13 个服务：12 个常驻 + Oracle 可选 profile）
 ├── data/                    # 输入数据挂载目录
 ├── output/                  # 输出文件目录（CSV / Excel）
 ├── test-resources/          # 测试数据 + benchmark.py
@@ -450,7 +450,7 @@ python test-resources/benchmark.py
 
 完整报告见 `test-results/benchmark_report.md`。
 
-当前自动化回归基线：后端 Maven Reactor 共 **115** 个测试用例，前端 Node Test Runner 共 **28** 个测试用例。
+当前自动化回归基线（2026-09-20 实测）：后端 `mvn -B test` 共 **170** 个测试用例（39 个测试类）BUILD SUCCESS，前端 `node --test test/*.test.js` 共 **66** 个测试用例（7 个测试文件）66/66 通过 —— 合计 **236** 个用例 0 失败。
 
 ## 十二、AI 智能化层（LLM Agent）
 
