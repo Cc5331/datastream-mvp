@@ -484,6 +484,7 @@
                                 <span style="color:#606266; font-size:12px;">已选 {{ selectedJobs.length }} 项</span>
                                 <el-button size="small" type="success" :disabled="!selectedJobs.length" :loading="batchOperating" @click="batchChangeOnline(true)"><el-icon><upload-filled /></el-icon> 批量上线</el-button>
                                 <el-button size="small" type="danger" plain :disabled="!selectedJobs.length" :loading="batchOperating" @click="batchChangeOnline(false)"><el-icon><download /></el-icon> 批量下线</el-button>
+                                <el-button size="small" type="danger" :disabled="!selectedJobs.length" :loading="batchOperating" @click="confirmBatchDelete"><el-icon><delete /></el-icon> 批量删除</el-button>
                             </template>
                             <el-popover placement="bottom" :width="170" trigger="click">
                                 <template #reference>

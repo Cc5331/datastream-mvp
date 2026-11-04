@@ -40,6 +40,7 @@ flowchart LR
 - **31 个内置控件**：CSV / Excel / JSON / XML / Parquet / HDFS / MySQL / PostgreSQL / Oracle / Kafka / Datagen 输入输出 + Redis 富化、字段拼接、字段过滤、字段改名、行过滤、JSON 解析、XML↔JSON 转换和数据质量控件。
 - **作业管理**：状态机 DRAFT → SUBMITTED → RUNNING → COMPLETED / FAILED / CANCELLED（依赖编排另有 WAITING / BLOCKED），Flink 状态每 5s 轮询回写（`app.monitor.status-poll-ms` 可配），日志落库可查。
 - **作业复制 / 定时调度**：一键复制作业（名称追加「（副本）」，状态重置 DRAFT）；作业可配置 cron 表达式定时自动提交（JobScheduler 每 30s 扫描，运行中不重复提交）。
+- **作业批量操作**：作业管理页勾选多行后可**批量上线 / 批量下线 / 批量删除**——批量删除会二次确认（列明选中作业与「不可恢复」），逐项独立处理并回报「成功 N，失败 M + 原因」；**运行中的作业不会被删**（会跳过并提示先取消或下线，避免留下取消不了的孤儿 Flink 作业）。
 - **动态参数面板**：按控件 paramSchema 自动渲染 string / number / boolean / enum / array 类型参数。
 - **实时监控面板**：运行中作业每 5s 自动刷新，展示吞吐（行/s）、背压（ok/low/high）、Checkpoint 状态与运行时长（聚合 Flink REST 指标）。
 - **数据预览**：点选输入类节点，右侧参数面板点「📊 预览数据」，弹窗展示 CSV / Excel / JSON / XML / TXT 前 N 行（默认 10 行）与字段名，便于提交前确认数据。
@@ -282,6 +283,7 @@ docker compose down -v         :: 停止并删除数据卷
 | GET | /api/jobs/{id} | 作业详情 |
 | PUT | /api/jobs/{id} | 更新作业 |
 | DELETE | /api/jobs/{id} | 删除作业 |
+| POST | /api/jobs/batch-delete | 批量删除作业（body: `{ids}`，逐项独立处理并返回 `{succeeded, failed}`；运行中的作业被跳过并说明原因） |
 | POST | /api/jobs/{id}/submit | 提交作业到 Flink |
 | POST | /api/jobs/{id}/cancel | 取消作业 |
 | POST | /api/jobs/{id}/copy | 复制作业（新作业状态 DRAFT，名称追加「（副本）」） |

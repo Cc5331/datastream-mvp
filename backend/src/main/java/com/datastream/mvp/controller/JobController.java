@@ -119,6 +119,40 @@ public class JobController {
         return runBatch(request.ids(), false, null, null);
     }
 
+    /**
+     * 批量删除作业：逐项独立处理，返回与批量上线/下线一致的 {succeeded, failed} 契约。
+     *
+     * <p>与单个删除的差别：**运行中（SUBMITTED/RUNNING）的作业会被跳过**并在 failed 里写明原因
+     * （批量删不提供"顺手取消"的隐式语义，避免把正在跑的任务删成无主的孤儿 Flink 作业）。</p>
+     */
+    @PostMapping("/batch-delete")
+    @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
+    @Audit(action = "JOB_BATCH_DELETE", targetType = "JOB", detail = "'批量删除 ' + #request.ids().size() + ' 个作业'")
+    public Map<String, Object> batchDelete(@RequestBody BatchJobRequest request) {
+        if (request == null || request.ids() == null || request.ids().isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请选择至少一个作业");
+        }
+        List<Long> succeeded = new ArrayList<>();
+        List<Map<String, Object>> failed = new ArrayList<>();
+        for (Long id : request.ids().stream().distinct().toList()) {
+            try {
+                JobDefinition job = jobService.findByIdForUser(id, currentUser());   // owner 校验
+                jobService.assertDeletable(job);                                    // 运行中跳过
+                jobService.delete(id);                                              // 逐项独立事务
+                succeeded.add(id);
+            } catch (Exception e) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("id", id);
+                item.put("message", e.getMessage() == null ? "删除失败" : e.getMessage());
+                failed.add(item);
+            }
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("succeeded", succeeded);
+        result.put("failed", failed);
+        return result;
+    }
+
     private Map<String, Object> runBatch(List<Long> ids, boolean online,
                                          Boolean scheduleEnabled, String cronExpression) {
         if (ids == null || ids.isEmpty()) {

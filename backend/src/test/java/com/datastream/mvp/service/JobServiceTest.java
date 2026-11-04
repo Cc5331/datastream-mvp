@@ -190,6 +190,33 @@ class JobServiceTest {
         assertEquals("flink-999", submitted.getFlinkJobId());
     }
 
+    @Test
+    void assertDeletable_allowsIdleJobsAndBlocksRunningOnes() {
+        // 批量删除的前置校验：跑着的作业不能删，否则 Flink 上会留下取消不了的孤儿作业
+        JobDefinition draft = job(10L, 7L);
+        draft.setStatus(JobDefinition.JobStatus.DRAFT);
+        assertDoesNotThrow(() -> service.assertDeletable(draft), "DRAFT 可删");
+
+        JobDefinition completed = job(11L, 7L);
+        completed.setStatus(JobDefinition.JobStatus.COMPLETED);
+        assertDoesNotThrow(() -> service.assertDeletable(completed), "已结束的作业可删");
+
+        JobDefinition failed = job(12L, 7L);
+        failed.setStatus(JobDefinition.JobStatus.FAILED);
+        assertDoesNotThrow(() -> service.assertDeletable(failed), "失败作业可删");
+
+        for (JobDefinition.JobStatus running : List.of(JobDefinition.JobStatus.SUBMITTED,
+                JobDefinition.JobStatus.RUNNING)) {
+            JobDefinition job = job(13L, 7L);
+            job.setStatus(running);
+            ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                    () -> service.assertDeletable(job), running + " 必须拒绝删除");
+            assertEquals(409, ex.getStatusCode().value());
+            assertTrue(ex.getReason().contains("请先取消或下线"), ex.getReason());
+        }
+        assertDoesNotThrow(() -> service.assertDeletable(null), "null 不炸（防御）");
+    }
+
     private JobDefinition job(Long id, Long ownerId) {
         JobDefinition job = new JobDefinition();
         job.setId(id);

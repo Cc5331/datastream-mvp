@@ -53,6 +53,10 @@ const api = {
         const res = await axios.post(`${API_BASE}/jobs/batch-offline`, { ids });
         return res.data;
     },
+    async batchDeleteJobs(ids) {
+        const res = await axios.post(`${API_BASE}/jobs/batch-delete`, { ids });
+        return res.data;
+    },
     async copyJob(id) {
         const res = await axios.post(`${API_BASE}/jobs/${id}/copy`);
         return res.data;
@@ -3400,6 +3404,43 @@ const app = createApp({
             }
         }
 
+        /**
+         * 批量删除作业：二次确认（列明不可恢复 + 运行中会被跳过），逐项返回结果。
+         * 运行中的作业由后端跳过并说明原因（不隐式取消，避免留下孤儿 Flink 作业）。
+         */
+        async function confirmBatchDelete() {
+            if (!selectedJobs.value.length) {
+                ElMessage.warning('请先选择作业');
+                return;
+            }
+            const running = selectedJobs.value.filter(row => row.status === 'SUBMITTED' || row.status === 'RUNNING');
+            const ids = selectedJobs.value.map(row => row.id);
+            const preview = ids.slice(0, 10).map(id => '#' + id).join('、') + (ids.length > 10 ? ` 等 ${ids.length} 个` : '');
+            const runningHint = running.length
+                ? `<div style="margin-top:8px;color:#e6a23c;">其中 <b>${running.length}</b> 个正在运行，会被跳过（需先取消或下线）</div>`
+                : '';
+            try {
+                await ElMessageBox.confirm(
+                    `<div>确定删除选中的 <b>${ids.length}</b> 个作业：${preview}</div>`
+                    + '<div style="margin-top:8px;color:#f56c6c;">删除后不可恢复：作业定义、版本历史、依赖关系一并移除。</div>'
+                    + runningHint,
+                    '批量删除作业',
+                    { type: 'warning', dangerouslyUseHTMLString: true,
+                      confirmButtonText: '确认删除', cancelButtonText: '取消' }
+                );
+                batchOperating.value = true;
+                const result = await api.batchDeleteJobs(ids);
+                showBatchResult('删除', result);
+                await loadJobs();
+            } catch (err) {
+                if (err !== 'cancel') {
+                    ElMessage.error('批量删除失败: ' + (err.response?.data?.error || err.response?.data?.message || err.message));
+                }
+            } finally {
+                batchOperating.value = false;
+            }
+        }
+
         async function confirmBatchOnline() {
             if (batchScheduleEnabled.value && !batchCronExpression.value.trim()) {
                 ElMessage.warning('启用调度时必须填写 Cron 表达式');
@@ -4013,7 +4054,7 @@ const app = createApp({
             exportDag, importDagTrigger, importDag, clearCanvas, newCanvas, applyParams, paramProxy, setParam,
             openJob, submitJobById, deleteJob, deleteJobFromDetail, viewLogs, statusTag, undoDag, redoDag, canUndo, canRedo,
             openJobDetail, onJobMore, jobCols, jobDetailVisible, jobDetailRow,
-            onlineJobById, offlineJobById, onJobSelectionChange, batchChangeOnline, confirmBatchOnline,
+            onlineJobById, offlineJobById, onJobSelectionChange, batchChangeOnline, confirmBatchOnline, confirmBatchDelete,
             copyJobById, deleteMonitorJob, openScheduleDialog, saveSchedule, loadScheduleHistory,
             openVersions, rollbackVersion, versionDialogVisible, jobVersions, versionLoading,
             loadSampleDag, SAMPLE_DAGS,

@@ -152,6 +152,23 @@ public class JobService {
         return saved;
     }
 
+    /**
+     * 删除前的可删性校验（批量删除逐项调用）。
+     *
+     * <p>运行中（SUBMITTED / RUNNING）的作业**不允许直接删**：删掉元数据后 Flink 上的作业仍在跑，
+     * 会变成谁也管不了的孤儿作业（无法取消、输出不再被合并）。要么先取消/下线，要么等它结束。</p>
+     *
+     * @throws ResponseStatusException 409：作业正在运行
+     */
+    public void assertDeletable(JobDefinition job) {
+        if (job == null) return;
+        JobDefinition.JobStatus status = job.getStatus();
+        if (status == JobDefinition.JobStatus.SUBMITTED || status == JobDefinition.JobStatus.RUNNING) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "作业正在运行（" + status + "），请先取消或下线后再删除");
+        }
+    }
+
     @Transactional
     public void delete(Long id) {
         if (jobRepo.existsById(id)) {
