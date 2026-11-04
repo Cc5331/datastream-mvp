@@ -471,7 +471,7 @@ python test-resources/benchmark.py
 
 完整报告见 `test-results/benchmark_report.md`。
 
-当前自动化回归基线（2026-11-04 实测）：后端 `mvn -B test` 共 **206** 个测试用例（43 个测试类）BUILD SUCCESS，前端 `node --test test/*.test.js` 共 **84** 个测试用例（10 个测试文件）84/84 通过 —— 合计 **290** 个用例 0 失败。
+当前自动化回归基线（2026-11-04 实测）：后端 `mvn -B test` 共 **223** 个测试用例（47 个测试类）BUILD SUCCESS，前端 `node --test test/*.test.js` 共 **89** 个测试用例（11 个测试文件）89/89 通过 —— 合计 **312** 个用例 0 失败。
 另有两条真机验证脚本：`node scripts/verify-canvas.cjs`（6 项，画布交互）与 `node scripts/verify-file-import.cjs`（18 项，拖拽导入 + AI 建议），
 以及不依赖浏览器的真接口验证 `node scripts/verify-agent-features.cjs`（13 项，导入建议 / Kafka 推断 / 告警聚合）。
 
