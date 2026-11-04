@@ -1,0 +1,133 @@
+{
+  "generatedAt": "2026-10-01 00:39:38",
+  "base": "http://localhost:18080",
+  "results": [
+    {
+      "case": {
+        "id": "FC-01",
+        "dag": "02-csv-concat-csv.json",
+        "source": "concat_source.csv",
+        "expected": "concat_expected_1.csv",
+        "fields": [
+          "category",
+          "channel"
+        ],
+        "separator": ",",
+        "newFieldName": "category_channel",
+        "chain": "CSV 输入 → 字段拼接 → CSV 输出",
+        "purpose": "基础拼接：拼接列追加到源全部列之后，逐行值正确（含空值/长文本/字段自带分隔符）"
+      },
+      "jobId": 2798,
+      "status": "COMPLETED",
+      "flinkJobId": "46154be37a1a0c4ca3aff334a0b71b3a",
+      "elapsedSec": 5.6,
+      "trace": [
+        "DRAFT(创建 #2798)",
+        "SUBMITTED(SUBMITTED)",
+        "COMPLETED"
+      ],
+      "compare": {
+        "expected_rows": 24,
+        "actual_rows": 24,
+        "columns": 13,
+        "expected_columns": 13,
+        "cell_mismatch_rows": 0,
+        "concat_recompute_bad": 0,
+        "header_ok": true,
+        "diffs": [],
+        "passed": true
+      },
+      "sourceRows": 24,
+      "errorLines": [],
+      "expectedPath": "D:\\code\\比赛\\2026省服务外包\\test-resources\\data\\concat_expected_1.csv",
+      "actualPath": "D:\\code\\比赛\\2026省服务外包\\output\\field_concat_e2e\\concat_expected_1.csv",
+      "startedAt": "2026-10-01T00:39:23.203509",
+      "completedAt": "2026-10-01T00:39:25.964487"
+    },
+    {
+      "case": {
+        "id": "FC-02",
+        "dag": "02b-csv-concat-types.json",
+        "source": "concat_source.csv",
+        "expected": "concat_expected_2.csv",
+        "fields": [
+          "amount",
+          "join_day"
+        ],
+        "separator": "|",
+        "newFieldName": "amount_day",
+        "chain": "CSV 输入 → 字段拼接 → CSV 输出（跨类型拼接）",
+        "purpose": "非字符串列拼接：数值列 amount 与日期列 join_day 各经 CAST(... AS STRING) 后拼接，边界值 0.00 / 空值行均参与比对"
+      },
+      "jobId": 2799,
+      "status": "COMPLETED",
+      "flinkJobId": "c0eef709ea39d5b3760ef8e0728f210e",
+      "elapsedSec": 5.6,
+      "trace": [
+        "DRAFT(创建 #2799)",
+        "SUBMITTED(SUBMITTED)",
+        "COMPLETED"
+      ],
+      "compare": {
+        "expected_rows": 24,
+        "actual_rows": 24,
+        "columns": 13,
+        "expected_columns": 13,
+        "cell_mismatch_rows": 0,
+        "concat_recompute_bad": 0,
+        "header_ok": true,
+        "diffs": [],
+        "passed": true
+      },
+      "sourceRows": 24,
+      "errorLines": [],
+      "expectedPath": "D:\\code\\比赛\\2026省服务外包\\test-resources\\data\\concat_expected_2.csv",
+      "actualPath": "D:\\code\\比赛\\2026省服务外包\\output\\field_concat_e2e\\concat_expected_2.csv",
+      "startedAt": "2026-10-01T00:39:28.829921",
+      "completedAt": "2026-10-01T00:39:30.963437"
+    },
+    {
+      "case": {
+        "id": "FC-03",
+        "dag": "02c-csv-concat-slim-validate.json",
+        "source": "concat_source_slim.csv",
+        "expected": "concat_expected_3.csv",
+        "fields": [
+          "src_name",
+          "channel"
+        ],
+        "separator": " | ",
+        "newFieldName": "name_channel",
+        "validate": "src_name,channel",
+        "chain": "CSV 输入 → 字段拼接 → 空值校验(checkFields) → CSV 输出",
+        "purpose": "含空格的分隔符不被拆开；拼接后接空值校验，校验字段为空的行被剔除"
+      },
+      "jobId": 2800,
+      "status": "COMPLETED",
+      "flinkJobId": "3bdd8c0566087cb2c17ae9b745045f2b",
+      "elapsedSec": 6.1,
+      "trace": [
+        "DRAFT(创建 #2800)",
+        "SUBMITTED(SUBMITTED)",
+        "COMPLETED"
+      ],
+      "compare": {
+        "expected_rows": 3,
+        "actual_rows": 3,
+        "columns": 4,
+        "expected_columns": 4,
+        "cell_mismatch_rows": 0,
+        "concat_recompute_bad": 0,
+        "header_ok": true,
+        "diffs": [],
+        "passed": true
+      },
+      "sourceRows": 5,
+      "errorLines": [],
+      "expectedPath": "D:\\code\\比赛\\2026省服务外包\\test-resources\\data\\concat_expected_3.csv",
+      "actualPath": "D:\\code\\比赛\\2026省服务外包\\output\\field_concat_e2e\\concat_expected_3.csv",
+      "startedAt": "2026-10-01T00:39:34.988638",
+      "completedAt": "2026-10-01T00:39:35.962558"
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "jobName": "字段拼接测试 02（类型拼接：数值列 amount + 日期列 join_day（'|' 分隔，验证 CAST 到 STRING））",
+  "parallelism": 2,
+  "nodes": [
+    {
+      "id": "csv_input_1",
+      "type": "csv_input",
+      "label": "CSV 输入（concat_source.csv）",
+      "params": {
+        "path": "test-resources/data/concat_source.csv",
+        "delimiter": ",",
+        "hasHeader": true
+      },
+      "x": 60,
+      "y": 260
+    },
+    {
+      "id": "fc_1",
+      "type": "field_concat",
+      "label": "字段拼接（amount,join_day → amount_day）",
+      "params": {
+        "fields": "amount,join_day",
+        "separator": "|",
+        "newFieldName": "amount_day"
+      },
+      "x": 300,
+      "y": 260
+    },
+    {
+      "id": "csv_output_1",
+      "type": "csv_output",
+      "label": "CSV 输出（期望值对照 concat_expected_2.csv）",
+      "params": {
+        "path": "test-resources/data/concat_expected_2.csv",
+        "delimiter": ","
+      },
+      "x": 540,
+      "y": 260
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "csv_input_1",
+      "target": "fc_1"
+    },
+    {
+      "id": "e2",
+      "source": "fc_1",
+      "target": "csv_output_1"
+    }
+  ]
+}

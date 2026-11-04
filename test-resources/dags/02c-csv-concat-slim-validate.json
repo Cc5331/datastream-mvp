@@ -1,0 +1,69 @@
+{
+  "jobName": "字段拼接测试 03（管道分隔：src_name + channel（' | '），拼接后接空值校验）",
+  "parallelism": 2,
+  "nodes": [
+    {
+      "id": "csv_input_1",
+      "type": "csv_input",
+      "label": "CSV 输入（concat_source_slim.csv）",
+      "params": {
+        "path": "test-resources/data/concat_source_slim.csv",
+        "delimiter": ",",
+        "hasHeader": true
+      },
+      "x": 60,
+      "y": 260
+    },
+    {
+      "id": "fc_1",
+      "type": "field_concat",
+      "label": "字段拼接（src_name,channel → name_channel）",
+      "params": {
+        "fields": "src_name,channel",
+        "separator": " | ",
+        "newFieldName": "name_channel"
+      },
+      "x": 300,
+      "y": 260
+    },
+    {
+      "id": "validate_1",
+      "type": "validate",
+      "label": "validate：拼接后校验 src_name / channel 非空（参数名是 checkFields）",
+      "params": {
+        "checkFields": "src_name,channel",
+        "ignoreEmpty": true
+      },
+      "x": 780,
+      "y": 260
+    },
+    {
+      "id": "csv_output_1",
+      "type": "csv_output",
+      "label": "CSV 输出（期望值对照 concat_expected_3.csv）",
+      "params": {
+        "path": "test-resources/data/concat_expected_3.csv",
+        "delimiter": ","
+      },
+      "x": 1020,
+      "y": 260
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "csv_input_1",
+      "target": "fc_1"
+    },
+    {
+      "id": "e2",
+      "source": "fc_1",
+      "target": "validate_1"
+    },
+    {
+      "id": "e3",
+      "source": "validate_1",
+      "target": "csv_output_1"
+    }
+  ]
+}

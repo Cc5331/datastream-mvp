@@ -1,57 +1,53 @@
 {
-  "jobName": "字段拼接测试",
+  "jobName": "字段拼接测试 01（基础拼接：category + channel（逗号分隔））",
   "parallelism": 2,
   "nodes": [
     {
-      "id": "csv_in",
+      "id": "csv_input_1",
       "type": "csv_input",
-      "label": "CSV 输入",
+      "label": "CSV 输入（concat_source.csv）",
       "params": {
-        "path": "test-resources/data/users.csv",
+        "path": "test-resources/data/concat_source.csv",
         "delimiter": ",",
         "hasHeader": true
       },
-      "x": 80,
-      "y": 250
+      "x": 60,
+      "y": 260
     },
     {
-      "id": "concat",
+      "id": "fc_1",
       "type": "field_concat",
-      "label": "字段拼接",
+      "label": "字段拼接（category,channel → category_channel）",
       "params": {
-        "fields": [
-          "name",
-          "department",
-          "city"
-        ],
-        "separator": " - ",
-        "newFieldName": "简介"
+        "fields": "category,channel",
+        "separator": ",",
+        "newFieldName": "category_channel"
       },
-      "x": 350,
-      "y": 250
+      "x": 300,
+      "y": 260
     },
     {
-      "id": "csv_out",
+      "id": "csv_output_1",
       "type": "csv_output",
-      "label": "CSV 输出",
+      "label": "CSV 输出（期望值对照 concat_expected_1.csv）",
       "params": {
-        "path": "test-resources/data/output_concat.csv",
+        "path": "test-resources/data/concat_expected_1.csv",
         "delimiter": ","
       },
-      "x": 620,
-      "y": 250
+      "x": 540,
+      "y": 260
     }
   ],
   "edges": [
     {
       "id": "e1",
-      "source": "csv_in",
-      "target": "concat"
+      "source": "csv_input_1",
+      "target": "fc_1"
     },
     {
       "id": "e2",
-      "source": "concat",
-      "target": "csv_out"
+      "source": "fc_1",
+      "target": "csv_output_1"
     }
   ]
 }
