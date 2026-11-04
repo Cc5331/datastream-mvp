@@ -28,10 +28,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
-import java.nio.ByteBuffer;
-import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
-import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -234,6 +231,12 @@ public class FileImportService {
         if (!StandardCharsets.UTF_8.equals(charset)) {
             warnings.add("检测到非 UTF-8 编码（" + charset.name() + "）：平台按 UTF-8 读取 CSV，建议先转码，否则中文可能乱码");
         }
+        // 内容本身已是历史乱码（别人用错编码导出：UTF-8 被按 GBK 解过）时尝试还原，
+        // 只改「展示与分析用的样本」，不改文件；节点 path 仍指向原文件。
+        if (repairMojibake(names, rows)) {
+            warnings.add("文件内容疑似历史上编码用错（UTF-8 被按 GBK 解读），已自动还原样本；"
+                    + "建议把源文件重新导出为 UTF-8，否则下游 Flink 读到的仍是乱码");
+        }
 
         result.put("delimiter", delimiter);
         result.put("hasHeader", hasHeader);
@@ -241,6 +244,15 @@ public class FileImportService {
         result.put("columns", buildColumns(names, rows, warnings));
         result.put("rows", rows);
         result.put("truncated", truncated);
+    }
+
+    /** 对列名与样本做乱码还原，返回是否发生过改动 */
+    private boolean repairMojibake(List<String> names, List<List<String>> rows) {
+        boolean changed = com.datastream.mvp.util.TextEncoding.repairMojibakeInPlace(names);
+        for (List<String> row : rows) {
+            if (com.datastream.mvp.util.TextEncoding.repairMojibakeInPlace(row)) changed = true;
+        }
+        return changed;
     }
 
     private void analyzeExcel(Path file, Map<String, Object> result, List<String> warnings) throws IOException {
@@ -284,6 +296,7 @@ public class FileImportService {
             }
             boolean truncated = lastRow > firstRow + rows.size();
             if (truncated) warnings.add("仅分析前 " + rows.size() + " 行，后续行按同结构读取");
+            repairMojibake(names, rows);
 
             result.put("delimiter", ",");
             result.put("hasHeader", true);
@@ -359,6 +372,7 @@ public class FileImportService {
         }
         boolean truncated = items.size() > previewRows;
         if (truncated) warnings.add("JSON 记录较多，仅分析前 " + previewRows + " 条");
+        repairMojibake(names, rows);
 
         result.put("mode", arrayMode ? "array" : "lines");
         result.put("delimiter", ",");
@@ -553,36 +567,12 @@ public class FileImportService {
     }
 
     /**
-     * 编码探测：BOM 优先，其次 UTF-8 严格解码，失败退 GB18030（中文 Windows 导出的 CSV 常见 GBK）。
-     * 只读文件头部 64KB，避免大文件整读。
+     * 编码探测：委托 {@link com.datastream.mvp.util.TextEncoding}。
+     * 历史实现只读头部 64KB 做严格 UTF-8 判断，采样窗口切在汉字中间时会误判成 GB18030，
+     * 导致「分析结果中文乱码」（2026-11-04 修复，见 TextEncoding 类注释）。
      */
     private Charset detectCharset(Path file) {
-        byte[] head = new byte[0];
-        try (InputStream input = Files.newInputStream(file)) {
-            head = input.readNBytes(64 * 1024);
-        } catch (IOException e) {
-            log.warn("Read head failed for charset detection: {}", e.getMessage());
-            return StandardCharsets.UTF_8;
-        }
-        if (head.length >= 3 && (head[0] & 0xFF) == 0xEF && (head[1] & 0xFF) == 0xBB && (head[2] & 0xFF) == 0xBF) {
-            return StandardCharsets.UTF_8;
-        }
-        if (head.length >= 2 && (head[0] & 0xFF) == 0xFF && (head[1] & 0xFF) == 0xFE) {
-            return StandardCharsets.UTF_16LE;
-        }
-        try {
-            StandardCharsets.UTF_8.newDecoder()
-                    .onMalformedInput(CodingErrorAction.REPORT)
-                    .onUnmappableCharacter(CodingErrorAction.REPORT)
-                    .decode(ByteBuffer.wrap(head));
-            return StandardCharsets.UTF_8;
-        } catch (CharacterCodingException e) {
-            try {
-                return Charset.forName("GB18030");
-            } catch (Exception ignored) {
-                return StandardCharsets.UTF_8;
-            }
-        }
+        return com.datastream.mvp.util.TextEncoding.detect(file);
     }
 
     private String cellText(Cell cell, DataFormatter formatter) {

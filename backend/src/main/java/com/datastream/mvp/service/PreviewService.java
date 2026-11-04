@@ -3,6 +3,7 @@ package com.datastream.mvp.service;
 import com.datastream.mvp.model.JobDefinition;
 import com.datastream.mvp.util.JdbcUrlUtil;
 import com.datastream.mvp.util.MysqlIdentifier;
+import com.datastream.mvp.util.TextEncoding;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -292,7 +293,11 @@ public class PreviewService {
         Map<String, Object> result = baseResult(f);
         List<String> columns = new ArrayList<>();
         List<List<String>> rows = new ArrayList<>();
-        try (Reader reader = Files.newBufferedReader(f.toPath(), StandardCharsets.UTF_8);
+        // 编码按内容探测（UTF-8 / GB18030 / BOM），不能写死 UTF-8：
+        // 中文 Windows 导出的 CSV 常见 GBK，硬读 UTF-8 会让中文列全变 \uFFFD
+        java.nio.charset.Charset charset = TextEncoding.detect(f.toPath());
+        result.put("encoding", charset.name());
+        try (Reader reader = Files.newBufferedReader(f.toPath(), charset);
              CSVParser parser = CSVFormat.DEFAULT.parse(reader)) {
             Iterator<CSVRecord> it = parser.iterator();
             boolean first = true;
@@ -318,6 +323,12 @@ public class PreviewService {
             log.warn("CSV preview fallback to text: {}", e.getMessage());
             return previewText(f, n);
         }
+        // 内容本身是历史乱码时还原（同 FileImportService 口径）
+        boolean repaired = TextEncoding.repairMojibakeInPlace(columns);
+        for (List<String> row : rows) {
+            if (TextEncoding.repairMojibakeInPlace(row)) repaired = true;
+        }
+        if (repaired) result.put("note", "内容疑似历史编码错误（UTF-8 被按 GBK 解读），已自动还原；建议源文件重新导出为 UTF-8");
         result.put("columns", columns);
         result.put("rows", rows);
         return result;
@@ -368,7 +379,7 @@ public class PreviewService {
         Map<String, Object> result = baseResult(f);
         List<JsonNode> items = new ArrayList<>();
         try {
-            String text = new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8);
+            String text = TextEncoding.readAll(f.toPath());
             if (text.startsWith("﻿")) text = text.substring(1);
             JsonNode root = objectMapper.readTree(text);
             if (root.isArray()) {
@@ -435,10 +446,12 @@ public class PreviewService {
     private Map<String, Object> previewText(java.io.File f, int n) {
         Map<String, Object> result = baseResult(f);
         List<String> rows = new ArrayList<>();
-        try (BufferedReader reader = Files.newBufferedReader(f.toPath(), StandardCharsets.UTF_8)) {
+        java.nio.charset.Charset charset = TextEncoding.detect(f.toPath());
+        result.put("encoding", charset.name());
+        try (BufferedReader reader = Files.newBufferedReader(f.toPath(), charset)) {
             String line;
             while (rows.size() < n && (line = reader.readLine()) != null) {
-                rows.add(line);
+                rows.add(TextEncoding.repairMojibake(line));
             }
             if (reader.readLine() != null) result.put("truncated", true);
         } catch (Exception e) {
