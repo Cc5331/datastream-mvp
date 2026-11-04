@@ -80,6 +80,35 @@ function check(name, ok, detail) {
 
     await request('DELETE', '/api/files/uploaded?path=' + encodeURIComponent(analyzed.data.path), { token });
 
+    // ---------- ①b 真实大文件的中文编码回归（2026-11-04 乱码事故）----------
+    const fsp = require('fs');
+    const pathMod = require('path');
+    const ordersPath = pathMod.resolve(__dirname, '..', 'test-resources/data/orders.csv');
+    if (fsp.existsSync(ordersPath)) {
+        const ordersBytes = fsp.readFileSync(ordersPath);
+        const ordersForm = multipart('file', 'orders.csv', ordersBytes, 'text/csv');
+        const orders = await request('POST', '/api/files/analyze', {
+            token, body: ordersForm.buffer, contentType: 'multipart/form-data; boundary=' + ordersForm.boundary
+        });
+        const rows = (orders.data && orders.data.rows) || [];
+        const firstRow = JSON.stringify(rows[0] || []);
+        check('真实 orders.csv 分析后中文正常（编码探测边界回归）',
+            orders.status === 200 && orders.data.encoding === 'UTF-8'
+            && !firstRow.includes('\uFFFD') && firstRow.includes('平板') && firstRow.includes('退款中'),
+            `encoding=${orders.data && orders.data.encoding} row1=${firstRow}`);
+
+        const preview = await request('GET',
+            '/api/preview/file?path=' + encodeURIComponent(orders.data.path) + '&limit=3', { token });
+        const previewText = JSON.stringify(preview.data.rows || []);
+        check('数据预览接口对同一文件也不乱码',
+            preview.status === 200 && !previewText.includes('\uFFFD') && previewText.includes('平板'),
+            `encoding=${preview.data && preview.data.encoding}`);
+
+        await request('DELETE', '/api/files/uploaded?path=' + encodeURIComponent(orders.data.path), { token });
+    } else {
+        check('真实 orders.csv 中文编码回归（数据文件缺失，跳过）', true, 'skipped');
+    }
+
     // ---------- ② Kafka 字段推断 ----------
     const topics = await request('GET', '/api/kafka/topics', { token });
     const brokerUp = topics.status === 200 && Array.isArray(topics.data) && topics.data.length > 0;

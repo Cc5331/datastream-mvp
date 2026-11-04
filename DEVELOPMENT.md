@@ -455,8 +455,9 @@
       确认前不落节点、识别列名/预览行/暂存路径、**「AI 建议」面板出建议 + 「应用字段改名」落到字段名**、取消即丢弃、
       确认后生成控件并关闭对话框、补齐下游可连线、保存后落库 `path`（uploads 下的服务器路径）+ `hasHeader` + `fieldsConfig`、
       提交前检查无错误（按上传文件唯一名反查作业，不污染历史数据）。同样需要 3000/18080 + Edge；`ws` 不可解析时用 `DSH_WS_NODE_MODULES` 指定。
-- [ ] 改了 AI / 告警相关代码时跑：`node scripts/verify-agent-features.cjs` → **13 项断言全 PASS**（真接口、不依赖浏览器）：
+- [ ] 改了 AI / 告警 / 编码相关代码时跑：`node scripts/verify-agent-features.cjs` → **15 项断言全 PASS**（真接口、不依赖浏览器）：
       上传+分析可用、导入建议返回建议且命中 leading-zero/empty-column/name-style、给出可应用的 renames、中文不乱码、
+      **真实 `test-resources/data/orders.csv`（149KB，64KB 边界切在汉字中间）分析后中文正确且 /api/preview/file 一致**、
       Kafka 不可用时给 400 可读错误而不是 500、空 topic 被拒、**同根因两次失败只留一条告警记录（occurrences=2、文本写明合并次数与涉及作业、带聚合签名）**。
       需要 18080 已启动；Kafka broker 可用时会额外验证真实字段推断。
 - [ ] 改了安全/并发相关代码时的针对性回归：`FlinkJobStatusCheckerTest`（集群换代判定）、`JobLocksTest`（分片锁互斥）、`JobAccessTest`（归属规则）、`JwtUtilTest`（令牌版本）、`JobServiceTest`（重复提交被拒）、`PluginLoaderServiceTest`（两种 SPI 接口）、`DataInitializerControlsTest`（内置 upsert 不清插件行）。
