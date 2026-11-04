@@ -124,8 +124,18 @@ public class MysqlTableCreator {
         try (Connection conn = DriverManager.getConnection(url, username, password)) {
             boolean exists = tableExists(conn, db, table);
             if (exists) {
-                if (VALIDATE_EXISTING.equals(policy)) validateColumns(conn, db, table, sourceFields);
-                else log.info("MySQL table already exists, skip create: `{}`.`{}`", db, table);
+                // 表已存在时**无论哪种策略**都要核对列：CREATE_IF_MISSING 以前的语义是「只跳过建表」，
+                // 结果表按旧 DAG 建过（列名不同）时一路放行到运行期，Flink 只回一坨
+                // "Recovery is suppressed by NoRestartBackoffTimeStrategy"，真因藏在
+                // Caused by: Unknown column 'x' in 'field list'（实测 job#2985）。
+                List<String> missing = missingColumns(conn, db, table, parseColumnNames(sourceFields));
+                if (!missing.isEmpty()) {
+                    throw new RuntimeException("MySQL 目标表 `" + db + "." + table + "` 已存在，但缺少上游字段: "
+                            + String.join(", ", missing)
+                            + "。该表多半是按旧 DAG 建的（列名与当前上游不一致）；请换一个表名、清掉/迁移旧表，"
+                            + "或先 ALTER TABLE 补列再提交。");
+                }
+                log.info("MySQL table already exists and matches upstream columns: `{}`.`{}`", db, table);
                 return;
             }
             if (!CREATE_IF_MISSING.equals(policy)) {
@@ -146,6 +156,50 @@ public class MysqlTableCreator {
         }
     }
 
+    /**
+     * 目标表列检查结果（只读：不建表、不改表）。
+     *
+     * @param tableExists    目标表是否存在
+     * @param missingColumns 上游有、目标表没有的列（表不存在时为空）
+     * @param error          连不上库时的错误描述（非 null 表示这次检查拿不到结论）
+     */
+    public record TableColumnCheck(boolean tableExists, List<String> missingColumns, String error) {
+        public static TableColumnCheck unavailable(String error) {
+            return new TableColumnCheck(false, List.of(), error);
+        }
+        public boolean hasProblem() { return error == null && tableExists && !missingColumns.isEmpty(); }
+    }
+
+    /**
+     * 供「提交前检查」复用：拿目标表真实列与上游字段比对，提前告警而不是等 Flink 运行期炸。
+     * 连接失败（库没起/凭据不对）返回 {@link TableColumnCheck#unavailable}，由调用方降级为 warning。
+     */
+    public TableColumnCheck checkColumns(Map<String, Object> params, List<String> upstreamFields) {
+        if (params == null) return TableColumnCheck.unavailable("节点参数为空");
+        String url = JdbcUrlUtil.normalize(str(params.get("url")));
+        String db = parseDatabase(url);
+        String table = str(params.get("table")).trim();
+        if (db == null || table.isEmpty()) {
+            return TableColumnCheck.unavailable("未填写 JDBC URL 或表名");
+        }
+        String username = resolveCredential(str(params.get("username")), defaultMysqlUsername);
+        String password = resolveCredential(str(params.get("password")), defaultMysqlPassword);
+        java.util.Properties props = new java.util.Properties();
+        props.setProperty("user", username == null ? "" : username);
+        props.setProperty("password", password == null ? "" : password);
+        // 提交前检查要快：连不上就别让用户干等
+        props.setProperty("connectTimeout", "3000");
+        props.setProperty("socketTimeout", "3000");
+        try (Connection conn = DriverManager.getConnection(url, props)) {
+            if (!tableExists(conn, db, table)) {
+                return new TableColumnCheck(false, List.of(), null);
+            }
+            return new TableColumnCheck(true, missingColumns(conn, db, table, upstreamFields), null);
+        } catch (Exception e) {
+            return TableColumnCheck.unavailable(e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+        }
+    }
+
     private boolean tableExists(Connection conn, String db, String table) throws Exception {
         try (java.sql.PreparedStatement ps = conn.prepareStatement(
                 "SELECT 1 FROM information_schema.tables WHERE table_schema = ? AND table_name = ? LIMIT 1")) {
@@ -157,17 +211,32 @@ public class MysqlTableCreator {
         }
     }
 
-    private void validateColumns(Connection conn, String db, String table, String sourceFields) throws Exception {
+    /** 上游字段里目标表缺的列（大小写不敏感，按上游顺序返回） */
+    private List<String> missingColumns(Connection conn, String db, String table, List<String> upstreamFields) throws Exception {
         Set<String> actual = new HashSet<>();
         try (java.sql.ResultSet rs = conn.getMetaData().getColumns(db, null, table, null)) {
             while (rs.next()) actual.add(rs.getString("COLUMN_NAME").toLowerCase());
         }
-        for (String line : sourceFields.split("\\n")) {
-            Matcher m = COLUMN_PATTERN.matcher(line.trim().replaceFirst(",$", ""));
-            if (m.matches() && !actual.contains(m.group(1).replace("`", "").toLowerCase())) {
-                throw new RuntimeException("MySQL 目标表缺少字段: " + m.group(1));
-            }
+        List<String> missing = new ArrayList<>();
+        for (String name : upstreamFields) {
+            if (name == null || name.isBlank()) continue;
+            if (!actual.contains(name.replace("`", "").trim().toLowerCase())) missing.add(name);
         }
+        return missing;
+    }
+
+    /** 从 DDL 字段串（"`a` STRING,\n`b` INT"）里只取列名 */
+    private List<String> parseColumnNames(String sourceFields) {
+        List<String> names = new ArrayList<>();
+        if (sourceFields == null || sourceFields.isBlank()) return names;
+        for (String part : sourceFields.split("\n")) {
+            String line = part.trim();
+            if (line.isEmpty()) continue;
+            if (line.endsWith(",")) line = line.substring(0, line.length() - 1).trim();
+            Matcher m = COLUMN_PATTERN.matcher(line);
+            if (m.find()) names.add(m.group(1).trim());
+        }
+        return names;
     }
 
     /**

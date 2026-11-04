@@ -11,6 +11,8 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.*;
 
 class DagPreflightServiceTest {
@@ -26,7 +28,7 @@ class DagPreflightServiceTest {
         when(jobs.findByIdForUser(1L, user)).thenReturn(job);
         when(controls.findAll()).thenReturn(List.of(control("source", "input", "{\"type\":\"object\",\"required\":[\"path\"],\"properties\":{\"path\":{\"type\":\"string\"}}}"), control("sink", "output", "{\"type\":\"object\",\"properties\":{\"mode\":{\"type\":\"string\",\"enum\":[\"append\"]}}}")));
 
-        Map<String, Object> result = new DagPreflightService(jobs, controls, new ObjectMapper(), resolver, mock(KafkaMonitorService.class)).validate(1L, user);
+        Map<String, Object> result = new DagPreflightService(jobs, controls, new ObjectMapper(), resolver, mock(KafkaMonitorService.class), mock(MysqlTableCreator.class)).validate(1L, user);
 
         assertEquals(false, result.get("valid"));
         String errors = result.get("errors").toString();
@@ -50,7 +52,7 @@ class DagPreflightServiceTest {
         when(jobs.findByIdForUser(1L, user)).thenReturn(job);
         when(controls.findAll()).thenReturn(List.of(control("source", "input", "{}"), control("sink", "output", "{}")));
 
-        Map<String, Object> result = new DagPreflightService(jobs, controls, new ObjectMapper(), resolver, mock(KafkaMonitorService.class)).validate(1L, user);
+        Map<String, Object> result = new DagPreflightService(jobs, controls, new ObjectMapper(), resolver, mock(KafkaMonitorService.class), mock(MysqlTableCreator.class)).validate(1L, user);
 
         assertEquals(true, result.get("valid"));
         assertTrue(((List<?>) result.get("errors")).isEmpty());
@@ -74,7 +76,7 @@ class DagPreflightServiceTest {
                 control("mysql_input", "input", "{\"type\":\"object\",\"required\":[\"url\",\"table\",\"username\"],\"properties\":{}}"),
                 control("sink", "output", "{}")));
 
-        Map<String, Object> result = new DagPreflightService(jobs, controls, new ObjectMapper(), resolver, mock(KafkaMonitorService.class)).validate(1L, user);
+        Map<String, Object> result = new DagPreflightService(jobs, controls, new ObjectMapper(), resolver, mock(KafkaMonitorService.class), mock(MysqlTableCreator.class)).validate(1L, user);
 
         assertEquals(true, result.get("valid"), "引用数据源时不应因缺少连接级参数而失败: " + result.get("errors"));
     }
@@ -98,7 +100,7 @@ class DagPreflightServiceTest {
                         + "\"batchSize\":{\"type\":\"number\"},\"port\":{\"type\":\"integer\"}}}"),
                 control("sink", "output", "{}")));
 
-        Map<String, Object> result = new DagPreflightService(jobs, controls, new ObjectMapper(), resolver, mock(KafkaMonitorService.class)).validate(1L, user);
+        Map<String, Object> result = new DagPreflightService(jobs, controls, new ObjectMapper(), resolver, mock(KafkaMonitorService.class), mock(MysqlTableCreator.class)).validate(1L, user);
 
         assertEquals(true, result.get("valid"), "字符串形式的布尔/数值参数不应报类型错误: " + result.get("errors"));
     }
@@ -122,7 +124,7 @@ class DagPreflightServiceTest {
                 control("concat", "transform", "{\"type\":\"object\",\"properties\":{\"fields\":{\"type\":\"string\"}}}"),
                 control("sink", "output", "{}")));
 
-        Map<String, Object> result = new DagPreflightService(jobs, controls, new ObjectMapper(), resolver, mock(KafkaMonitorService.class)).validate(1L, user);
+        Map<String, Object> result = new DagPreflightService(jobs, controls, new ObjectMapper(), resolver, mock(KafkaMonitorService.class), mock(MysqlTableCreator.class)).validate(1L, user);
 
         assertEquals(true, result.get("valid"), "数组形式的字符串参数不应报类型错误: " + result.get("errors"));
     }
@@ -146,7 +148,7 @@ class DagPreflightServiceTest {
                         + "\"port\":{\"type\":\"integer\"}}}"),
                 control("sink", "output", "{}")));
 
-        Map<String, Object> result = new DagPreflightService(jobs, controls, new ObjectMapper(), resolver, mock(KafkaMonitorService.class)).validate(1L, user);
+        Map<String, Object> result = new DagPreflightService(jobs, controls, new ObjectMapper(), resolver, mock(KafkaMonitorService.class), mock(MysqlTableCreator.class)).validate(1L, user);
 
         String errors = result.get("errors").toString();
         assertTrue(errors.contains("参数类型错误: hasHeader"), "非法布尔值仍应报错: " + errors);
@@ -232,8 +234,87 @@ class DagPreflightServiceTest {
                 control("redis_lookup", "transform", "{}"),
                 control("mysql_output", "output", "{}")));
 
-        return new DagPreflightService(jobs, controls, mapper, resolver, mock(KafkaMonitorService.class))
+        return new DagPreflightService(jobs, controls, mapper, resolver,
+                mock(KafkaMonitorService.class), mock(MysqlTableCreator.class))
                 .validate(1L, user);
+    }
+
+    /**
+     * 2026-11-04 实测事故（job#2985）：上游 orders.csv 声明的 order_id… 写进 `flink_demo.output_table`，
+     * 而该表是旧 DAG 建的（sale_id…）。CREATE_IF_MISSING 只跳过建表、不核对列 → 提交成功、运行期才炸，
+     * 用户只看到外层 `Recovery is suppressed by NoRestartBackoffTimeStrategy`。
+     * 本用例锁定：提交前就必须报错并点名缺哪几列。
+     */
+    @Test
+    void flagsMysqlTargetMissingUpstreamColumns() {
+        Map<String, Object> result = preflightForMysqlTarget(
+                new MysqlTableCreator.TableColumnCheck(true, List.of("order_id", "pay_method"), null),
+                "CREATE_IF_MISSING");
+        assertEquals(false, result.get("valid"), "目标表缺列必须判为不可提交: " + result.get("errors"));
+        String errors = result.get("errors").toString();
+        assertTrue(errors.contains("缺少上游字段"), errors);
+        assertTrue(errors.contains("order_id") && errors.contains("pay_method"), "要点名缺哪几列: " + errors);
+    }
+
+    @Test
+    void warnsInsteadOfBlockingWhenMysqlUnreachable() {
+        Map<String, Object> result = preflightForMysqlTarget(
+                MysqlTableCreator.TableColumnCheck.unavailable("Communications link failure"),
+                "CREATE_IF_MISSING");
+        assertEquals(true, result.get("valid"), "连不上库不能阻断提交: " + result.get("errors"));
+        assertTrue(result.get("warnings").toString().contains("无法连接 MySQL"),
+                "应降级为 warning: " + result.get("warnings"));
+    }
+
+    @Test
+    void flagsMissingTableWhenPolicyIsFailIfMissing() {
+        Map<String, Object> result = preflightForMysqlTarget(
+                new MysqlTableCreator.TableColumnCheck(false, List.of(), null), "FAIL_IF_MISSING");
+        assertEquals(false, result.get("valid"));
+        assertTrue(result.get("errors").toString().contains("不存在"), result.get("errors").toString());
+    }
+
+    private Map<String, Object> preflightForMysqlTarget(MysqlTableCreator.TableColumnCheck check, String policy) {
+        JobService jobs = mock(JobService.class);
+        ControlRegistryService controls = mock(ControlRegistryService.class);
+        DataSourceNodeResolver resolver = mock(DataSourceNodeResolver.class);
+        MysqlTableCreator tableCreator = mock(MysqlTableCreator.class);
+        CurrentUser user = new CurrentUser(2L, "u", "U", "OPERATOR");
+        ObjectMapper mapper = new ObjectMapper();
+
+        var csvIn = mapper.createObjectNode();
+        csvIn.put("id", "csv_in").put("type", "csv_input").put("label", "CSV 输入");
+        csvIn.putObject("params")
+                .put("path", "D:/x/orders.csv")
+                .put("fieldsConfig", "[{\"name\":\"order_id\",\"type\":\"STRING\"},"
+                        + "{\"name\":\"amount\",\"type\":\"DOUBLE\"},{\"name\":\"pay_method\",\"type\":\"STRING\"}]");
+
+        var mysqlOut = mapper.createObjectNode();
+        mysqlOut.put("id", "mysql_out").put("type", "mysql_output").put("label", "MySQL Output");
+        mysqlOut.putObject("params")
+                .put("url", "jdbc:mysql://localhost:3306/flink_demo")
+                .put("table", "output_table")
+                .put("createTablePolicy", policy);
+
+        var root = mapper.createObjectNode();
+        root.put("parallelism", 1);
+        var nodes = root.putArray("nodes");
+        nodes.add(csvIn);
+        nodes.add(mysqlOut);
+        var edges = root.putArray("edges");
+        edges.addObject().put("source", "csv_in").put("target", "mysql_out");
+
+        JobDefinition job = new JobDefinition();
+        job.setParallelism(1);
+        job.setDagJson(root.toString());
+        when(jobs.findByIdForUser(1L, user)).thenReturn(job);
+        when(controls.findAll()).thenReturn(List.of(
+                control("csv_input", "input", "{}"),
+                control("mysql_output", "output", "{}")));
+        when(tableCreator.checkColumns(any(), anyList())).thenReturn(check);
+
+        return new DagPreflightService(jobs, controls, mapper, resolver,
+                mock(KafkaMonitorService.class), tableCreator).validate(1L, user);
     }
 
     private ControlRegistry control(String type, String category, String schema) {

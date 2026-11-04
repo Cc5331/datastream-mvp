@@ -1083,6 +1083,14 @@ public class FlinkJobStatusChecker {
         if (raw.contains("Column") && raw.contains("not found")) {
             sb.append("\n\n[定位提示] SQL 里的字段在上游 schema 中不存在：请核对控件里的字段名/字段拼接配置。");
         }
+        if (raw.contains("Unknown column") || raw.contains("in 'field list'")) {
+            // 实测 job#2985：上游 orders.csv 的 order_id… 写进 flink_demo.output_table，
+            // 而该表是旧 DAG 建的（sale_id…）；CREATE_IF_MISSING 只跳过建表、不核对列，
+            // 于是运行期才炸，外层还包着 NoRestartBackoffTimeStrategy
+            sb.append("\n\n[定位提示] 目标表结构与上游字段不一致（表已存在但缺少要写的列）："
+                    + "该表多半是按旧 DAG 建的。请换一个表名、清掉/迁移旧表，或先 ALTER TABLE 补列；"
+                    + "平台「提交前检查」现在会提前拦下这类问题。");
+        }
         if (raw.contains("Failed to fetchResults") || raw.contains("Failed to execute the operation")) {
             // 实测 Flink 1.18.1：语句在「校验期」失败（如字段不存在、语法错）时，SQL Gateway 的
             // FetchResults 直接返回 HTTP 500 且响应体为空，operation status 也只回 {"status":"ERROR"}，

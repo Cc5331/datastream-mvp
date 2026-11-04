@@ -29,6 +29,7 @@ public class DagPreflightService {
     private final ObjectMapper objectMapper;
     private final DataSourceNodeResolver dataSourceNodeResolver;
     private final KafkaMonitorService kafkaMonitorService;
+    private final MysqlTableCreator mysqlTableCreator;
 
     public Map<String, Object> validate(Long id, CurrentUser user) {
         JobDefinition job = jobService.findByIdForUser(id, user);
@@ -108,7 +109,84 @@ public class DagPreflightService {
         for (String output : outputs) if (!reachable.contains(output)) errors.add("输出节点不可从输入到达: " + output);
 
         validateFieldReferences(nodes, edges, controls, byId, errors);
+        validateMysqlTargetColumns(nodes, edges, controls, errors, warnings);
         return result(errors, warnings);
+    }
+
+    /**
+     * MySQL 输出目标表结构校验：表已存在但缺少上游字段 → 提交前就拦下。
+     *
+     * <p>为什么需要（2026-11-04 实测 job#2985）：上游是 orders.csv 的 8 个字段（order_id…），
+     * 目标表 `flink_demo.output_table` 却是 9/29 Kafka 演示作业留下的旧结构（sale_id…），
+     * `createTablePolicy=CREATE_IF_MISSING` 只跳过建表、不核对列 → 作业提交成功、运行期才炸，
+     * 用户只看到外层 `Recovery is suppressed by NoRestartBackoffTimeStrategy`，
+     * 真因是嵌套的 `Unknown column 'order_id' in 'field list'`。这里与 Kafka topic 校验同一思路：
+     * 能在提交前确定的问题，就不要留到运行期。</p>
+     *
+     * <p>判定口径：只对**声明了字段的上游输入**（fieldsConfig）做比对；库表输入等拿不到声明式
+     * schema 的情况直接放行；连不上库时降级为 warning（不阻断提交）。</p>
+     */
+    private void validateMysqlTargetColumns(JsonNode nodes, JsonNode edges,
+                                            Map<String, ControlRegistry> controls,
+                                            List<String> errors, List<String> warnings) {
+        if (mysqlTableCreator == null) return;
+        Map<String, Set<String>> inputFields = new LinkedHashMap<>();
+        for (JsonNode n : nodes) {
+            String id = n.path("id").asText("");
+            if (id.isEmpty()) continue;
+            ControlRegistry c = controls.get(n.path("type").asText(""));
+            if (c != null && "input".equals(c.getCategory())) {
+                Set<String> f = declaredFields(n.path("params"));
+                if (!f.isEmpty()) inputFields.put(id, f);
+            }
+        }
+        if (inputFields.isEmpty()) return;
+
+        Map<String, Set<String>> parents = new LinkedHashMap<>();
+        for (JsonNode e : edges) {
+            String s = e.path("source").asText(""), t = e.path("target").asText("");
+            if (!s.isEmpty() && !t.isEmpty()) parents.computeIfAbsent(t, k -> new LinkedHashSet<>()).add(s);
+        }
+
+        for (JsonNode n : nodes) {
+            if (!"mysql_output".equals(n.path("type").asText(""))) continue;
+            JsonNode params = n.path("params");
+            if (params.hasNonNull("dataSourceId") && !params.path("dataSourceId").asText("").isBlank()) {
+                continue;   // 引用已保存数据源：连接参数由后端注入，这里拿不到 URL，跳过
+            }
+            String label = n.path("label").asText(n.path("id").asText("MySQL 输出"));
+            Set<String> reachableIn = new LinkedHashSet<>();
+            collectReachableInputs(n.path("id").asText(""), parents, inputFields, reachableIn, new HashSet<>());
+            if (reachableIn.isEmpty()) continue;
+            Set<String> upstreamFields = new LinkedHashSet<>();
+            for (String inputId : reachableIn) upstreamFields.addAll(inputFields.get(inputId));
+            if (upstreamFields.isEmpty()) continue;
+
+            Map<String, Object> paramMap = objectMapper.convertValue(params, Map.class);
+            MysqlTableCreator.TableColumnCheck check =
+                    mysqlTableCreator.checkColumns(paramMap, new ArrayList<>(upstreamFields));
+            if (check == null) continue;
+            String table = params.path("table").asText("?");
+            if (check.error() != null) {
+                warnings.add(label + "：提交前无法连接 MySQL 校验目标表「" + table + "」的结构（" + check.error()
+                        + "）；如果目标表已存在且列不一致，作业会在运行期报 Unknown column");
+                continue;
+            }
+            if (!check.tableExists()) {
+                String policy = params.path("createTablePolicy").asText("FAIL_IF_MISSING");
+                if ("FAIL_IF_MISSING".equalsIgnoreCase(policy)) {
+                    errors.add(label + "：目标表「" + table + "」不存在，且建表策略为 FAIL_IF_MISSING；"
+                            + "请改成 CREATE_IF_MISSING 或先手工建表");
+                }
+                continue;
+            }
+            if (check.hasProblem()) {
+                errors.add(label + "：目标表「" + table + "」已存在，但缺少上游字段: "
+                        + String.join(", ", check.missingColumns())
+                        + "。该表多半是按旧 DAG 建的（列名与当前上游不一致）：请换一个表名、清掉/迁移旧表，"
+                        + "或先 ALTER TABLE 补列再提交。");
+            }
+        }
     }
 
     /**
