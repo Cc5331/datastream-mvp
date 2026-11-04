@@ -50,6 +50,10 @@ flowchart LR
 - **AI 助手（NL2Pipeline Agent）**：输入自然语言需求（如「读取 sales.csv，把 product_category 和 channel 拼接成新列，写出到 MySQL 表 ai_demo」），DeepSeek 依据控件注册表摘要生成可执行 DAG（仅使用合法控件类型与参数），落库为 DRAFT 作业，人工确认后可打开画布微调并提交运行。
 - **告警中心（故障感知）**：每 10s 自动扫描作业失败 / 在线重启超限 / 吞吐归零 / 高背压 / Checkpoint 失败 / 资源超阈值（`app.monitor.health-scan-ms` 可配），15 分钟去重后落库展示，支持邮件 + webhook 通知与恢复闭环，前端带未读角标与已读管理。
 - **智能诊断 Agent**：对失败作业一键诊断——本地规则引擎先命中 8 类高频错误（文件不存在、路径乱码、字段配置缺失、Kafka 不可用等），未命中自动调用 DeepSeek 归因，返回根因 / 关键证据 / 修复建议，部分参数可一键修正。
+- **拖拽文件即建输入控件（2026-11 新增）**：把 CSV / Excel / JSON / XML / Parquet 文件从资源管理器直接拖到画布 → 后端暂存并自动分析（分隔符、首行是否表头、列名与列类型、JSON 模式、Excel 工作表、前 20 行预览）→ 弹确认框（控件类型 / 分隔符 / 表头 / JSON 模式 / 字段名与类型都可改，还带「✨AI 建议」）→ 确认后才在落点生成输入控件并写好参数；取消则丢弃暂存文件。省掉「先上传、再手抄路径、再手填字段」三步。
+- **导入建议 Agent（2026-11 新增）**：确认框里点「✨AI 建议」，本地规则先给出可执行建议——编号列别用 INT（丢前导零）、日期/度量列类型、全空列、字段名规范化（可一键应用改名）、唯一列作去重键、宽表裁剪、缺时间列；配置了模型再补一条总评（只发列名 + 前 3 行）。
+- **Kafka 字段推断（2026-11 新增）**：`kafka_input` 参数面板点「从 topic 推断字段」，抽样 20 条真实消息推出 `fieldsConfig`（嵌套对象按 JSON 文本存 STRING，非 JSON 消息退化为单列 `value` 并提示），直接写回节点，避免手抄键名写错后一路放行到 Flink 才报 `Column not found`。
+- **告警聚合降噪（2026-11 新增）**：同根因、多作业的重复告警在 10 分钟窗口内合并成一条（`occurrences` 计数 + 涉及作业清单），不再重复发邮件 / webhook；告警中心「重复」列显示 `×N`。恢复通知（INFO）永不聚合。
 - **企业工作台与模板中心**：登录后默认进入个人工作台，汇总作业状态、未读告警与最近作业；内置模板支持搜索、预览并安全复制为新画布。
 - **运行治理与管理总览**：作业详情可查看生命周期、日志、调度和告警聚合时间线；ADMIN 可查看用户、作业、告警运营总览，集群健康页展示 Flink 可用性、TaskManager、Slot 与作业状态。
 - **用户管理（增删查改 + 批量操作，仅 ADMIN）**：顶栏「管理 → 用户管理」可视化维护账号——搜索用户名/显示名、按角色筛选、分页列表，支持**新建**（用户名 3–32 位字母/数字/下划线，密码 ≥8 位且同时含字母和数字）、**编辑**显示名与角色、**启用/禁用**、**重置密码**（重置后该账号旧登录态立即失效）、**删除**（二次确认）；勾选多行后可**批量启用 / 批量禁用 / 批量删除**，逐项独立处理并回报「成功 N，失败 M + 原因」。后端 `/api/users` 为类级 ADMIN 限制：禁止删除或禁用**当前登录账号**、禁止删掉或降级**最后一个启用管理员**，所有写操作全部写入审计（USER_CREATE / USER_UPDATE / USER_PASSWORD_RESET / USER_DELETE / USER_BATCH_STATUS / USER_BATCH_DELETE）。
@@ -116,7 +120,8 @@ docker compose ps       :: 查看状态，全部应为 healthy
 
 1. 按「快速启动」依次启动 Flink、后端、前端。
 2. 浏览器打开 http://localhost:3000 。
-3. 从左侧控件库拖拽「CSV 输入」和「CSV 输出」到画布。
+3. **（推荐新路径）** 直接把一个 `sales.csv` 从资源管理器拖到画布空白处 → 确认框里核对字段与类型（可点「✨AI 建议」看建议、点「应用字段改名」规范化列名）→ 点「确认生成控件」，输入节点就位；文件已暂存在 `output/uploads/`。
+   或**（原路径）** 从左侧控件库拖拽「CSV 输入」和「CSV 输出」到画布。
 4. 从 CSV 输入节点右侧端口拖线连接到 CSV 输出节点左侧端口。
 5. 点选节点，在右侧参数面板填写：
    - CSV 输入 `path`：`D:\code\比赛\2026省服务外包\test-resources\data\sales.csv`
@@ -320,6 +325,19 @@ docker compose down -v         :: 停止并删除数据卷
 |------|------|------|
 | GET | /api/preview/file | 预览 CSV / Excel / JSON / XML / TXT 前 N 行（参数 path、limit，默认 10 行） |
 
+### 文件导入（/api/files，ADMIN/OPERATOR）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | /api/files/analyze | 上传并分析文件（multipart `file`）：暂存到 `output/uploads/`，返回建议的控件类型 / 分隔符 / 是否表头 / 列与类型 / 前 20 行预览 / 告警 |
+| DELETE | /api/files/uploaded | 丢弃暂存文件（参数 path，**仅允许 uploads 目录内**，用户取消导入时调用） |
+
+### Kafka 字段推断（/api/kafka，ADMIN/OPERATOR）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | /api/kafka/infer-schema | 抽样 topic 消息推断 `fieldsConfig`（body: `{topic, sampleSize?}`，返回 columns / fieldsConfig / sampled / warnings） |
+
 
 ### AI 智能化（/api/ai）
 
@@ -327,6 +345,7 @@ docker compose down -v         :: 停止并删除数据卷
 |------|------|------|
 | POST | /api/ai/nl2pipeline | 自然语言 → DRAFT 作业（body: `{prompt}`，DeepSeek 生成 + 本地校验，ADMIN/OPERATOR） |
 | POST | /api/ai/diagnose/{jobId} | 诊断作业失败原因（本地规则引擎优先，未命中走 DeepSeek，ADMIN/OPERATOR） |
+| POST | /api/ai/inspect-file | 导入建议（body: `{path, controlType}`）：本地规则 + 模型补充，返回 suggestions / renames / source（ADMIN/OPERATOR） |
 
 ### 告警中心（/api/alerts）
 
@@ -342,7 +361,7 @@ docker compose down -v         :: 停止并删除数据卷
 
 ```
 项目根目录
-├── backend/                 # Spring Boot 后端（15 个 Controller / 34 个 @Service）
+├── backend/                 # Spring Boot 后端（17 个 Controller / 37 个 @Service，2026-11 按注解实测）
 │   ├── src/main/java/com/datastream/mvp/
 │   │   ├── MvpBackendApplication.java
 │   │   ├── config/          # DataInitializer（控件种子）/ WebConfig / 异常处理
@@ -450,15 +469,21 @@ python test-resources/benchmark.py
 
 完整报告见 `test-results/benchmark_report.md`。
 
-当前自动化回归基线（2026-09-20 实测）：后端 `mvn -B test` 共 **170** 个测试用例（39 个测试类）BUILD SUCCESS，前端 `node --test test/*.test.js` 共 **66** 个测试用例（7 个测试文件）66/66 通过 —— 合计 **236** 个用例 0 失败。
+当前自动化回归基线（2026-11-04 实测）：后端 `mvn -B test` 共 **206** 个测试用例（43 个测试类）BUILD SUCCESS，前端 `node --test test/*.test.js` 共 **84** 个测试用例（10 个测试文件）84/84 通过 —— 合计 **290** 个用例 0 失败。
+另有两条真机验证脚本：`node scripts/verify-canvas.cjs`（6 项，画布交互）与 `node scripts/verify-file-import.cjs`（18 项，拖拽导入 + AI 建议），
+以及不依赖浏览器的真接口验证 `node scripts/verify-agent-features.cjs`（13 项，导入建议 / Kafka 推断 / 告警聚合）。
 
 ## 十二、AI 智能化层（LLM Agent）
 
-平台内置三条 AI 能力，全部以「AI 生成/建议 + 人工确认」为原则，不绕过既有审核与上线机制：
+平台内置五条 AI / Agent 能力，全部以「本地规则优先 + AI 补充 + 人工确认」为原则，不绕过既有审核与上线机制：
 
 1. **NL2Pipeline Agent**：前端「AI 助手」页输入自然语言需求 → DeepSeek 依据控件注册表摘要与参数 Schema 生成合法 DAG → 落库为 DRAFT 作业 → 人工「打开画布编辑」微调后提交。
-2. **故障感知告警中心**：`HealthMonitor` 每 10s 扫描（作业失败 / 在线重启超限 / 吞吐归零 / 高背压 / Checkpoint 失败 / 资源超阈值），15 分钟去重后写入 `alert_record`，前端「告警中心」展示；命中时同步触发 webhook 与邮件通知，恢复正常后发送 ALERT_RESOLVED 闭环。
-3. **智能诊断 Agent**：作业列表点「🤖 诊断」→ 本地规则引擎先覆盖 8 类高频错误（秒级返回），未命中时调用 DeepSeek 结合作业配置与最近日志归因，返回 `rootCause / evidence / suggestions / paramFixes`，支持一键修正后重跑。
+2. **故障感知告警中心**：`HealthMonitor` 每 10s 扫描（作业失败 / 在线重启超限 / 吞吐归零 / 高背压 / Checkpoint 失败 / 资源超阈值），窗口内去重后写入 `alert_record`，前端「告警中心」展示；命中时同步触发 webhook 与邮件通知，恢复正常后发送 ALERT_RESOLVED 闭环。
+3. **智能诊断 Agent**：作业列表点「🤖 诊断」→ 本地规则引擎先覆盖 8 类高频错误（秒级返回），未命中时调用 DeepSeek 结合作业配置与最近日志归因，返回 `rootCause / evidence / suggestions / paramFixes`，支持一键修正后重跑。告警触发时还会**自动**跑一次（同根因窗口内最多 3 次，避免打爆模型配额）。
+4. **导入建议 Agent（2026-11 新增）**：拖拽文件导入的确认框里点「✨AI 建议」→ 本地规则给出编号列类型 / 全空列 / 字段名规范化（可一键应用）/ 主键候选 / 宽表 / 缺时间列等建议，配置了模型再补一条总评；模型不可用时静默降级为纯本地建议（返回里 `source=local-rules`）。
+5. **Kafka 字段推断（2026-11 新增）**：参数面板「从 topic 推断字段」→ 抽样真实消息推出 `fieldsConfig` 并写回节点，属于确定性推断（不依赖模型，可离线/单测）。
+
+> **告警聚合降噪（2026-11 新增）**：非 INFO 告警先算签名（`事件|归一化根因`，抹掉作业名、#id、路径、Flink jid、数字），10 分钟窗口内同签名只合并计数、不再重复发邮件/推 webhook；恢复通知逐条闭环、永不聚合。配置项 `app.alert.aggregation-window-ms`、`app.alert.auto-diagnosis-per-window`。
 
 ### 配置（.env，密钥不入库、不提交仓库）
 
@@ -480,6 +505,7 @@ python test-resources/benchmark.py
 
 ## 十一、相关文档
 
+- `更新说明-2026-11-04.md`：本轮更新说明（拖拽文件导入 + 三个 Agent 能力，含用法、配置项、验证结果与已知限制）
 - `DEVELOPMENT.md`：开发维护指南（逻辑框架 / 扩展规范 / 红线 / 回归清单）
 - `AGENTS.md`：AI 助手工作区指令（动代码前先读 DEVELOPMENT.md）
 - `test-resources/benchmark.py`：性能基准测试脚本
