@@ -16,7 +16,8 @@ class KafkaMonitorControllerTest {
         List<KafkaMonitorService.TopicInfo> expected = List.of(
                 new KafkaMonitorService.TopicInfo("orders", 2, 3, 15, 12));
         when(service.listTopics()).thenReturn(expected);
-        KafkaMonitorController controller = new KafkaMonitorController(service, new ObjectMapper());
+        KafkaMonitorController controller = new KafkaMonitorController(service,
+                mock(com.datastream.mvp.service.KafkaSchemaInferenceService.class), new ObjectMapper());
 
         assertEquals(expected, controller.topics());
         verify(service).listTopics();

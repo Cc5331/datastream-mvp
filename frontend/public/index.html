@@ -347,10 +347,110 @@
                                 <el-button v-if="canEdit" size="small" type="success" plain @click="previewNode" style="flex:1;" :loading="previewLoading"><el-icon><zoom-in /></el-icon> 预览数据</el-button>
                                 <el-button size="small" type="primary" @click="applyParams" style="flex:1;"><el-icon><circle-check /></el-icon> 应用参数</el-button>
                             </div>
+                            <!-- Kafka 输入专用：抽样 topic 自动推断字段定义（手抄键名极易写错，见红线 35） -->
+                            <el-button v-if="canEdit && selectedNode?.data?.type === 'kafka_input'" size="small" type="warning" plain
+                                       style="width:100%;margin-top:8px;" :loading="kafkaInferLoading" @click="inferKafkaFields">
+                                <el-icon><magic-stick /></el-icon> 从 topic 推断字段
+                            </el-button>
                         </div>
                     </div>
                 </div>
 
+
+                <!-- 拖拽文件导入确认弹窗：上传+分析后由用户确认，确认后才会在画布生成输入控件 -->
+                <el-dialog v-model="importDialogVisible" title="📥 导入文件生成输入控件" width="860px"
+                           top="6vh" class="file-import-dialog" :close-on-click-modal="false"
+                           @closed="onImportDialogClosed">
+                    <div class="file-import-summary">
+                        <div class="file-import-file">
+                            <el-icon><files /></el-icon>
+                            <strong>{{ importForm.fileName }}</strong>
+                            <span>{{ fmtFileSize(importForm.sizeBytes) }}</span>
+                            <el-tag size="small" type="info">{{ importForm.extension ? '.' + importForm.extension : '' }}</el-tag>
+                        </div>
+                        <div class="file-import-path">已暂存到服务器：{{ importForm.path }}</div>
+                    </div>
+                    <el-alert v-for="(warning, idx) in importForm.warnings" :key="'warn-' + idx"
+                              :title="warning" type="warning" :closable="false" show-icon
+                              class="file-import-warning"></el-alert>
+                    <el-alert v-if="importForm.truncated" type="info" :closable="false" show-icon
+                              title="文件较大，只分析了前若干行，字段结构按样本推断"></el-alert>
+
+                    <el-form label-position="top" size="small" class="file-import-form">
+                        <div class="file-import-grid">
+                            <el-form-item label="生成控件">
+                                <el-select v-model="importForm.controlType" style="width:100%">
+                                    <el-option v-for="opt in IMPORT_CONTROL_OPTIONS" :key="opt.type"
+                                               :label="opt.label" :value="opt.type"></el-option>
+                                </el-select>
+                            </el-form-item>
+                            <el-form-item label="分隔符">
+                                <el-select v-model="importForm.delimiter" style="width:100%">
+                                    <el-option v-for="opt in IMPORT_DELIMITER_OPTIONS" :key="opt.label"
+                                               :label="opt.label" :value="opt.value"></el-option>
+                                </el-select>
+                            </el-form-item>
+                            <el-form-item v-if="importSupportsHeader" label="首行是表头">
+                                <el-switch v-model="importForm.hasHeader"></el-switch>
+                            </el-form-item>
+                            <el-form-item v-if="importForm.controlType === 'excel_input' && importForm.sheetNames.length" label="工作表">
+                                <el-select v-model="importForm.sheetName" clearable placeholder="默认第一个工作表" style="width:100%">
+                                    <el-option v-for="sheet in importForm.sheetNames" :key="sheet" :label="sheet" :value="sheet"></el-option>
+                                </el-select>
+                            </el-form-item>
+                            <el-form-item v-if="importForm.controlType === 'json_input'" label="JSON 模式">
+                                <el-select v-model="importForm.mode" style="width:100%">
+                                    <el-option label="自动识别（auto）" value="auto"></el-option>
+                                    <el-option label="逐行 JSON Lines（lines）" value="lines"></el-option>
+                                    <el-option label="数组（array）" value="array"></el-option>
+                                </el-select>
+                            </el-form-item>
+                        </div>
+
+                        <el-form-item label="字段（可改名、改类型；CSV 输入与 JSON lines 会写成 fieldsConfig）">
+                            <div class="file-import-columns">
+                                <div v-for="(col, idx) in importForm.columns" :key="'col-' + idx" class="file-import-column">
+                                    <span class="file-import-column-index">{{ idx + 1 }}</span>
+                                    <el-input v-model="col.name" size="small" placeholder="字段名"></el-input>
+                                    <el-select v-model="col.type" size="small" style="width:130px">
+                                        <el-option v-for="t in IMPORT_TYPE_OPTIONS" :key="t" :label="t" :value="t"></el-option>
+                                    </el-select>
+                                </div>
+                                <el-empty v-if="!importForm.columns.length" description="未识别到字段，将按文件表头自动推导"></el-empty>
+                            </div>
+                        </el-form-item>
+
+                        <el-form-item label="数据预览（前 10 行）">
+                            <el-table :data="importPreviewRows" size="small" border max-height="240" class="file-import-preview">
+                                <el-table-column v-for="col in importPreviewColumnDefs" :key="'pv-' + col.index"
+                                                 :prop="String(col.index)" :label="col.label"
+                                                 min-width="120" show-overflow-tooltip></el-table-column>
+                            </el-table>
+                        </el-form-item>
+                    </el-form>
+                    <div v-if="importAdvice" class="file-import-advice">
+                        <div class="file-import-advice-head">
+                            <span>🤖 导入建议 <el-tag size="small" type="info">{{ importAdvice.source }}</el-tag></span>
+                            <el-button v-if="Object.keys(importAdvice.renames || {}).length" size="small" plain type="primary"
+                                       @click="applyImportRenames"><el-icon><edit /></el-icon> 应用字段改名</el-button>
+                        </div>
+                        <p v-if="importAdvice.summary" class="file-import-advice-summary">{{ importAdvice.summary }}</p>
+                        <ul class="file-import-advice-list">
+                            <li v-for="(item, idx) in (importAdvice.suggestions || [])" :key="'adv-' + idx">
+                                <strong>{{ item.title }}</strong>
+                                <span v-if="item.detail">：{{ item.detail }}</span>
+                            </li>
+                        </ul>
+                        <p v-if="!(importAdvice.suggestions || []).length" class="file-import-advice-empty">没有发现明显问题</p>
+                    </div>
+                    <template #footer>
+                        <el-button type="warning" plain :loading="importAdviceLoading" @click="loadImportAdvice">
+                            <el-icon><magic-stick /></el-icon> AI 建议
+                        </el-button>
+                        <el-button @click="importDialogVisible = false"><el-icon><close /></el-icon> 取消</el-button>
+                        <el-button type="primary" @click="confirmImportNode"><el-icon><check /></el-icon> 确认生成控件</el-button>
+                    </template>
+                </el-dialog>
 
                 <!-- 数据预览弹窗 -->
                 <el-dialog v-model="previewVisible" title="📊 数据预览" width="78%" :close-on-click-modal="true" top="6vh">
@@ -858,6 +958,13 @@
                             </template>
                         </el-table-column>
                         <el-table-column prop="event" label="事件" width="180"></el-table-column>
+                        <el-table-column label="重复" width="90">
+                            <template #default="scope">
+                                <el-tag v-if="(scope.row.occurrences || 1) > 1" type="warning" size="small"
+                                        :title="'同类告警已合并 ' + scope.row.occurrences + ' 次（同根因降噪）'">×{{ scope.row.occurrences }}</el-tag>
+                                <span v-else style="color:#c0c4cc;">-</span>
+                            </template>
+                        </el-table-column>
                         <el-table-column label="作业" width="170">
                             <template #default="scope"><span>{{ scope.row.jobName || '-' }} <span v-if="scope.row.jobId" style="color:#999;">(#{{ scope.row.jobId }})</span></span></template>
                         </el-table-column>

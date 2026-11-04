@@ -21,6 +21,7 @@
 
 ### 1.2 当前已实现功能（2026-08 实测可用）
 - **画布**：左侧控件库拖拽控件到画布、端口连线、点选配置参数、Delete 删除、双击删除、保存 / 提交 / 导出 / 导入 JSON、新建画布、清空、Ctrl+S 保存。
+- **拖拽文件建输入控件（2026-11-04）**：把 CSV / Excel / JSON / XML / Parquet 文件从资源管理器拖到画布 → 后端暂存并自动分析（分隔符、首行是否表头、列名与列类型、模式、工作表、前 20 行预览）→ 弹确认框（可改控件类型/分隔符/表头/JSON 模式/字段名与类型）→ 确认后才在落点生成输入控件并写好 params；取消则丢弃暂存文件。
 - **控件（31 个内置）**：
   - 输入：Datagen、CSV、Excel、JSON、XML、Parquet、HDFS、Kafka、MySQL、PostgreSQL、Oracle。
   - 输出：CSV、Excel、JSON、XML、Parquet、HDFS、Kafka、MySQL、PostgreSQL、Oracle。
@@ -36,6 +37,7 @@
 - **作业管理**：状态机 DRAFT → SUBMITTED → RUNNING → COMPLETED / FAILED / CANCELLED（另有 WAITING/BLOCKED 用于依赖编排）；Flink 状态每 **5s** 轮询回写；日志落库可查；一键复制作业（名称追加「（副本）」）；按 cron 定时自动提交（JobScheduler 每 30s 扫描，运行中不重复提交）；上线/下线生命周期——上线后流式作业后台持续运行、异常 10 分钟窗口内自动重启最多 3 次，批量作业按 cron 周期重跑，Flink 不可用禁止上线。
 - **参数面板**：按控件 paramSchema 动态渲染（string / number / boolean / enum / array）。
 - **企业能力（2026-08/09 迭代）**：JWT + RBAC（ADMIN/OPERATOR/VIEWER，含 owner 隔离）+ 操作审计 + 用户管理 CRUD；作业版本历史与回滚；作业依赖编排（环检测、上游完成自动触发）与工作流图；数据血缘；实时监控面板（吞吐趋势 / 背压 / checkpoint / 历史卡片兜底）；Kafka 可视化（SSE 实时消息流）；故障感知告警中心（10s 扫描 + DB 去重 + 恢复闭环 + webhook/邮件）；AI 层（NL2Pipeline 自然语言建作业、智能诊断规则引擎 + LLM 归因、草稿人工确认）；数据预览。
+- **AI / Agent 能力（2026-11-04 扩展）**：① **智能诊断**（原有：本地规则 8 类 + LLM 归因，告警触发自动跑）；② **文件导入建议**（`ImportAdvisorService`：本地规则判前导零编号/日期度量类型/全空列/字段名规范化/主键候选/宽表，配置了模型再补一条总评，`POST /api/ai/inspect-file`，只发列名+前 3 行）；③ **Kafka 字段推断**（`KafkaSchemaInferenceService`：抽样 20 条消息推 `fieldsConfig`，`POST /api/kafka/infer-schema`，参数面板一键回填）；④ **告警聚合降噪**（`AlertAggregator`：同根因多作业告警合并成一条，邮件/webhook 不重复，模型自动诊断按窗口限流）。
 
 ### 1.3 未实现 / TODO（后续完善方向）
 - 控件插件热加载：PluginLoaderService 已能扫描 `backend/plugins` 注册外部插件，但 MVP 仍以内置注册表为准，尚未做插件的端到端验证与 UI 管理。
@@ -240,6 +242,14 @@
   2. graph.clearCells() 后**必须等待双 rAF（带 100ms 兜底）再 addNode**——X6 3.1.7 异步渲染在「同批 clear+add 相同 id」时偶发残留旧视图，导致同一节点渲染两次（视觉重叠），这是已修复的历史 bug，防护不能删；
   3. 矩形碰撞检测自动排布：无坐标或冲突节点按行错开（宽 160 + 间距 20，超 1200px 换行），有真实坐标的节点保持原位置。
 - 拖拽添加：onDragStart 写入 dataTransfer，setupDropHandler 监听 drop 按落点 clientToLocal 放置。
+- **拖拽文件导入（2026-11-04）**：drop 处理函数**先判 `e.dataTransfer.files`**（有文件就走上导入链路，不再去 JSON.parse），
+  链路为 `handleDroppedFiles` → `POST /api/files/analyze`（暂存到 `output/uploads/` 并分析）→ `openImportDialog`
+  （确认框：控件类型 / 分隔符 / 首行表头 / JSON 模式 / 工作表 / 字段名与类型 / 前 10 行预览）→ `confirmImportNode`
+  （`buildImportParams` 按控件类型映射参数 → `addNodeOnCanvas`）。**确认前不落节点**；取消/关闭对话框调
+  `DELETE /api/files/uploaded` 丢弃暂存文件。
+- 节点创建统一走 `addNodeOnCanvas(data, point, paramsOverride)`（控件库拖拽与文件导入共用一份 X6 配置，
+  `graph.addNode` 只存在于本函数与 `loadDagToCanvas`）；导入参数通过 `node.setData({params: {...}})` 合并，
+  不绕过 X6 的 `change:data` 与撤销栈。
 - 参数面板：node:click 填充 nodeParams / nodeParamSchema；applyParams 写回节点 data.params（保存前也会自动调用，改参数不丢）。
 - 作业切换：作业列表「编辑」/ 双击行 → openJob → loadDagToCanvas。
 - 提交前校验 validateDagForSubmit：有节点必须连线、输出节点必须有路径。
@@ -257,6 +267,11 @@
   - 标识未变或取不到 → 视为 Flink 正常结束后移出 overview → 置 COMPLETED（保持既有输出合并）。
   首次观测不算换代，避免误报；与 HeartbeatMonitor 的 JOB_HEARTBEAT_LOST 语义现已一致。
 - **重复提交防护**：`JobService.submit` 持锁并校验状态，SUBMITTED/RUNNING 再提交返回 409；`cancel` 共用同一把锁。
+- **告警聚合降噪（2026-11-04）**：`AlertService.sendAlert` 的非 INFO 告警先经 `AlertAggregator` 算签名
+  （`事件|归一化根因`：抹掉作业名/#id/路径/Flink jid/数字/引号内容），窗口（`app.alert.aggregation-window-ms`，默认 10 分钟）内
+  同签名的第 2..N 条**不新建记录、不发邮件、不推 webhook**，只把 `occurrences / aggregatedJobs / lastSeenAt` 累加到首条记录并把
+  `readFlag` 重新置 false；`app.alert.auto-diagnosis-per-window`（默认 3）限制同签名自动诊断次数，避免一波故障打几十个 LLM 请求。
+  **INFO（恢复通知）永不聚合**，必须逐条闭环。告警中心「重复」列显示 `×N`。
 
 ---
 
@@ -272,10 +287,13 @@
 | service/ExcelPreprocessor.java / JsonPreprocessor / XmlPreprocessor / ParquetPreprocessor | 各种格式 → 临时 CSV | 临时文件放 output/*_temp_csv，注意编码 BOM |
 | service/ExcelOutputConverter.java / XmlOutputConverter / ParquetOutputConverter | CSV → 目标格式后处理 | 输出路径来自节点 params.path |
 | service/MonitorService.java + FlinkMetricsService | Flink 指标采集、趋势缓冲、历史卡片兜底 | 2s 采集走 HTTP，注意阻塞单线程调度器 |
-| service/HealthMonitor.java / AlertService.java / AlertRetentionService.java / HeartbeatMonitor.java | 告警判定、去重、恢复闭环、通知、保留策略 | 新增检查项要同步 shouldAlert/markAlerted |
-| ai/LlmClient.java / ai/AgentService.java + ai/PromptCatalog | 多服务商 LLM 客户端、NL2Pipeline、智能诊断 | API Key 加密密钥来自环境变量或 backend/data/.ai_config_key，**不得硬编码** |
+| service/HealthMonitor.java / AlertService.java / AlertRetentionService.java / HeartbeatMonitor.java | 告警判定、去重、恢复闭环、通知、保留策略 | 新增检查项要同步 shouldAlert/markAlerted；**非 INFO 告警会经 AlertAggregator 聚合**（见 5.7），新增告警别忘了 INFO 恢复通知不参与聚合 |
+| service/AlertAggregator.java | 告警签名归一化 + 窗口内合并 + 自动诊断配额（降噪） | 改签名规则要同时跑 `AlertAggregatorTest`；作业名/#id 由 AlertService 作为噪声传入，其他易变部分在签名器里抹掉 |
+| ai/LlmClient.java / ai/AgentService.java + ai/PromptCatalog / ai/ImportAdvisorService.java | 多服务商 LLM 客户端、NL2Pipeline、智能诊断、文件导入建议 | API Key 加密密钥来自环境变量或 backend/data/.ai_config_key，**不得硬编码**；发给模型的数据只含结构与少量样本行 |
 | service/JobScheduler.java / DependencyService.java | cron 调度、依赖编排与自动触发 | 30s 扫描；运行中作业不重复提交 |
 | service/AuditService（audit 包）/ UserService.java / LineageService.java / PreviewService.java / KafkaMonitorService.java | 审计、用户管理、血缘、预览、Kafka 可视化 | 新端点记得 @PreAuthorize + owner 校验 |
+| service/FileImportService.java / controller/FileImportController.java | 画布拖拽文件导入：暂存到 output/uploads + 自动分析（分隔符/首行表头/列类型/JSON 模式/工作表/预览行），以及丢弃暂存文件 | 权限与预览同档（ADMIN/OPERATOR）；丢弃只允许删 uploads 目录内文件；分析失败时自动删掉刚落盘的文件；暂存目录不自动清理（见红线 37） |
+| service/KafkaSchemaInferenceService.java + util/DataTypeInference.java | 抽样 topic 消息推断 `kafka_input.fieldsConfig`（类型口径与文件导入共用 DataTypeInference） | 端点 `POST /api/kafka/infer-schema`（ADMIN/OPERATOR）；非 JSON 消息退化为单列 `value` 并给告警；`buildResult` 是纯函数，可直接单测 |
 | config/DataInitializer.java | 控件种子（**31 个**，启动时清空重建） | 新增控件第一站，必须与前端 getBuiltinControls 同步 |
 | config/SecurityConfig.java / WebConfig.java | 鉴权规则、CORS 白名单 | H2 console 默认关闭且仅 ADMIN；CORS 默认只放行本机 3000 |
 | controller/JobController.java | 作业 REST 路由（11 个控制器之一） | 写操作需 ADMIN/OPERATOR + owner |
@@ -317,6 +335,30 @@
 ### 7.4 改 UI 流程（如作业下拉切换）
 - 所有「重新加载画布」都必须走 loadDagToCanvas（自带防抖 + 双 rAF + 碰撞检测），不要自己写 clearCells + addNode，否则会踩 X6 重叠 bug。
 - 新增画布级状态时，注意 currentJobId / currentJobName / selectedNode / nodeParams 的复位逻辑（参考 newCanvas/clearCanvas）。
+- 新增「往画布里加节点」的入口时，一律复用 `addNodeOnCanvas(data, point, paramsOverride)`（控件库拖拽与文件导入共用），不要再复制一份 `graph.addNode({...})` 配置。
+
+### 7.5 拖拽文件导入支持新格式（2026-11-04 新增）
+一条新格式要动四处，缺一处就「拖了没反应」或「生成控件报缺参数」：
+1. 后端 `FileImportService`：`controlTypeForExtension` 加扩展名 → 控件类型映射，并实现对应的 `analyzeXxx`（产出 `columns[{name,type}]` / `rows` / `delimiter` / `hasHeader` / `mode` / `sheetNames` 等建议值）。
+2. 前端 `IMPORT_SUPPORTED_EXTS`（决定拖入是否被接收）+ `IMPORT_CONTROL_OPTIONS`（确认框里可选的控件类型）。
+3. 前端 `buildImportParams`：按该控件在 `DagTranslationService` 里**实际读取的参数名**做映射（名字对不上＝翻译层拿不到值）。
+4. 该控件必须已在「控件注册表双份」里存在（见 5.3），否则确认时找不到控件 metadata。
+加完跑 `node scripts/verify-file-import.cjs`（真浏览器）与 `frontend/test/file-import.test.js`。
+
+### 7.6 新增一个 Agent / AI 能力（2026-11-04 新增）
+沿用「本地规则优先 + 模型补充 + 人工确认」这一条范式（智能诊断、导入建议都是它）：
+1. **规则先行**：任何 AI 能力都要有一份**离线可跑**的本地规则（不依赖 API Key、可单测），模型只是补充；
+   参考 `ImportAdvisorService.localSuggestions` / `AgentService.localRuleEngine`。
+2. **脱敏口径统一**：只发字段结构 + 前几行样本（导入建议 `LLM_SAMPLE_ROWS = 3`），凭据一律掩码，
+   整表/整日志不外发。
+3. **降级不阻断**：`llmClient.isConfigured()` 为 false 或调用异常时，静默降级为纯本地结果并在返回里标
+   `source=local-rules`（前端会把 source 显示出来，别在异常时抛 502 把功能做死）。
+4. **不自动改用户状态**：建议只是建议——导入建议不改表单（改名要用户点「应用字段改名」），
+   NL2Pipeline 一律产出 DRAFT 等人工确认，写操作只能走 `JobService.submit`。
+5. **限流**：可能被故障风暴批量触发的 AI 调用（如告警自动诊断）必须按窗口配额，见
+   `AlertAggregator.allowAutoDiagnosis`（`app.alert.auto-diagnosis-per-window`）。
+6. 端点放 `AiController`（`/api/ai/**`，ADMIN/OPERATOR），需要读文件的一律复用
+   `PreviewService`（自带 allowed-roots 白名单），别另写路径校验。
 
 ---
 
@@ -366,6 +408,13 @@
 34. **in-DOM 模板里不要用会与原生标签冲突的图标名**：本项目 `index.html` 是浏览器**先解析**的 in-DOM 模板，`<el-icon><select /></el-icon>` 会被当成**原生 `<select>`**，把后续模板内容吞进去、整块界面结构被破坏（本轮真实踩坑：批量启用按钮写了 `<select />`，导致新建/编辑对话框全部点不开，12 项端到端断言里 8 项挂掉）。请用 `<circle-check />`、`<close />`、`<delete />`、`<key />` 这类与原生标签不冲突的名字；按钮内必须带图标（`frontend/test/app.test.js` 有强制用例）。
 35. **节点里的字段名必须能在上游输入声明的 schema 里找到**：翻译层完全信任 params 里的字段名（如 `redis_lookup.keyField` 直接渲染成 `redis_lookup(..., CAST(\`id\` AS STRING))`），而输入节点声明什么字段、Flink 表就只有什么列。字段写错时会被放行到 Flink，在 `CREATE TEMPORARY VIEW` 阶段被 Calcite 拦下（`Column 'id' not found in any table`），且 Flink 1.18.1 的 SQL Gateway REST **在校验期失败时只回 `{"status":"ERROR"}`、FetchResults 直接 HTTP 500 空 body、operation status 也不含 errors**——真实报文只落在 SQL Gateway 自己的日志里，用户最终只看到无信息量的 `Failed to fetchResults`。`DagPreflightService.validateFieldReferences` 已在提交前拦下这类问题（`redis_lookup.keyField` / `xml_json|json_parse.sourceField` / `field_filter.fields` / `field_rename.mappings` 的输入侧字段）。**注意只校验输入侧字段**：`targetField` / `newFieldName` 是转换节点新产出的字段，误当引用会制造假告警。排障时若要拿 Gateway 真实报文，去 Gateway 进程的输出日志里找同一时刻的 `Failed to execute the operation` 段。
 36. **Flink 集群必须经 `start-all.bat`（或导出 `FLINK_CONF_DIR`）启动，否则读不到 `conf/flink-conf.yaml`**：裸 `java -cp "lib\*" … --configDir …` 启动时，Flink 仍靠**环境变量 `FLINK_CONF_DIR`** 定位配置目录，`--configDir` 只用于脚本内部；缺它时集群以默认配置运行（`rest.port` 会被 `-Drest.port` 顶上，所以表面正常），后果是 —— **指标系统不注册，REST 指标端点全部返回空数组**（`/jobs/{id}/vertices/{vid}/metrics` 空、`/metrics` 404），直接表现为**监控面板「吞吐趋势」全程 0**、`THROUGHPUT_ZERO` 告警误报，而平台自身无任何报错。判据：后端启动日志有一行 `Flink 指标自检: TaskManager N 个 / Slot M 个，指标链路就绪`（`MonitorService.checkFlinkMetricsAvailability`，判定口径是「集群可达 + TaskManager 数>0」而**不是**探指标端点本身——Flink 对「指标不存在」与「集群不可用」都返回空数组，无作业时会误报）；若该行为 WARN（无 TaskManager / 集群不可达），先修启动方式，别去查采集代码。重启正解：`start-all.bat`（幂等、按端口判断，会先确保 `FLINK_CONF_DIR` 等变量已导出）。
+37. **画布拖拽文件导入的四条硬约束（2026-11-04）**：
+   - **drop 里必须先判 `e.dataTransfer.files`**：从资源管理器拖入文件时 `text/plain` 是空的，先走 `JSON.parse(getData('text/plain'))` 只会抛错、什么也不发生。顺序写反 = 功能静默失效。
+   - **确认前不落节点**：分析结果只作为确认框的**建议值**（控件类型/分隔符/表头/字段类型都可改），用户点「确认生成控件」才 `addNodeOnCanvas`；取消或关闭对话框要走 `DELETE /api/files/uploaded` 丢弃暂存文件。**不要**先把节点画上去再问「是否保留」——那会让「拖错文件」直接污染画布和撤销栈。
+   - **暂存目录必须在 `output/` 之下**（默认 `../output/uploads`）：它同时得在 `app.preview.allowed-roots` 内，节点落成后才能复用 `/api/preview/file` 与作业输出预览；丢弃接口只允许删 uploads 根目录内的文件（否则等于开放任意文件删除）。上传目录**不自动清理**，历史暂存文件可手工删。
+   - **验证脚本禁止用「最大 job id」定位自己刚建的作业**：H2 自增号会因历史删除而远大于现存最大 id（实测库内 max id=2799 时新建作业拿到 2822），按最大 id 取会读到**别人的作业**，后续「清理」就会误删真实数据（本轮真实踩坑：`verify-canvas.cjs` 的旧写法误删了 FC-03 演示作业，已重建并改为「保存前 id 快照差集」+「按上传文件唯一名反查」）。`verify-file-import.cjs` 与 `verify-canvas.cjs` 都已按此修正。
+38. **Agent / AI 能力的六条护栏（2026-11-04）**：新增任何 AI 能力都要守住——① **本地规则先行**（离线可用、可单测，模型只是补充）；② 只发**结构与少量样本行**（导入建议 3 行），凭据掩码；③ 模型未配置或调用失败**静默降级**并标 `source=local-rules`，不要抛 502 把功能做死；④ **不自动改用户状态**（建议要用户点应用、AI 作业一律 DRAFT 等人工确认、写操作只走 `JobService.submit`）；⑤ 可能被风暴批量触发的调用**必须限流**（`AlertAggregator.allowAutoDiagnosis`）；⑥ 读文件的 AI 端点复用 `PreviewService` 的 allowed-roots，别另写路径校验。范式细节见 §7.6。
+39. **告警聚合的三条不变量（2026-11-04）**：① **INFO（恢复通知）永不聚合**——它必须逐条闭环，否则「已恢复」会被吞掉；② 聚合只影响**提醒次数**（邮件/webhook），`occurrences / aggregatedJobs / lastSeenAt` 必须落库，用户看到的「合并了 N 次、涉及哪些作业」是事实来源；③ 合并目标是**首条记录的 id**，若该记录已被用户/保留策略删除，必须回退成新建记录（`mergeIntoExisting` 返回 false → 走正常路径），不能默默丢一条告警。改聚合逻辑必跑 `AlertAggregatorTest` + `AlertServiceAggregationTest`，并跑 `node scripts/verify-agent-features.cjs` 真接口验证。
 
 ---
 
@@ -391,17 +440,25 @@
 - [ ] 参数面板：改参数 → 应用 → 保存 → 重开，值保持。
 - [ ] 导出 JSON → 导入 JSON → 画布一致。
 
-### 9.4 自动化测试（改完必跑，2026-09-18 实测全绿）
-- [ ] `mvn -B -f pom.xml test` → 5 模块 BUILD SUCCESS，后端 **170** 个用例 0 失败。
-- [ ] `cd frontend; node --test test/*.test.js` → **66** 个用例 0 失败（控件注册表一致性、控件管理页、按钮图标、数据源 CRUD、账户资料与在线状态、参数类型转换、模板与 AI 示例、端点权限入口隐藏、资源生命周期、拖拽落点幂等、参数持久化、用户管理界面与批量操作接线）。
+### 9.4 自动化测试（改完必跑，2026-11-04 实测全绿）
+- [ ] `mvn -B -f pom.xml test` → BUILD SUCCESS，后端 **206** 个用例 0 失败（43 个测试类）。
+- [ ] `cd frontend; node --test test/*.test.js` → **84** 个用例 0 失败（控件注册表一致性、控件管理页、按钮图标、数据源 CRUD、账户资料与在线状态、参数类型转换、模板与 AI 示例、端点权限入口隐藏、资源生命周期、拖拽落点幂等、参数持久化、拖拽文件导入、AI 能力接线、用户管理界面与批量操作接线）。
 - [ ] 改了用户/权限相关代码时跑一次真浏览器验证：`node scripts/verify-users-crud.cjs`
       → **12 项断言全 PASS**（管理菜单入口、列表、新建、编辑、重置密码、删除、自删保护、审计四类记录、勾选计数、批量禁用、批量启用、批量删除 + 批量审计；脚本会自行删除测试账号）。
 - [ ] 改了任意页面布局时可截图核对：`node scripts/shot-page.cjs "控件管理" out.png`（通用：菜单项名 + 输出路径，
       会打印视图类名 / 标题 / 统计行 / 表格行数 / 只读提示，便于无人值守确认排版）。
 - [ ] 改了画布交互（拖拽/连线/参数面板/加载 DAG）时跑一次真浏览器验证：`node scripts/verify-canvas.cjs`
       → 6 项断言全 PASS：一次拖拽=一个控件、原生拖拽可连线、拖入的输入节点自带默认 path、输出节点带默认 path、
-      **提交前检查无错误**、面板改参数直接保存即落库（脚本自行删除验证用作业，不污染演示数据）。
-      需要 3000/18080 已启动 + Edge；`ws` 模块不可解析时用 `DSH_WS_NODE_MODULES` 指定。
+      **提交前检查无错误**、面板改参数直接保存即落库（脚本按「保存前 id 快照差集」定位自己新建的作业再删除，
+      **不要改回「取最大 id」**——见红线 37）。
+- [ ] 改了拖拽文件导入链路时跑：`node scripts/verify-file-import.cjs` → **18 项断言全 PASS**：拖入文件弹确认框、
+      确认前不落节点、识别列名/预览行/暂存路径、**「AI 建议」面板出建议 + 「应用字段改名」落到字段名**、取消即丢弃、
+      确认后生成控件并关闭对话框、补齐下游可连线、保存后落库 `path`（uploads 下的服务器路径）+ `hasHeader` + `fieldsConfig`、
+      提交前检查无错误（按上传文件唯一名反查作业，不污染历史数据）。同样需要 3000/18080 + Edge；`ws` 不可解析时用 `DSH_WS_NODE_MODULES` 指定。
+- [ ] 改了 AI / 告警相关代码时跑：`node scripts/verify-agent-features.cjs` → **13 项断言全 PASS**（真接口、不依赖浏览器）：
+      上传+分析可用、导入建议返回建议且命中 leading-zero/empty-column/name-style、给出可应用的 renames、中文不乱码、
+      Kafka 不可用时给 400 可读错误而不是 500、空 topic 被拒、**同根因两次失败只留一条告警记录（occurrences=2、文本写明合并次数与涉及作业、带聚合签名）**。
+      需要 18080 已启动；Kafka broker 可用时会额外验证真实字段推断。
 - [ ] 改了安全/并发相关代码时的针对性回归：`FlinkJobStatusCheckerTest`（集群换代判定）、`JobLocksTest`（分片锁互斥）、`JobAccessTest`（归属规则）、`JwtUtilTest`（令牌版本）、`JobServiceTest`（重复提交被拒）、`PluginLoaderServiceTest`（两种 SPI 接口）、`DataInitializerControlsTest`（内置 upsert 不清插件行）。
 - [ ] 改了安全配置时的手工验证：未登录访问 `/api/jobs` 返回 401；`/h2-console` 未登录不可访问（默认还是关闭状态）。
 
@@ -603,3 +660,7 @@
 | 2026-09-29 | **修正上一条的第③处改动（xml_json 字段引用）并端到端跑通 2726**：上一轮把 `xml_json.sourceField` 从 `payload` 改成 `value` **是错的**——`value` 只有在 Kafka 表声明为 `key`/`value` 时才存在；一旦按消息字段声明成 8 个业务列，Flink JSON 源产出的就是那 8 列，`value` 列不复存在（这正是新加的字段引用校验当场报出来的：`节点「XML<->JSON」引用的字段 value 在上游输入声明的字段中不存在`）。**更根本的问题**：该控件模板是 `SELECT *, ${direction}(\`${sourceField}\`) AS \`${targetField}\` FROM ${id}`（`DataInitializer:231`），`xml2json` 要求 sourceField **装的是 XML 文本**；而 2726 里该节点的上游可用字段只有 8 个 JSON 标量字符串 + `extra_info`（Redis 产出），**没有任何一个装 XML** —— 该节点在此管线里本就是断链的，填任何现有字段都产不出有意义的 `result`。**处理**：删除 `xml_json` 节点并把 `redis_lookup → xml_json → mysql_output` 改接为 `redis_lookup → mysql_output`（理由：Kafka 源用 JSON 格式，消息本身即 JSON，没有 XML 可解析；保留一个永远产出 NULL 的节点只会污染输出表结构）。**做法**：新增 `logs/diag/DagSet.java`（从 UTF-8 文件整段写入 DAG_JSON，避免再套一层转义；上一轮的 `DagPatch.java` 仍在，用于精确字面量替换）。过程中踩到并修正两个自身错误：① 正则 `\{.*?\}` 会停在 params 的嵌套花括号处、删歪片段 → 改用**精确字面量**替换；② 删节点后残留双逗号（redis 尾随逗号 + 保留的 mysql 前导逗号）→ 连前导逗号一起吃掉。每次改完都用 `ConvertFrom-Json` 校验节点/边数再写库。**验证（全部经真实接口与真实数据，非单测）**：① 用演示管理员口令（`video/restore_kafka_demo.py` 记载）登录成功 → `GET /api/jobs/2726/preflight` 返回 **`valid=true`、errors/warnings 均空**（上一轮的字段报错消除）；② `POST /api/jobs/2726/submit` → 拿到真实 Flink Job ID `7c661213fae48a38c83511bb4713cdea` → RUNNING → 32s 后 `体验模式自动停止：Kafka 输入作业运行 32s，已取消并合并输出`（autoStop 生效）；③ `flink_demo.output_table` 被 `CREATE_IF_MISSING` **按新 schema 自动重建**为 `sale_id,region,product_category,sales_person,amount,quantity,sale_date,channel,extra_info`，**实际落库 40 行**（= topic 中 40 条消息），样例 `S100000/华北/家电/2716.16/2/2026-09-27`；`channel` 为 NULL（消息本就无此字段，符合预期）、`extra_info` 为 NULL（Redis 6379 未监听，符合预期，作业仍跑完）。**结论**：2726 现在从 Kafka 读入 → 落 MySQL 全链路跑通。 | `logs/diag/DagSet.java`（新）· JOB_DEFINITION#2726 的 DAG_JSON · DEVELOPMENT 本表 |
 | 2026-09-30 | **入库前工作区清理与本地工具补入（本轮无产品代码改动，只做可入库性收口）**：把 9/20–9/29 累积的改动整理入库时，先按「可复现 / 无隐私 / 无机器绑定」三条标准过一遍工作区。① **不入库**：`video/`（演示片生产线与素材）与 `.video-study/` 按保密要求整体排除（`.gitignore` 原有规则，本轮确认生效）；`.dsh/`（会话内 PPT 订正工具与产物）、`logs/`（2.6MB 诊断转储、`logs/diag/*.java` 一次性工具、`h2.jar`）、`.env` / 各类 `*.log` 均继续忽略，不入库。② **补入仓库**：`scripts/diag-mysql-output.ps1`（只读诊断「后端有没有拿到 MYSQL_PASSWORD」）、`scripts/gen-defense-docs.py`（答辩 Markdown → 可打印 Word）、`scripts/fix-ppt-text.cjs` + `scripts/verify-ppt-diff.cjs`（PPT 文本订正与独立验收）、`frontend/test/field-concat.test.js`（字段拼接回归）——这 5 个文件都被本表既有条目引用过，此前一直只存在于本地，属「文档点了名但仓库里没有」。③ **刻意不入库的 3 个脚本**：`scripts/revise-outline.py`、`scripts/verify-outline-revision.py`、`scripts/_final_check.py` 面向 `docs/A22 通用流处理任务管理平台PPT大纲.docx`，而该文件只存在于生成它的机器上（`docs/` 已从仓库删除），且脚本把 `D:\code\比赛\2026省服务外包\docs` 写死成绝对路径——入库即制造「跑不通且可能漏路径」的死代码，改用 `git` 版本历史与本表条目留痕。④ **验证**：后端 `mvn -B test` **178 通过 0 失败**（39 个测试类以上，BUILD SUCCESS）；前端 `node --check public/js/app.js` 通过、`node --test test/*.test.js` **70 通过 0 失败**（8 个测试文件）；合计 **248 用例 0 失败**。⑤ **入库形态**：按层拆成 3 个提交（后端 17 文件 / 前端 4 文件 / 脚本与文档 7 文件）推送 `origin/master`，与远端 `e0f25fa` 为快进关系（`git rev-list --left-right --count` = `0 0`） | `.gitignore` · `scripts/diag-mysql-output.ps1`（新）· `scripts/gen-defense-docs.py`（新）· `scripts/fix-ppt-text.cjs`（新）· `scripts/verify-ppt-diff.cjs`（新）· `frontend/test/field-concat.test.js`（新）· 本表 |
 | 2026-09-29 | **「吞吐趋势全部为 0」根因：Flink 集群启动时没读 conf/flink-conf.yaml（缺 FLINK_CONF_DIR）**：现象是监控面板「吞吐趋势（运行中与最近结束作业 · 行/s）」全程压在 0，峰值/平均都是 0 行/s，而作业实际在正常读 Kafka、写 MySQL（当时 output_table 已落 40 行）。**逐层取证**：① 趋势点确实采集到了，但**采集到的值本身就是 0**（`/api/monitor/trends` 返回 16 个点，`in/out` 全 0；`/api/monitor/overview` 的 `total.numRecordsIn/Out = 0`）——**不是画图问题，是指标采集问题**；② 直连 Flink 发现该作业只有一个融合 vertex（`Source: kafka_input[22] -> Calc[23] -> Sink: mysql_output[24]`）且 `read-records=0 / write-records=0`；③ 更关键：作业在 RUNNING 时逐一探测 `numRecordsIn`/`numRecordsOut`/`numRecordsInPerSecond` **全部返回空数组 `[]`**，连必然存在的 `numRecordsIn` 都没有，且 JobManager 的 `/metrics` 端点返回 **404**；④ TaskManager 启动日志给出决定性证据：`MetricRegistryImpl - No metrics reporter configured, no metrics will be exposed/reported.`。**根因**：集群是被**裸 `java -cp "lib\*" … --configDir …` 手工拉起**的，而 Flink 定位配置目录靠的是**环境变量 `FLINK_CONF_DIR`**（`start-all.bat:13` 才 `set` 它），`--configDir` 只供脚本内部使用；缺它时集群以**默认配置**运行 —— `rest.port` 被 `-Drest.port=18081` 顶上所以表面一切正常，但 `conf/flink-conf.yaml` 从未被加载，metrics 未注册，于是所有指标端点返回空 → 平台吞吐曲线恒为 0。**修复**：① 在 `conf/flink-conf.yaml` 补上 metrics reporter 配置（`metrics.reporters: jmx` + `metrics.reporter.jmx.factory.class/port`，配置前已备份 `flink-conf.yaml.bak_20260929`）；② 杀掉手工进程，改用 **`start-all.bat`** 重启集群（它导出 `FLINK_CONF_DIR`，并幂等按端口判断），后端无需重启。**验证（真实接口，非单测）**：重启后同样提交 2726 → 运行中 `mode=live`、`numRecordsOutPerSecond=0.67`；`/api/monitor/trends` 返回 **16 个点中 10 个非 0**（`in=out=0.67`）；连跑两次会话（13:03 / 13:08）结果一致，曲线不再是零线。**代码加固**：`MonitorService` 新增启动自检 `checkFlinkMetricsAvailability` —— 判定口径特意选「集群可达 + TaskManager/Slot 数 > 0」而**不是**探指标端点本身（Flink 对「指标不存在」和「集群不可用」都返回空数组，无作业时会误报；实测我第一版探 `/metrics` 就误报了 404，因为该端点在这套集群上本就不存在）；节点无 TaskManager 时直接 WARN 说明「吞吐趋势将持续为 0」。**回归**：`mvn -B test` **178 通过 0 失败**；启动日志实测输出 `Flink 指标自检: TaskManager 1 个 / Slot 4 个，指标链路就绪（http://localhost:18081）`。踩坑已写入第 8 节红线 36。 | `flink-1.18.1/conf/flink-conf.yaml`（+备份）· MonitorService.java · DEVELOPMENT 第 8 节 + 本表 |
+| 2026-09-30 | **字段拼接测试数据成套收口（可手工核对 + 可离线校验 + 可一键实跑）**：为「字段拼接」控件补一套专用测试数据，替换原来直接拿 `users.csv` 凑合的做法。① **数据**：`concat_source.csv`（24 行 × 12 列，逐行覆盖拼接边界——中文字段、数值 `0.00` 保真、日期串、空字符串字段（相邻分隔符）、字段值里带分号/竖线/冒号（即分隔符本身出现在字段值里）、带斜杠与 `(v2)` 括号、200+ 字符长文本）与 `concat_source_slim.csv`（5 行短表，方便人工核对）；期望输出 `concat_expected_1/2/3.csv` 按落盘契约生成（源全部列 + 拼接列，对应 `FlinkJobStatusChecker.applyTransformHeader`）。② **DAG**：`02-csv-concat-csv.json` 重写为逗号串写法（原文件 `fields` 还是 JSON 数组历史形态），新增 `02b-csv-concat-null-guard.json`（CSV → 行过滤 `amount IS NULL` → 拼接 `city,dept`（`/`）→ CSV）与 `02c-csv-concat-slim-validate.json`（CSV → 拼接 `src_name,channel`（`' | '`，含空格分隔符）→ 空值校验 `checkFields` → CSV）。③ **工具**：`scripts/gen-field-concat-testdata.py`（确定性生成，无随机数）、`scripts/verify-field-concat-testdata.py`（独立校验：不 import 生成器，自行按分隔符重算每个拼接值并逐行比对，同时校验 DAG 契约、`fields` 必须是逗号串而非数组、`validate` 必须用 `checkFields` 而非 `fields`）、`scripts/run-field-concat-demo.ps1`（登录 → 建作业 → 提交 → 轮询 → 与期望文件逐行逐列比对；输出改写到 `output/`，不覆盖期望值文件）。④ **回归**：新增 `DagFieldConcatDataTest`（4 例，真读这三个 DAG 喂给 `DagTranslationService.translate()`，断言 CONCAT 表达式 / 拼接列进 schema 传播链 / 链中间节点物化视图 / 末尾 transform 内联 / 无 `CONCAT([` 非法语法；并暴露了一条测试侧事实——DAG 里的相对路径在 `user.dir=backend/` 时需先补成相对仓库根的绝对路径）。**验证**：`verify-field-concat-testdata.py` **77 断言全通过**；后端 `mvn -B test` **182 通过 0 失败**（含新增 4 例）。**实测限制（如实记录）**：本轮后端 8080 / Flink 8081 / SQL Gateway 8083 均未启动，`run-field-concat-demo.ps1` 只做了语法解析校验（`Parser::ParseFile` 0 错误，并已按红线 4 的教训存成 UTF-8 BOM），端到端落盘比对留待环境起来后补跑 | test-resources/data/（concat_source.csv · concat_source_slim.csv · concat_expected_1/2/3.csv · README_field_concat.md）· test-resources/dags/（02-csv-concat-csv.json · 02b · 02c）· scripts/（gen-field-concat-testdata.py · verify-field-concat-testdata.py · run-field-concat-demo.ps1）· backend/src/test/java/.../DagFieldConcatDataTest.java（新）· DEVELOPMENT 本表 |
+| 2026-10-01 | **字段拼接测试数据真机实跑 + 测试报告产出（本轮把上一轮的「待环境起来后补跑」补上了）**：① **端到端实跑**：起 `start-all.bat`（后端 18080 / Flink 18081 / SQL Gateway 18083 / 前端 3000），新增 `scripts/run-field-concat-e2e.py` 把三个场景依次真实提交并自动出报告——FC-01（CSV→拼接 `category,channel`→CSV）作业 #2798 / Flink `46154be37a1a0c4ca3aff334a0b71b3a` / 24 行；FC-02（跨类型拼接 `amount,join_day`）作业 #2799 / `c0eef709ea39d5b3760ef8e0728f210e` / 24 行；FC-03（拼接→空值校验）作业 #2800 / `3bdd8c0566087cb2c17ae9b745045f2b` / 3 行；三个场景**逐行逐列与期望值一致**，拼接列另经「按分隔符独立重算」复核，产出 `test-results/field_concat_report.md`（3/3 PASS，总耗时 17.4s）+ 同批 JSON。② **实跑暴露并修正的两处测试数据缺陷（单测与离线校验都没抓到，只有真机跑才现形）**：**(a)** 原 02 场景用 `row_filter(amount IS NULL)` 挑空值行，实跑 `COMPLETED` 但**落盘 0 行**；用「拼接 `order_id,amount`」把值打出来后，空值行结果是 `A0019|`，证明 **Flink csv 源把空字段读成空字符串而非 NULL**——但把条件换成 `amount IS NULL OR amount = ''` / `TRIM(amount) = ''` / `order_id = 'A0019'` 仍为 0 行（两者互相矛盾，根因未定位），故该场景改为**跨类型拼接**（数值 `amount` + 日期 `join_day`，验证逐个 `CAST(... AS STRING)` 与 `0.00` 不丢位），空值路径改由 02c 的 `validate` 覆盖；**(b)** `concat_expected_3.csv` 原来按「5 行」生成，而 `validate(ignoreEmpty=true)` 会剔除 `src_name`/`channel` 为空的行，实跑 3 行才对，生成器已补 `validate_fields` 口径（期望值文件必须体现校验语义）。③ **如实记录的环境现象（写进报告第六节，不掩盖）**：连续提交十余次后 SQL Gateway 会间歇性返回 `Failed to fetchResults.`（后端转 HTTP 500、报文无根因，`CREATE TABLE` 类语句中招），**重启 Gateway 立即恢复**——本报告的三个用例正是重启后连跑通过的；另外把 e2e 的 HTTP 封装改成会读 5xx 响应体，否则只能看到「HTTP 500」看不到根因。**验证**：`verify-field-concat-testdata.py` **74 断言全通过**（口径改为跨类型/校验后重新计算）；后端 `mvn -B test` **182 通过 0 失败**（含 `DagFieldConcatDataTest` 4 例，已按改名后的 DAG 与 `amount_day` 期望列同步）。**结论**：字段拼接控件在真实 Flink 上从提交到落盘全链路通过；同轮另外记录 `row_filter` 空值链路 0 行的未定位现象，供后续排查 | scripts/run-field-concat-e2e.py（新）· test-results/field_concat_report.md（新）· field_concat_report.json（新）· test-resources/dags/02b-csv-concat-types.json（原 02b-csv-concat-null-guard.json 改名改场景）· test-resources/data/concat_expected_2/3.csv · scripts/gen-field-concat-testdata.py · scripts/verify-field-concat-testdata.py · scripts/run-field-concat-demo.ps1（默认端口 18080）· DagFieldConcatDataTest.java · DEVELOPMENT 本表 |
+| 2026-11-04 | **新增「拖拽文件到画布 → 自动分析 → 用户确认 → 生成输入控件」**：浏览器拖拽只能拿到 `File` 对象、拿不到本机绝对路径，而节点 `params.path` 必须是服务器可读路径，因此走「上传暂存 + 服务端分析 + 人工确认」三段式。① **后端**：新增 `FileImportService` / `FileImportController`（`POST /api/files/analyze` multipart、`DELETE /api/files/uploaded`，权限与 `/api/preview/**` 同档 ADMIN/OPERATOR），文件暂存到 `output/uploads/`（在 `app.preview.allowed-roots` 内，落成节点后可直接预览）；分析内容=文件类型→建议控件类型（csv/excel/json/xml/parquet）、分隔符探测（, ; Tab | 且按多行一致性打分）、首行是否表头（非空/无重复/含非纯数字）、列名去重、列类型推断（**样本含空值一律退化为 STRING**，避免 INT/DOUBLE 解析失败变 null）、JSON 的 array/lines 模式、Excel 工作表名、前 20 行预览、编码探测（BOM → UTF-8 严格解码 → GB18030，非 UTF-8 给转码告警）；解析失败会删掉刚落盘的文件。配置项 `app.files.upload-subdir / max-upload-bytes / preview-rows`。② **前端**：`setupDropHandler` 的 drop **先判 `e.dataTransfer.files`**（此前直接 `JSON.parse(text/plain)`，文件拖拽必然静默失败），新增 `handleDroppedFiles` → `openImportDialog`（确认框可改控件类型/分隔符/首行表头/JSON 模式/工作表/字段名与类型，含前 10 行预览与告警）→ `confirmImportNode` → `addNodeOnCanvas`；**确认前不落节点**，取消/关闭走 `DELETE /api/files/uploaded` 丢弃。节点创建收敛为 `addNodeOnCanvas(data, point, paramsOverride)`（`graph.addNode` 仅存于它与 `loadDagToCanvas`），导入参数用 `node.setData` 合并，保住 X6 `change:data` 与撤销栈。`buildImportParams` 按控件类型映射参数（csv: delimiter/hasHeader/fieldsConfig、excel: +sheetName、json: +mode/encoding、xml: rowTag/encoding、parquet: delimiter；excel 分支不写 fieldsConfig，翻译层本就不读）。③ **测试**：后端 `FileImportServiceTest` 5 例（分隔符/表头/类型推断、分号+无表头、GB18030 告警且中文可读、非法类型与超限拒绝、丢弃只允许 uploads 内文件）→ `mvn -B test` **187 通过 0 失败**；前端新增 `test/file-import.test.js` 9 例（files 分支顺序、确认前不落节点、addNode 收敛、参数映射、取消丢弃、弹窗与图标、接口权限、setup 导出、BOM）→ `node --test` **79 通过 0 失败**。④ **真机验证**：新增 `scripts/verify-file-import.cjs`（Edge+CDP，**16 断言全 PASS**：弹框/不落节点/列名/预览行/暂存路径/取消丢弃/确认生成/补下游连线/保存后 `path`+`hasHeader`+`fieldsConfig` 落库/提交前检查无错），并回归 `verify-canvas.cjs` 6/6。⑤ **顺带修掉一个会误删数据的坑**：两个验证脚本原先按「最大 job id」定位自己刚建的作业，而 H2 自增号会远大于现存最大 id（实测库内 max=2799 时新作业拿到 2822）→ 读到别人的作业并删除。实测中确已误删 FC-03 演示作业（原 id 2800），已按 `test-resources/dags/02c-csv-concat-slim-validate.json` 原样重建（新 id 2824，状态 DRAFT）；`verify-canvas.cjs` 改为「保存前 id 快照差集」、`verify-file-import.cjs` 改为「按上传文件唯一名反查」，并写入红线 37。 | FileImportService.java（新）· FileImportController.java（新）· application.yml（app.files.*）· FileImportServiceTest.java（新）· app.js · index.html · style.css · frontend/test/file-import.test.js（新）· scripts/verify-file-import.cjs（新）· scripts/verify-canvas.cjs · DEVELOPMENT §1.2·§5.6·§6.1·§8(37)·§9.4 / 本表 |
+| 2026-11-04 | **三个 Agent 能力落地（告警降噪 / 导入建议 / Kafka 字段推断）**：① **告警聚合降噪**——新增 `AlertAggregator`（签名 = `事件\|归一化根因`，抹掉作业名、#id、路径、Flink jid、数字、引号内容），`AlertService` 非 INFO 告警窗口内同签名只合并不提醒：第 2..N 条不再新建记录 / 不发邮件 / 不推 webhook，只把 `occurrences / aggregatedJobs / lastSeenAt` 累加到首条并把 `readFlag` 重新置 false；`AlertRecord` 新增 4 个聚合字段（旧数据为 null，按 1 处理）；`app.alert.aggregation-window-ms=600000`；同签名自动诊断按 `auto-diagnosis-per-window=3` 限流（避免一波故障打几十个 LLM 请求）；INFO 恢复通知**永不聚合**；告警中心新增「重复」列显示 `×N`。**实测痛点**：后端重启时几十个历史 FAILED 作业同时告警、邮件刷屏，根因其实只有一个。② **文件导入 AI 建议**——新增 `ai/ImportAdvisorService`（`POST /api/ai/inspect-file`，ADMIN/OPERATOR）：本地规则先跑（编号列别用 INT 丢前导零、日期/度量列类型、全空列、字段名规范化并给出可一键应用的 renames、唯一列作去重键、宽表裁剪、缺时间列），`LlmClient` 配置了再补一条总评（只发列名+前 3 行），模型失败静默降级为 `source=local-rules`；确认框里加「✨AI 建议」按钮 + 建议面板 + 「应用字段改名」。③ **Kafka 字段推断**——新增 `service/KafkaSchemaInferenceService`（`POST /api/kafka/infer-schema`，ADMIN/OPERATOR）：抽样 20 条消息（复用 `KafkaMonitorService.streamTopic`）推出 `fieldsConfig`，嵌套对象按 JSON 文本存 STRING、非 JSON 消息退化为单列 `value` 并给告警、坏行跳过；类型口径抽到 `util/DataTypeInference` 与文件导入共用；`kafka_input` 参数面板加「从 topic 推断字段」按钮，推断后**直接写回节点**并弹字段清单。**回归**：后端新增 15 例（`AlertAggregatorTest` 5：签名归一化/窗口合并/过期/诊断配额；`AlertServiceAggregationTest` 4：合并后不发邮件、异根因照常提醒、INFO 不聚合、诊断限流；`KafkaSchemaInferenceServiceTest` 4；`ImportAdvisorServiceTest` 6）→ `mvn -B test` **206 通过 0 失败**；前端新增 `test/agent-features.test.js` 5 例 → `node --test` **84 通过 0 失败**。**真接口验证**：新增 `scripts/verify-agent-features.cjs` **13/13 PASS**（含「同根因两次失败只留一条告警记录、occurrences=2、签名落库」，Kafka broker 不可用时验证 400 可读错误），`scripts/verify-file-import.cjs` 扩到 **18/18 PASS**（新增 AI 建议面板 + 一键改名断言），`verify-canvas.cjs` 回归 6/6。**过程中修掉的两处自身缺陷**：① 首次实现里「新建记录」分支的自动诊断没走配额（配额只加在合并分支）→ 实测超出上限，改为两条路径统一过 `allowAutoDiagnosis`；② 签名最初只抹路径/数字，作业名不同导致同一根因聚不到一起 → 改为由 `AlertService` 把作业名与 #id 作为噪声传入。 | AlertAggregator.java（新）· AlertRecord.java · AlertService.java · AlertAggregatorTest.java（新）· AlertServiceAggregationTest.java（新）· ai/ImportAdvisorService.java（新）· ImportAdvisorServiceTest.java（新）· AiController.java · KafkaSchemaInferenceService.java（新）· KafkaSchemaInferenceServiceTest.java（新）· KafkaMonitorController.java · KafkaMonitorControllerTest.java · util/DataTypeInference.java（新）· FileImportService.java · application.yml · app.js · index.html · style.css · frontend/test/agent-features.test.js（新）· scripts/verify-agent-features.cjs（新）· scripts/verify-file-import.cjs · DEVELOPMENT §1.2·§5.7·§6.1·§7.6·§8(38,39)·§9.4 / 本表 |

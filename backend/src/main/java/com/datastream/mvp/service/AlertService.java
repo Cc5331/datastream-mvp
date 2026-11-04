@@ -17,21 +17,31 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Locale;
 
 /**
  * 告警服务：webhook 通知 + 告警记录落库 + 邮件通知（异步，见 AlertMailDispatcher）。
  * SMTP 未配置时自动降级为日志记录，不影响主流程。
+ *
+ * <p>降噪：非 INFO 告警会先经 {@link AlertAggregator} 判定「同一根因、多个作业」的重复告警，
+ * 窗口内同签名的第 2..N 条只累加计数（occurrences / aggregatedJobs / lastSeenAt），
+ * 不再新建记录、不再发邮件与 webhook。INFO（恢复通知）必须逐条闭环，不参与聚合。</p>
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class AlertService {
 
+    /** 聚合后缀的起始标记（重复合并时据此还原「原始告警文本」） */
+    private static final String AGG_MARK = " ｜ 同类告警已合并 ";
+
     private final ObjectMapper objectMapper;
     private final JobLogRepository logRepo;
     private final AlertRecordRepository alertRepo;
     private final AlertMailDispatcher mailDispatcher;
     private final ApplicationEventPublisher eventPublisher;
+    private final AlertAggregator alertAggregator;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
@@ -44,6 +54,42 @@ public class AlertService {
      */
     public void sendAlert(JobDefinition job, String level, String event, String message) {
         String lvl = level == null ? "WARN" : level;
+        boolean aggregatable = !"INFO".equalsIgnoreCase(lvl);
+        // 签名时把作业名与 #id 当噪声抹掉：同一个根因在不同作业上必须能聚到一起
+        String signature = aggregatable
+                ? alertAggregator.signatureOf(event, message, job == null
+                        ? java.util.List.of()
+                        : java.util.List.of(String.valueOf(job.getId()), job.getName() == null ? "" : job.getName()))
+                : null;
+
+        // ① 同签名仍在聚合窗口内 -> 合并进既有记录，不再提醒
+        if (aggregatable) {
+            AlertAggregator.Bucket bucket = alertAggregator.findMergeable(signature);
+            if (bucket != null && mergeIntoExisting(bucket, job, lvl, event, message)) {
+                if (alertAggregator.allowAutoDiagnosis(signature)) publishAutoDiagnosis(job, lvl, event, message);
+                return;
+            }
+        }
+
+        // ② 正常路径：落库 + webhook + 邮件 + 自动诊断
+        AlertRecord rec = saveNewRecord(job, lvl, event, message, signature);
+        if (aggregatable && rec != null) {
+            alertAggregator.register(signature, rec.getId(),
+                    job == null ? null : job.getId(), job == null ? null : job.getName());
+        }
+        if (job != null) sendWebhook(job, lvl, event, message);
+        // INFO 级（如恢复通知）不发邮件，只落库 + webhook
+        if (!"INFO".equalsIgnoreCase(lvl)) {
+            // 异步发送，避免 SMTP 超时阻塞定时扫描线程
+            mailDispatcher.send(buildAlertMailSubject(event, lvl, job), buildAlertMailBody(job, lvl, event, message));
+            // 真实故障告警 -> 异步触发自动智能诊断（仅作业级；同签名窗口内有配额，避免打爆 LLM）
+            if (!aggregatable || alertAggregator.allowAutoDiagnosis(signature)) {
+                publishAutoDiagnosis(job, lvl, event, message);
+            }
+        }
+    }
+
+    private AlertRecord saveNewRecord(JobDefinition job, String lvl, String event, String message, String signature) {
         try {
             AlertRecord rec = new AlertRecord();
             rec.setLevel(lvl);
@@ -54,19 +100,76 @@ public class AlertService {
             rec.setMessage(message);
             rec.setReadFlag(false);
             rec.setCreatedAt(LocalDateTime.now());
-            alertRepo.save(rec);
-            log.info("[ALERT][{}] job={} {}: {}", rec.getLevel(), rec.getJobId(), event, message);
+            rec.setSignature(signature);
+            rec.setOccurrences(1);
+            rec.setLastSeenAt(rec.getCreatedAt());
+            rec.setAggregatedJobs(job == null ? null
+                    : (job.getName() == null || job.getName().isBlank() ? "未命名作业" : job.getName().trim())
+                        + "(#" + job.getId() + ")");
+            AlertRecord saved = alertRepo.save(rec);
+            log.info("[ALERT][{}] job={} {}: {}", saved.getLevel(), saved.getJobId(), event, message);
+            return saved;
         } catch (Exception e) {
             log.warn("Alert record save failed: {}", e.getMessage());
+            return null;
         }
-        if (job != null) sendWebhook(job, lvl, event, message);
-        // INFO 级（如恢复通知）不发邮件，只落库 + webhook
-        if (!"INFO".equalsIgnoreCase(lvl)) {
-            // 异步发送，避免 SMTP 超时阻塞定时扫描线程
-            mailDispatcher.send(buildAlertMailSubject(event, lvl, job), buildAlertMailBody(job, lvl, event, message));
-            // 真实故障告警 -> 异步触发自动智能诊断（仅作业级）
-            publishAutoDiagnosis(job, lvl, event, message);
+    }
+
+    /**
+     * 把本次告警合并进窗口内既有记录：次数 +1、刷新最近时间、补记涉及作业、重新置未读。
+     * @return false 表示既有记录已被删除（用户清理/保留策略），调用方应改为新建记录
+     */
+    private boolean mergeIntoExisting(AlertAggregator.Bucket bucket, JobDefinition job, String lvl, String event, String message) {
+        try {
+            AlertRecord rec = alertRepo.findById(bucket.alertId()).orElse(null);
+            if (rec == null) return false;
+            alertAggregator.merge(bucket, job == null ? null : job.getId(), job == null ? null : job.getName());
+            String base = stripAggregationNote(rec.getMessage(), message);
+            rec.setMessage(buildAggregatedMessage(base, bucket));
+            rec.setOccurrences(bucket.occurrences());
+            rec.setLastSeenAt(LocalDateTime.now());
+            rec.setAggregatedJobs(String.join(", ", bucket.jobLabels()));
+            rec.setLevel(strongerLevel(rec.getLevel(), lvl));
+            rec.setReadFlag(false);          // 又发生了一次 -> 重新提示
+            alertRepo.save(rec);
+            log.info("[ALERT][AGG] job={} {}: 合并进告警 #{}（第 {} 次，涉及 {} 个作业）",
+                    job == null ? null : job.getId(), event, rec.getId(), bucket.occurrences(), bucket.jobLabels().size());
+            return true;
+        } catch (Exception e) {
+            log.warn("Alert aggregation merge failed (fallback to new record): {}", e.getMessage());
+            return false;
         }
+    }
+
+    /** 去掉上一次合并时追加的后缀，拿到原始告警文本 */
+    private String stripAggregationNote(String current, String fallbackMessage) {
+        if (current == null) return fallbackMessage;
+        int idx = current.indexOf(AGG_MARK);
+        return idx < 0 ? current : current.substring(0, idx);
+    }
+
+    private String buildAggregatedMessage(String baseMessage, AlertAggregator.Bucket bucket) {
+        List<String> labels = bucket.jobLabels();
+        String latest = labels.isEmpty() ? "-" : labels.get(labels.size() - 1);
+        String jobs = String.join("、", labels);
+        if (labels.size() >= 20) jobs = jobs + " …";
+        return baseMessage + AGG_MARK + bucket.occurrences() + " 次（涉及 " + Math.max(labels.size(), 1)
+                + " 个作业：" + jobs + "；最近一次 " + latest + "）";
+    }
+
+    private String strongerLevel(String a, String b) {
+        int ra = levelRank(a), rb = levelRank(b);
+        return ra >= rb ? a : b;
+    }
+
+    private int levelRank(String level) {
+        if (level == null) return 0;
+        return switch (level.toUpperCase(Locale.ROOT)) {
+            case "CRITICAL" -> 3;
+            case "WARN" -> 2;
+            case "INFO" -> 1;
+            default -> 0;
+        };
     }
 
     private void publishAutoDiagnosis(JobDefinition job, String level, String event, String message) {

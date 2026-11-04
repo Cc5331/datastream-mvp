@@ -85,6 +85,29 @@ const api = {
         const res = await axios.post(`${API_BASE}/preview/node`, { jobId, nodeId, limit });
         return res.data;
     },
+    // 画布拖拽文件导入：上传暂存 + 自动分析（返回建议的控件类型/分隔符/表头/字段与预览行）
+    async analyzeImportedFile(file) {
+        const form = new FormData();
+        form.append('file', file, file.name);
+        // 不手工设置 Content-Type，交给 axios 生成 multipart boundary
+        const res = await axios.post(`${API_BASE}/files/analyze`, form);
+        return res.data;
+    },
+    // 用户在确认框点取消时丢弃暂存文件（后端只允许删除 uploads 目录内的文件）
+    async discardImportedFile(path) {
+        const res = await axios.delete(`${API_BASE}/files/uploaded`, { params: { path } });
+        return res.data;
+    },
+    // 文件导入建议：本地规则 + 模型补充（只读，不改任何状态）
+    async inspectImportedFile(path, controlType) {
+        const res = await axios.post(`${API_BASE}/ai/inspect-file`, { path, controlType });
+        return res.data;
+    },
+    // 从 Kafka topic 抽样推断 kafka_input 的字段定义（fieldsConfig）
+    async inferKafkaSchema(topic, sampleSize) {
+        const res = await axios.post(`${API_BASE}/kafka/infer-schema`, { topic, sampleSize });
+        return res.data;
+    },
     async getMonitorOverview() {
         const res = await axios.get(`${API_BASE}/monitor/overview`);
         return res.data;
@@ -514,7 +537,7 @@ const BUILTIN_TEMPLATES = [
 
 // ===== Vue App =====
 const { createApp, ref, reactive, computed, onMounted, onUnmounted, watch, nextTick, toRaw } = Vue;
-const { ElMessage, ElMessageBox } = ElementPlus;
+const { ElMessage, ElMessageBox, ElLoading } = ElementPlus;
 
 const app = createApp({
     setup() {
@@ -939,58 +962,18 @@ const app = createApp({
 
             dropHandler = (e) => {
                 e.preventDefault();
+                // ① 从操作系统拖入的文件：上传后端分析 → 弹确认框 → 用户确认后才生成输入控件
+                if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+                    handleDroppedFiles(e.dataTransfer.files, e.clientX, e.clientY);
+                    return;
+                }
+                // ② 从左侧控件库拖入的控件
                 try {
                     const data = JSON.parse(e.dataTransfer.getData('text/plain'));
                     if (!graph) return;
 
                     const point = graph.clientToLocal(e.clientX, e.clientY);
-                    const nodeId = `${data.type}_${Date.now()}`;
-                    const colors = CATEGORY_COLORS[data.category] || CATEGORY_COLORS.transform;
-
-                    const node = graph.addNode({
-                        id: nodeId,
-                        x: point.x - 60,
-                        y: point.y - 20,
-                        width: 160,
-                        height: 50,
-                        label: `${colors.icon} ${data.name}`,
-                        attrs: {
-                            body: {
-                                fill: colors.bg,
-                                stroke: colors.border,
-                                strokeWidth: 2,
-                                rx: 8,
-                                ry: 8
-                            },
-                            label: {
-                                text: `${colors.icon} ${data.name}`,
-                                fill: '#303133',
-                                fontSize: 13,                                fontWeight: 'bold',
-                                textAnchor: 'middle',
-                                textVerticalAnchor: 'middle'
-                            }
-                        },
-                        ports: {
-                            groups: {
-                                left: { position: 'left', attrs: { circle: { r: 4, magnet: true, stroke: colors.border, fill: '#fff', strokeWidth: 2 } } },
-                                right: { position: 'right', attrs: { circle: { r: 4, magnet: true, stroke: colors.border, fill: '#fff', strokeWidth: 2 } } }
-                            },
-                            items: [
-                                { id: `${nodeId}-in`, group: 'left' },
-                                { id: `${nodeId}-out`, group: 'right' }
-                            ]
-                        },
-                        data: {
-                            type: data.type,
-                            name: data.name,
-                            category: data.category,
-                            // 用 paramSchema 的 default 初始化，保证「面板里看到的」与「节点里存的」一致：
-                            // 之前固定为空对象，用户看到面板里已填好路径、直接点提交却报「缺少必填参数: path」
-                            params: defaultParamsFromSchema(data.paramSchema),
-                            paramSchema: data.paramSchema
-                        }
-                    });
-
+                    addNodeOnCanvas(data, point);
                     ElMessage.success(`添加控件: ${data.name}`);
                 } catch (err) {
                     console.error('Drop error:', err);
@@ -999,6 +982,333 @@ const app = createApp({
 
             container.addEventListener('dragover', dragoverHandler);
             container.addEventListener('drop', dropHandler);
+        }
+
+        // 画布节点创建（控件库拖拽与文件导入共用，避免两处各写一份 X6 节点配置）
+        // paramsOverride：拖拽文件导入时按分析结果覆盖 schema 默认值（path / delimiter / fieldsConfig…）
+        function addNodeOnCanvas(data, point, paramsOverride) {
+            if (!graph) return null;
+            const nodeId = `${data.type}_${Date.now()}`;
+            const colors = CATEGORY_COLORS[data.category] || CATEGORY_COLORS.transform;
+            // 用 paramSchema 的 default 初始化，保证「面板里看到的」与「节点里存的」一致：
+            // 之前固定为空对象，用户看到面板里已填好路径、直接点提交却报「缺少必填参数: path」
+            const node = graph.addNode({
+                id: nodeId,
+                x: point.x - 60,
+                y: point.y - 20,
+                width: 160,
+                height: 50,
+                label: `${colors.icon} ${data.name}`,
+                attrs: {
+                    body: {
+                        fill: colors.bg,
+                        stroke: colors.border,
+                        strokeWidth: 2,
+                        rx: 8,
+                        ry: 8
+                    },
+                    label: {
+                        text: `${colors.icon} ${data.name}`,
+                        fill: '#303133',
+                        fontSize: 13,                                fontWeight: 'bold',
+                        textAnchor: 'middle',
+                        textVerticalAnchor: 'middle'
+                    }
+                },
+                ports: {
+                    groups: {
+                        left: { position: 'left', attrs: { circle: { r: 4, magnet: true, stroke: colors.border, fill: '#fff', strokeWidth: 2 } } },
+                        right: { position: 'right', attrs: { circle: { r: 4, magnet: true, stroke: colors.border, fill: '#fff', strokeWidth: 2 } } }
+                    },
+                    items: [
+                        { id: `${nodeId}-in`, group: 'left' },
+                        { id: `${nodeId}-out`, group: 'right' }
+                    ]
+                },
+                data: {
+                    type: data.type,
+                    name: data.name,
+                    category: data.category,
+                    // 红线 32：拖出来的节点必须带 schema 默认值，否则面板有值、节点是空对象
+                    params: defaultParamsFromSchema(data.paramSchema),
+                    paramSchema: data.paramSchema
+                }
+            });
+            // 文件导入：把分析结果（path / delimiter / fieldsConfig…）合并进节点 params。
+            // 走 setData 而不是直接改引用，保证 X6 的 change:data 事件与撤销栈一致
+            if (node && paramsOverride && Object.keys(paramsOverride).length) {
+                node.setData({
+                    ...node.getData(),
+                    params: Object.assign({}, node.getData().params || {}, paramsOverride)
+                });
+            }
+            return node;
+        }
+
+        // ===== 拖拽文件导入：上传后端分析 → 确认对话框 → 生成输入控件 =====
+        // 浏览器拖拽只能拿到 File 对象（拿不到本机绝对路径），节点 params.path 必须是服务器可读路径，
+        // 所以文件先传到后端暂存（output/uploads），分析结果只作为**建议值**，用户确认后才落成节点。
+        const IMPORT_SUPPORTED_EXTS = ['csv', 'tsv', 'txt', 'xlsx', 'xls', 'json', 'jsonl', 'ndjson', 'xml', 'parquet'];
+        const IMPORT_CONTROL_OPTIONS = [
+            { type: 'csv_input', label: 'CSV 输入' },
+            { type: 'excel_input', label: 'Excel 输入' },
+            { type: 'json_input', label: 'JSON 输入' },
+            { type: 'xml_input', label: 'XML 输入' },
+            { type: 'parquet_input', label: 'Parquet 输入' }
+        ];
+        const IMPORT_TYPE_OPTIONS = ['STRING', 'INT', 'BIGINT', 'DOUBLE', 'BOOLEAN', 'DATE', 'TIMESTAMP'];
+        const IMPORT_DELIMITER_OPTIONS = [
+            { label: '逗号 ,', value: ',' },
+            { label: '分号 ;', value: ';' },
+            { label: '制表符 Tab', value: '\t' },
+            { label: '竖线 |', value: '|' }
+        ];
+        const importDialogVisible = ref(false);
+        const importConfirmed = ref(false);
+        const importForm = reactive({
+            path: '', fileName: '', sizeBytes: 0, extension: '', controlType: 'csv_input',
+            delimiter: ',', hasHeader: true, sheetNames: [], sheetName: '', mode: 'array',
+            encoding: 'UTF-8', columns: [], rows: [], warnings: [], truncated: false
+        });
+        let importDropPoint = { x: 0, y: 0 };
+
+        const importSupportsHeader = computed(() => importForm.controlType === 'csv_input' || importForm.controlType === 'excel_input');
+        const importPreviewColumnDefs = computed(() => (importForm.columns || []).map((col, idx) => ({
+            index: idx,
+            label: (col && col.name) || `col${idx + 1}`
+        })));
+        // el-table 的 prop 用列下标（字符串），避免列重名/含点号导致取值错位
+        const importPreviewRows = computed(() => (importForm.rows || []).slice(0, 10).map(row => {
+            const item = {};
+            (importForm.columns || []).forEach((_, idx) => { item[idx] = row && row[idx] != null ? row[idx] : ''; });
+            return item;
+        }));
+
+        function fmtFileSize(bytes) {
+            const size = Number(bytes) || 0;
+            if (size < 1024) return `${size} B`;
+            if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+            return `${(size / 1024 / 1024).toFixed(2)} MB`;
+        }
+
+        async function handleDroppedFiles(files, clientX, clientY) {
+            if (!graph) return;
+            if (!canEdit.value) {
+                ElMessage.warning('当前账号为只读角色，不能新增控件');
+                return;
+            }
+            const picked = Array.from(files || []);
+            if (!picked.length) return;
+            const file = picked.find(f => IMPORT_SUPPORTED_EXTS.includes(String(f.name || '').split('.').pop().toLowerCase()));
+            if (!file) {
+                ElMessage.error(`不支持的文件类型：${picked[0].name}（支持 CSV / Excel / JSON / XML / Parquet）`);
+                return;
+            }
+            if (picked.length > 1) ElMessage.info('一次只导入一个文件，已取第一个可识别的文件');
+
+            importDropPoint = graph.clientToLocal(clientX, clientY);
+            const loading = ElLoading.service({ target: '#dag-canvas', text: '正在上传并分析文件...' });
+            try {
+                const result = await api.analyzeImportedFile(file);
+                openImportDialog(result);
+            } catch (err) {
+                ElMessage.error(getErrorMessage(err, '文件分析失败'));
+            } finally {
+                loading.close();
+            }
+        }
+
+        function openImportDialog(result) {
+            importConfirmed.value = false;
+            importAdvice.value = null;
+            importForm.path = result.path || '';
+            importForm.fileName = result.fileName || '';
+            importForm.sizeBytes = result.sizeBytes || 0;
+            importForm.extension = result.extension || '';
+            importForm.controlType = result.controlType || 'csv_input';
+            importForm.delimiter = result.delimiter || ',';
+            importForm.hasHeader = result.hasHeader !== false;
+            importForm.sheetNames = Array.isArray(result.sheetNames) ? result.sheetNames : [];
+            importForm.sheetName = result.sheetName || '';
+            importForm.mode = result.mode || 'array';
+            importForm.encoding = result.encoding || 'UTF-8';
+            importForm.columns = (Array.isArray(result.columns) ? result.columns : [])
+                .map(col => ({ name: col?.name || '', type: col?.type || 'STRING' }));
+            importForm.rows = Array.isArray(result.rows) ? result.rows : [];
+            importForm.warnings = Array.isArray(result.warnings) ? result.warnings : [];
+            importForm.truncated = !!result.truncated;
+            importDialogVisible.value = true;
+        }
+
+        // 把确认框里的表单翻译成节点 params（各输入控件的参数名以 DagTranslationService 为准）
+        function buildImportParams(fields) {
+            const type = importForm.controlType;
+            const params = { path: importForm.path };
+            const delimiter = importForm.delimiter || ',';
+            const fieldsConfig = fields && fields.length ? JSON.stringify(fields) : '';
+            if (type === 'csv_input') {
+                params.delimiter = delimiter;
+                params.hasHeader = !!importForm.hasHeader;
+                if (fieldsConfig) params.fieldsConfig = fieldsConfig;
+            } else if (type === 'excel_input') {
+                params.delimiter = delimiter;
+                params.hasHeader = !!importForm.hasHeader;
+                params.sheetName = importForm.sheetName || '';
+            } else if (type === 'json_input') {
+                params.mode = importForm.mode || 'auto';
+                params.delimiter = delimiter;
+                params.encoding = importForm.encoding || 'UTF-8';
+                if (fieldsConfig) params.fieldsConfig = fieldsConfig;
+            } else if (type === 'xml_input') {
+                params.rowTag = '';
+                params.delimiter = delimiter;
+                params.encoding = importForm.encoding || 'UTF-8';
+            } else if (type === 'parquet_input') {
+                params.delimiter = delimiter;
+            }
+            return params;
+        }
+
+        function confirmImportNode() {
+            const type = importForm.controlType;
+            const fields = (importForm.columns || [])
+                .map(col => ({ name: String(col.name || '').trim(), type: col.type || 'STRING' }))
+                .filter(col => col.name);
+            // JSON lines 模式必须带字段定义，否则翻译层会报「fieldsConfig 为空」
+            if (type === 'json_input' && importForm.mode !== 'array' && !fields.length) {
+                ElMessage.warning('JSON lines 模式需要字段定义，请至少保留一列');
+                return;
+            }
+            const ctrl = controls.value.find(c => c.type === type)
+                || getBuiltinControls().find(c => c.type === type);
+            if (!ctrl) {
+                ElMessage.error(`控件库中没有该类型的控件：${type}`);
+                return;
+            }
+            let paramSchema = {};
+            try {
+                paramSchema = ctrl.paramSchema ? JSON.parse(ctrl.paramSchema) : {};
+            } catch (err) {
+                console.warn('控件 paramSchema 解析失败', ctrl.type, err);
+            }
+            importConfirmed.value = true;
+            importDialogVisible.value = false;
+            addNodeOnCanvas({
+                type: ctrl.type,
+                name: ctrl.name,
+                category: ctrl.category || 'input',
+                paramSchema
+            }, importDropPoint, buildImportParams(fields));
+            ElMessage.success(`已生成 ${ctrl.name} 控件：${importForm.fileName}`);
+        }
+
+        // 取消 / 关闭对话框：丢弃暂存文件，避免 output/uploads 堆垃圾（确认生成时保留）
+        async function onImportDialogClosed() {
+            if (importConfirmed.value) {
+                importConfirmed.value = false;
+                return;
+            }
+            const path = importForm.path;
+            importForm.path = '';
+            importAdvice.value = null;
+            if (!path) return;
+            try {
+                await api.discardImportedFile(path);
+            } catch (err) {
+                console.warn('清理暂存文件失败', err);
+            }
+        }
+
+        // ===== 导入建议（本地规则 + 模型补充）：只给建议，不动用户已填的表单 =====
+        const importAdvice = ref(null);
+        const importAdviceLoading = ref(false);
+
+        async function loadImportAdvice() {
+            if (!importForm.path) {
+                ElMessage.warning('文件路径已失效，请重新拖入文件');
+                return;
+            }
+            importAdviceLoading.value = true;
+            try {
+                importAdvice.value = await api.inspectImportedFile(importForm.path, importForm.controlType);
+                if (importAdvice.value && !(importAdvice.value.suggestions || []).length
+                    && !importAdvice.value.summary) {
+                    ElMessage.info('没有发现明显问题，可以直接确认生成');
+                }
+            } catch (err) {
+                ElMessage.error(getErrorMessage(err, '获取建议失败'));
+            } finally {
+                importAdviceLoading.value = false;
+            }
+        }
+
+        // 「应用字段改名」：把建议里的 renames 落到确认框的字段名上（用户可再改）
+        function applyImportRenames() {
+            const renames = (importAdvice.value && importAdvice.value.renames) || {};
+            const keys = Object.keys(renames);
+            if (!keys.length) {
+                ElMessage.info('没有可应用的字段改名建议');
+                return;
+            }
+            let applied = 0;
+            (importForm.columns || []).forEach(col => {
+                const target = renames[col.name];
+                if (target) {
+                    col.name = target;
+                    applied += 1;
+                }
+            });
+            if (applied) ElMessage.success(`已按建议改名 ${applied} 个字段`);
+            else ElMessage.info('当前字段名与建议一致，无需改名');
+        }
+
+        // ===== Kafka 输入：从 topic 抽样推断字段定义（避免手抄键名写错）=====
+        const kafkaInferLoading = ref(false);
+
+        async function inferKafkaFields() {
+            const node = selectedNode.value;
+            if (!node) return;
+            const params = (node.getData && node.getData().params) || {};
+            const topic = String(nodeParams.value.topic || params.topic || '').trim();
+            if (!topic) {
+                ElMessage.warning('请先在参数面板填写 Kafka topic');
+                return;
+            }
+            kafkaInferLoading.value = true;
+            try {
+                const res = await api.inferKafkaSchema(topic);
+                const columns = res.columns || [];
+                if (!columns.length) {
+                    ElMessage.warning('没有从该 topic 推断出字段');
+                    return;
+                }
+                nodeParams.value.fieldsConfig = res.fieldsConfig;
+                // 推理结果直接写回节点，避免用户忘了点「应用参数」
+                applyParams();
+                const rows = columns
+                    .map(col => `<tr><td style="padding:2px 10px 2px 0;color:#606266;">${escapeHtmlText(col.name)}</td>`
+                        + `<td style="padding:2px 0;"><code>${escapeHtmlText(col.type)}</code></td></tr>`)
+                    .join('');
+                const warnings = (res.warnings || []).length
+                    ? `<p style="margin:8px 0 0;color:#e6a23c;">⚠ ${(res.warnings || []).map(escapeHtmlText).join('<br>⚠ ')}</p>`
+                    : '';
+                ElMessageBox.alert(
+                    `<p style="margin:0 0 6px;">按 <b>${res.sampled}</b> 条样本推断出 <b>${columns.length}</b> 个字段，已写入节点参数：</p>`
+                    + `<table style="font-size:13px;">${rows}</table>${warnings}`,
+                    `Kafka 字段推断：${escapeHtmlText(topic)}`,
+                    { dangerouslyUseHTMLString: true, confirmButtonText: '知道了' }
+                );
+            } catch (err) {
+                ElMessage.error(getErrorMessage(err, 'Kafka 字段推断失败'));
+            } finally {
+                kafkaInferLoading.value = false;
+            }
+        }
+
+        // ElMessageBox 的 HTML 里要转义来自 Kafka 文案的字符
+        function escapeHtmlText(value) {
+            return String(value == null ? '' : value)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         }
 
         // 按分类获取控件
@@ -3693,6 +4003,12 @@ const app = createApp({
             selectedNode, nodeParams, nodeParamSchema, jobErrors,
             previewVisible, previewLoading, previewData, previewRows, previewNode,
             controlsByCategory, onDragStart, saveDag, submitJob,
+            importDialogVisible, importForm, fmtFileSize,
+            importAdvice, importAdviceLoading, loadImportAdvice, applyImportRenames,
+            kafkaInferLoading, inferKafkaFields,
+            IMPORT_CONTROL_OPTIONS, IMPORT_TYPE_OPTIONS, IMPORT_DELIMITER_OPTIONS,
+            importSupportsHeader, importPreviewColumnDefs, importPreviewRows,
+            confirmImportNode, onImportDialogClosed,
         controlsLoading, controlKeyword, controlCategoryFilter, controlRows, controlStats, isPluginControl,
             exportDag, importDagTrigger, importDag, clearCanvas, newCanvas, applyParams, paramProxy, setParam,
             openJob, submitJobById, deleteJob, deleteJobFromDetail, viewLogs, statusTag, undoDag, redoDag, canUndo, canRedo,

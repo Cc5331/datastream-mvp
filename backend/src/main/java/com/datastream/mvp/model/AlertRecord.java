@@ -39,4 +39,21 @@ public class AlertRecord {
     private Boolean readFlag = false;   // 是否已读
 
     private LocalDateTime createdAt = LocalDateTime.now();
+
+    /**
+     * 聚合签名（event + 归一化后的根因），用于把「同一根因、多个作业」的告警合并成一条。
+     * 见 AlertAggregator.signatureOf。旧数据为 null，表示未参与聚合。
+     */
+    @Column(length = 512)
+    private String signature;
+
+    /** 合并次数（含首条）；旧数据为 null 按 1 处理 */
+    private Integer occurrences = 1;
+
+    /** 最近一次同类告警的时间（告警中心展示「最近发生」） */
+    private LocalDateTime lastSeenAt;
+
+    /** 已合并涉及的作业清单（"作业名(#id)" 逗号分隔，最多保留 20 个） */
+    @Column(columnDefinition = "TEXT")
+    private String aggregatedJobs;
 }

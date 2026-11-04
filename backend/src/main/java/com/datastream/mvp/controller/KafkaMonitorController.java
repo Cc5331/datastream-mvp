@@ -30,11 +30,25 @@ import java.util.Map;
 public class KafkaMonitorController {
 
     private final KafkaMonitorService kafkaMonitorService;
+    private final com.datastream.mvp.service.KafkaSchemaInferenceService kafkaSchemaInferenceService;
     private final ObjectMapper objectMapper;
 
     @GetMapping("/topics")
     public List<KafkaMonitorService.TopicInfo> topics() {
         return kafkaMonitorService.listTopics();
+    }
+
+    /** 请求体：从 topic 抽样推断 kafka_input 的字段定义 */
+    public record InferSchemaRequest(String topic, Integer sampleSize) {}
+
+    /**
+     * 抽样 topic 消息并推断字段定义（kafka_input.fieldsConfig），
+     * 避免手抄消息键名写错、一路放行到 Flink 才报「Column not found」。
+     */
+    @org.springframework.web.bind.annotation.PostMapping("/infer-schema")
+    public Map<String, Object> inferSchema(@org.springframework.web.bind.annotation.RequestBody InferSchemaRequest request) {
+        return kafkaSchemaInferenceService.infer(request == null ? null : request.topic(),
+                request == null ? null : request.sampleSize());
     }
 
     /**

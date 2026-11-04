@@ -27,6 +27,7 @@ public class AiController {
     private final AgentService agentService;
     private final LlmClient llmClient;
     private final com.datastream.mvp.service.JobService jobService;
+    private final com.datastream.mvp.ai.ImportAdvisorService importAdvisorService;
 
     public record Nl2PipelineRequest(String prompt, String model) {}
     public record AiConfigRequest(String provider, String baseUrl, String apiKey,
@@ -164,6 +165,20 @@ public class AiController {
     public List<com.datastream.mvp.model.DiagnosisReport> diagnosisHistory(@PathVariable Long jobId) {
         jobService.findByIdForUser(jobId, currentUser());
         return agentService.listDiagnosis(jobId);
+    }
+
+    public record InspectFileRequest(String path, String controlType) {}
+
+    /**
+     * 文件导入建议：给拖拽导入确认框提供可解释建议（本地规则 + 模型补充）。
+     * 只读接口（不改任何状态），但仍按 ADMIN/OPERATOR 限制——它会回显文件列名与前几行样本。
+     */
+    @PostMapping("/inspect-file")
+    @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
+    public Map<String, Object> inspectFile(@RequestBody InspectFileRequest req) {
+        currentUser();
+        return importAdvisorService.inspect(req == null ? null : req.path(),
+                req == null ? null : req.controlType());
     }
 
     private CurrentUser currentUser() {

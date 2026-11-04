@@ -107,6 +107,11 @@ app:
     # 告警保留策略：默认保留 30 天且最多 5000 条（0 = 不限制该项）
     retention-days: ${APP_ALERT_RETENTION_DAYS:30}
     retention-max-records: ${APP_ALERT_RETENTION_MAX:5000}
+    # 告警聚合降噪：同根因告警在窗口内合并为一条（不再重复发邮件/webhook），
+    # 窗口内同签名最多触发 N 次自动诊断（避免一波故障打几十个 LLM 请求）
+    aggregation-window-ms: ${APP_ALERT_AGGREGATION_WINDOW_MS:600000}
+    auto-diagnosis-per-window: ${APP_ALERT_AUTO_DIAGNOSIS_PER_WINDOW:3}
+    aggregation-prune-ms: ${APP_ALERT_AGGREGATION_PRUNE_MS:300000}
 
   preview:
     allowed-roots: ${APP_PREVIEW_ALLOWED_ROOTS:../data,../test-resources,../output}
@@ -120,6 +125,12 @@ app:
     test-resources-root: ${APP_TEST_RESOURCES_ROOT:../test-resources}
   storage:
     output-root: ${OUTPUT_ROOT:../output}
+  files:
+    # 画布「拖拽文件导入」暂存目录：默认 output-root/uploads。output 已在 app.preview.allowed-roots 内，
+    # 生成的节点可直接复用 /api/preview/file 预览；暂存文件不会自动清理，可手工清理历史文件
+    upload-subdir: ${APP_FILES_UPLOAD_SUBDIR:uploads}
+    max-upload-bytes: ${APP_FILES_MAX_UPLOAD_BYTES:52428800}
+    preview-rows: ${APP_FILES_PREVIEW_ROWS:20}
 
   mysql:
     # mysql_input/mysql_output 控件默认用户名与密码（预填 + 预览用），通过环境变量注入，不入库
@@ -141,6 +152,9 @@ app:
   kafka:
     # Kafka 可视化（/api/kafka/*）连接地址；本机运行用 localhost:29092，容器内用 kafka:9092
     bootstrap-servers: ${APP_KAFKA_BOOTSTRAP_SERVERS:localhost:29092}
+    # 「从 topic 推断字段」：抽样条数与超时（抽不到消息会返回 400 并说明原因，不静默成功）
+    schema-sample-size: ${APP_KAFKA_SCHEMA_SAMPLE_SIZE:20}
+    schema-sample-timeout-ms: ${APP_KAFKA_SCHEMA_SAMPLE_TIMEOUT_MS:6000}
 
   monitor:
     # 告警/健康扫描与 Flink 状态轮询间隔（毫秒），越小告警越及时但也越耗 Flink HTTP

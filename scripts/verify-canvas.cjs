@@ -173,10 +173,21 @@ const PAGE_HELPERS = `
         input.dispatchEvent(new Event('change', { bubbles: true }));
         return true;
     },
-    latestJob: async () => {
+    /** 现有作业 id 快照：保存前取一次，保存后靠差集定位「本次新建的作业」 */
+    jobIds: async () => {
         const token = localStorage.getItem('token');
         const jobs = await (await fetch('/api/jobs', { headers: { Authorization: 'Bearer ' + token } })).json();
-        const newest = jobs.slice().sort((a, b) => b.id - a.id)[0];
+        return jobs.map(j => j.id);
+    },
+    /** 按「保存前快照里没有的 id」定位本次创建的作业（不能按最大 id 猜，
+     *  库里存在大量历史作业，且 H2 自增号可能远大于现存最大 id → 会误读并误删别人的作业） */
+    latestJob: async (knownIds) => {
+        const token = localStorage.getItem('token');
+        const jobs = await (await fetch('/api/jobs', { headers: { Authorization: 'Bearer ' + token } })).json();
+        const known = Array.isArray(knownIds) ? knownIds : [];
+        const newer = jobs.filter(j => !known.includes(j.id));
+        if (!newer.length) return null;
+        const newest = newer.slice().sort((a, b) => b.id - a.id)[0];
         const detail = await (await fetch('/api/jobs/' + newest.id,
             { headers: { Authorization: 'Bearer ' + token } })).json();
         const preflight = await (await fetch('/api/jobs/' + newest.id + '/preflight',
@@ -273,9 +284,17 @@ const PAGE_HELPERS = `
     const afterConnect = await cdp.eval(`({ edges: window.__verify.edgeCount() })`);
     check('原生拖拽可从端口连出一条边', afterConnect.edges >= 1, `边数=${afterConnect.edges}`);
 
+    const knownJobIds = await cdp.eval('window.__verify.jobIds()');   // 保存前快照，用于定位新作业
+
     await cdp.eval(`(() => { const b = window.__verify.visibleButton('保存'); if (b) b.click(); return 'ok'; })()`);
     await sleep(2200);
-    const saved = await cdp.eval(`window.__verify.latestJob()`);
+    const saved = await cdp.eval(`window.__verify.latestJob(${JSON.stringify(knownJobIds)})`);
+    if (!saved) {
+        check('保存后能定位到本次创建的作业', false, '未找到新作业（保存被校验拦下？）');
+        try { cdp.ws.close(); } catch (_) { /* ignore */ }
+        browser.kill();
+        process.exit(1);
+    }
     const csvIn = saved.nodes.find(n => n.type === 'csv_input');
     const csvOut = saved.nodes.find(n => n.type === 'csv_output');
     check('落库的 CSV 输入节点带默认 path（不再报缺少必填参数）',
@@ -297,8 +316,8 @@ const PAGE_HELPERS = `
         const b = window.__verify.visibleButton('保存');
         if (b) b.click();
         await new Promise(r => setTimeout(r, 2200));
-        const job = await window.__verify.latestJob();
-        const node = job.nodes.find(n => n.type === 'csv_input');
+        const job = await window.__verify.latestJob(${JSON.stringify(knownJobIds)});
+        const node = job && job.nodes.find(n => n.type === 'csv_input');
         return { ok: true, savedPath: node && node.path };
     })()`);
     check('面板里改参数后直接保存即落库（无需先点应用参数）',
